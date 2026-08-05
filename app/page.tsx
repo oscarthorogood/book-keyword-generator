@@ -36,6 +36,7 @@ export default function Home() {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceStatus[] | null>(null);
   const [keywordCount, setKeywordCount] = useState<number | null>(null);
+  const [recommendedRange, setRecommendedRange] = useState<string | null>(null);
 
   function toggleMatchType(value: MatchType) {
     setMatchTypes((prev) =>
@@ -49,6 +50,7 @@ export default function Home() {
     setErrorMessage(null);
     setSources(null);
     setKeywordCount(null);
+    setRecommendedRange(null);
 
     try {
       const res = await fetch("/api/generate", {
@@ -76,8 +78,10 @@ export default function Home() {
 
       const sourceHeader = res.headers.get("X-Source-Status");
       const countHeader = res.headers.get("X-Keyword-Count");
+      const rangeHeader = res.headers.get("X-Recommended-Keyword-Range");
       if (sourceHeader) setSources(JSON.parse(decodeURIComponent(sourceHeader)));
       if (countHeader) setKeywordCount(Number(countHeader));
+      if (rangeHeader) setRecommendedRange(rangeHeader);
 
       const disposition = res.headers.get("Content-Disposition") ?? "";
       const filenameMatch = disposition.match(/filename="([^"]+)"/);
@@ -222,11 +226,25 @@ export default function Home() {
           </div>
         )}
 
-        {status === "success" && (
-          <div className="mt-6 rounded-md border border-green-300 bg-green-50 dark:bg-green-950/30 dark:border-green-900 p-4 text-sm text-green-800 dark:text-green-300">
-            Download started — {keywordCount ?? "?"} keyword rows.
-          </div>
-        )}
+        {status === "success" && (() => {
+          const [recommendedMin] = recommendedRange?.split("-").map(Number) ?? [null];
+          const belowRecommendedMin =
+            keywordCount !== null && recommendedMin !== null && keywordCount < recommendedMin;
+          return (
+            <div
+              className={`mt-6 rounded-md border p-4 text-sm ${
+                belowRecommendedMin
+                  ? "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-300"
+                  : "border-green-300 bg-green-50 text-green-800 dark:bg-green-950/30 dark:border-green-900 dark:text-green-300"
+              }`}
+            >
+              Download started — {keywordCount ?? "?"} keywords
+              {recommendedRange ? ` (Amazon recommends ${recommendedRange} per ad group)` : ""}.
+              {belowRecommendedMin &&
+                " That's below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
+            </div>
+          );
+        })()}
 
         {sources && (
           <div className="mt-4 text-xs text-neutral-500 space-y-1">

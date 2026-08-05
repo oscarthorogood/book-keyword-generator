@@ -80,6 +80,12 @@ better one:
   score highest and keep their bid; single-source speculative terms get a
   discounted bid so testing them risks less spend. The Bulksheet output is
   sorted best-first.
+- **Capped to Amazon's own recommended range** — Amazon's keyword-targeting
+  guidance is 25-50 keywords per ad group (`RECOMMENDED_MIN_KEYWORDS` /
+  `RECOMMENDED_MAX_KEYWORDS` in `lib/keywordMerge.ts`). The final list is
+  truncated to the top 50 best-scoring keywords; if free sources turn up
+  fewer than 25, the app still generates the file but flags it in the UI
+  rather than padding the ad group with filler.
 
 ## Setup
 

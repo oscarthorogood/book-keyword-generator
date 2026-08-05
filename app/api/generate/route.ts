@@ -10,6 +10,8 @@ import {
   buildGenreMetadataCandidates,
   finalizeKeywords,
   mergeKeywordCandidates,
+  RECOMMENDED_MAX_KEYWORDS,
+  RECOMMENDED_MIN_KEYWORDS,
 } from "@/lib/keywordMerge";
 import {
   buildAutocompleteSeeds,
@@ -218,6 +220,7 @@ export async function POST(req: NextRequest) {
       "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
       "Content-Disposition": `attachment; filename="${filename}"`,
       "X-Keyword-Count": String(keywords.length),
+      "X-Recommended-Keyword-Range": `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
       "X-Source-Status": encodeURIComponent(JSON.stringify(sourceStatuses)),
     },
   });

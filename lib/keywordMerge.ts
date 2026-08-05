@@ -238,10 +238,20 @@ export function scoreAndTierBids(
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 }
 
+// Amazon's own keyword-targeting guidance is to add 25-50 relevant keywords
+// per ad group: enough for coverage without diluting focus/budget across too
+// many terms (advertising.amazon.com's automated-fetch blocking meant this
+// was corroborated via secondary sources quoting Amazon's public guide,
+// rather than pulled directly from the primary page — worth a spot check
+// against Seller Central's own current guidance if it matters precisely).
+export const RECOMMENDED_MIN_KEYWORDS = 25;
+export const RECOMMENDED_MAX_KEYWORDS = 50;
+
 /**
  * Full pipeline from raw per-source candidate groups to the final keyword
  * list handed to the Bulksheet writer: merge + dedupe, collapse near-dupes,
- * then score and tier bids.
+ * score and tier bids, then cap at Amazon's recommended per-ad-group ceiling
+ * (RECOMMENDED_MAX_KEYWORDS), keeping the best-scoring keywords first.
  */
 export function finalizeKeywords(
   groups: KeywordCandidate[][],
@@ -249,5 +259,6 @@ export function finalizeKeywords(
 ): KeywordCandidate[] {
   const merged = mergeKeywordCandidates(...groups);
   const collapsed = collapseNearDuplicates(merged);
-  return scoreAndTierBids(collapsed, defaultBid);
+  const scored = scoreAndTierBids(collapsed, defaultBid);
+  return scored.slice(0, RECOMMENDED_MAX_KEYWORDS);
 }
