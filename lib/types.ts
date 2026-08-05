@@ -17,12 +17,15 @@ export type KeywordSource =
   | "ads-api"
   | "autocomplete"
   | "comp-title"
-  | "genre-metadata";
+  | "genre-metadata"
+  | "buyer-intent";
 
 export interface KeywordCandidate {
   text: string;
   sources: KeywordSource[];
   suggestedBid?: number;
+  /** Relevance/confidence score used to tier bids and order the output. Not written to the Bulksheet. */
+  score?: number;
 }
 
 export interface BookMetadata {
@@ -42,6 +45,7 @@ export interface ProductPageData {
   isbn13?: string;
   compTitles: string[]; // "customers also bought" style titles
   categories: string[]; // browse node / bestseller category text
+  compAsins: string[]; // ASINs of "customers also bought" titles, for one-hop category lookup
 }
 
 export interface SourceStatus {

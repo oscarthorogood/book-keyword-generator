@@ -10,16 +10,58 @@ file out. Gated behind HTTP Basic Auth for private/single-user use.
 ## How it works
 
 1. Scrapes the book's own Amazon product page for title/author/ISBN, "customers
-   also bought" comp titles, and category/best-seller placement.
+   also bought" comp titles + their ASINs, and category/best-seller placement.
 2. In parallel: calls the Amazon Ads API keyword-recommendations endpoint,
-   scrapes Amazon's unofficial autocomplete endpoint, and looks up the book in
-   Google Books + Open Library for genre/subject data.
+   sweeps Amazon's unofficial autocomplete endpoint across dozens of seed
+   phrases (title, title + book/series/audiobook/kindle, title + a–z — see
+   "Keyword generation" below), scrapes categories from a few of the comp
+   titles' own product pages, and looks up the book in Google Books + Open
+   Library for genre/subject data.
 3. All sources degrade gracefully — if one fails (no Ads API credentials, a
    blocked scrape, no ISBN match), the app carries on with whatever the other
    sources returned instead of failing the whole request.
-4. Merges everything into one deduped, source-tagged keyword list.
-5. Writes a Sponsored Products Bulksheet (Campaign / Ad Group / Product Ad /
-   Keyword rows) and streams it back as a download.
+4. Templates the genre/subject terms into buyer-intent phrases ("best fantasy
+   books", "books like `<title>`") — free long-tail candidates generated from
+   data already fetched, no extra calls.
+5. Merges everything, drops overly-generic standalone terms ("book", "novel"),
+   collapses near-duplicates (plurals, word order), scores each surviving
+   keyword by source agreement and specificity, and tiers its bid down if only
+   one source backs it.
+6. Writes a Sponsored Products Bulksheet (Campaign / Ad Group / Product Ad /
+   Keyword rows), best-scoring keywords first, and streams it back as a
+   download.
+
+### Keyword generation, in more detail
+
+Everything here is free — no paid keyword APIs — so "effective" comes from
+squeezing more signal out of the free sources rather than paying for a
+better one:
+
+- **Alphabet-soup autocomplete seeding** (`buildAutocompleteSeeds` in
+  `lib/scrape.ts`) — Amazon's autocomplete returns different completions per
+  next character, so sweeping `<title> a` through `<title> z` (plus a few
+  buyer-language modifiers) pulls far more real suggestions out of the same
+  free endpoint than just querying the bare title. Capped at 40 seeds,
+  fetched with bounded concurrency so it doesn't hammer Amazon or blow a
+  serverless function's time budget.
+- **One-hop comp-title scraping** (`scrapeRelatedCategories`) — the "customers
+  also bought" carousel gives us a few ASINs of directly comparable books; we
+  scrape their category placement too, borrowing keywords from books already
+  proven to sell to the same readers.
+- **Buyer-intent templating** (`buildBuyerIntentCandidates` in
+  `lib/keywordMerge.ts`) — crosses the genre/subject terms already extracted
+  with generic intent phrasing to generate long-tail candidates for free.
+- **Generic-term filtering** — standalone single words like "book", "novel",
+  "kindle" are dropped; they're too broad to be worth a keyword slot alone
+  even though they're kept as part of a longer phrase.
+- **Near-duplicate collapsing** — a plural/word-order-insensitive signature
+  merges near-identical candidates ("wizard school books" / "wizard schools
+  book") so budget isn't split across the same idea twice.
+- **Confidence scoring + bid tiering** — keywords multiple independent
+  sources agree on (and Ads-API-sourced ones, which carry real bid data)
+  score highest and keep their bid; single-source speculative terms get a
+  discounted bid so testing them risks less spend. The Bulksheet output is
+  sorted best-first.
 
 ## Setup
 
@@ -44,7 +86,8 @@ See `.env.example`. Required:
 
 Without Ads API credentials configured, that source is skipped gracefully and
 the app still generates a file from autocomplete + comp-title + genre-metadata
-keywords alone.
++ buyer-intent keywords alone (at a discounted bid, since none of those
+sources carry real bid data).
 
 ### Deploy
 

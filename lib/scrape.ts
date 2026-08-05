@@ -25,16 +25,70 @@ const AUTOCOMPLETE_MARKET_ID: Record<Marketplace, string> = {
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
-const FETCH_TIMEOUT_MS = 8000;
+const PAGE_TIMEOUT_MS = 8000;
+const AUTOCOMPLETE_TIMEOUT_MS = 4000;
 
-async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
+async function fetchWithTimeout(
+  url: string,
+  init: RequestInit | undefined,
+  timeoutMs: number
+): Promise<Response> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
   }
+}
+
+/**
+ * Runs `fn` over `items` with at most `limit` in flight at once. Used to keep
+ * the autocomplete sweep from firing dozens of simultaneous requests at
+ * Amazon's unofficial endpoint (which risks getting the whole batch blocked)
+ * while still finishing well inside a serverless function's time budget.
+ */
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  fn: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results: R[] = new Array(items.length);
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < items.length) {
+      const current = nextIndex++;
+      results[current] = await fn(items[current]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
+const AUTOCOMPLETE_MODIFIERS = ["book", "series", "novel", "audiobook", "kindle"];
+const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
+const MAX_AUTOCOMPLETE_SEEDS = 40;
+const AUTOCOMPLETE_CONCURRENCY = 10;
+
+/**
+ * Amazon's autocomplete returns different completions depending on the next
+ * character typed, so sweeping a-z after the title ("<title> a", "<title>
+ * b", ...) harvests far more real suggestions than the bare title alone —
+ * a well-known free technique for multiplying yield from the same endpoint.
+ */
+export function buildAutocompleteSeeds(title: string, author?: string): string[] {
+  const cleanTitle = title.trim();
+  if (!cleanTitle) return [];
+
+  const seeds = new Set<string>();
+  seeds.add(cleanTitle);
+  for (const modifier of AUTOCOMPLETE_MODIFIERS) seeds.add(`${cleanTitle} ${modifier}`);
+  if (author) seeds.add(`${cleanTitle} ${author}`);
+  for (const letter of ALPHABET) seeds.add(`${cleanTitle} ${letter}`);
+
+  return Array.from(seeds).slice(0, MAX_AUTOCOMPLETE_SEEDS);
 }
 
 /**
@@ -54,9 +108,11 @@ export async function getAutocompleteSuggestions(
   )}&suggestion-type=KEYWORD&page-type=Gateway&alias=stripbooks&site-variant=desktop&version=3&event=onKeyPress&wc=&lop=en_US&mid=${marketId}`;
 
   try {
-    const res = await fetchWithTimeout(url, {
-      headers: { "User-Agent": USER_AGENT, Accept: "application/json" },
-    });
+    const res = await fetchWithTimeout(
+      url,
+      { headers: { "User-Agent": USER_AGENT, Accept: "application/json" } },
+      AUTOCOMPLETE_TIMEOUT_MS
+    );
     if (!res.ok) return [];
 
     const json = (await res.json()) as {
@@ -73,16 +129,15 @@ export async function getAutocompleteSuggestions(
 }
 
 /**
- * Fetches a handful of autocomplete completions across common book-search
- * prefixes ("<title>", "<title> book", "<title> series", ...) so we get more
- * than just what the raw title returns.
+ * Fetches autocomplete completions across every seed in `seedTerms` (see
+ * buildAutocompleteSeeds), bounded to AUTOCOMPLETE_CONCURRENCY in flight.
  */
 export async function getAutocompleteKeywordSet(
   seedTerms: string[],
   marketplace: Marketplace
 ): Promise<KeywordCandidate[]> {
-  const results = await Promise.all(
-    seedTerms.map((term) => getAutocompleteSuggestions(term, marketplace))
+  const results = await mapWithConcurrency(seedTerms, AUTOCOMPLETE_CONCURRENCY, (term) =>
+    getAutocompleteSuggestions(term, marketplace)
   );
   return results.flat();
 }
@@ -102,11 +157,13 @@ function extractIsbns($: cheerio.CheerioAPI): { isbn10?: string; isbn13?: string
   return { isbn10, isbn13 };
 }
 
+const EMPTY_PRODUCT_PAGE: ProductPageData = { compTitles: [], categories: [], compAsins: [] };
+
 /**
  * Scrapes the book's own Amazon product page for title/author/ISBN plus
- * thematic context: "customers also bought" titles and category/best-seller
- * placement text. Best-effort — returns whatever it can find, empty arrays
- * on total failure.
+ * thematic context: "customers also bought" titles + their ASINs, and
+ * category/best-seller placement text. Best-effort — returns whatever it can
+ * find, empty arrays on total failure.
  */
 export async function scrapeProductPage(
   asin: string,
@@ -114,17 +171,20 @@ export async function scrapeProductPage(
 ): Promise<ProductPageData> {
   const domain = AMAZON_DOMAINS[marketplace];
   const url = `https://www.${domain}/dp/${encodeURIComponent(asin)}`;
-  const empty: ProductPageData = { compTitles: [], categories: [] };
 
   try {
-    const res = await fetchWithTimeout(url, {
-      headers: {
-        "User-Agent": USER_AGENT,
-        Accept: "text/html,application/xhtml+xml",
-        "Accept-Language": "en-US,en;q=0.9",
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
       },
-    });
-    if (!res.ok) return empty;
+      PAGE_TIMEOUT_MS
+    );
+    if (!res.ok) return EMPTY_PRODUCT_PAGE;
 
     const html = await res.text();
     const $ = cheerio.load(html);
@@ -139,10 +199,16 @@ export async function scrapeProductPage(
     const { isbn10, isbn13 } = extractIsbns($);
 
     const compTitles = new Set<string>();
+    const compAsins = new Set<string>();
     $(
-      '[data-a-carousel-options*="also-bought"] .p13n-sc-truncate, [id*="similarities"] img[alt], .a-carousel-card img[alt]'
+      '[data-a-carousel-options*="also-bought"] a[href*="/dp/"], [id*="similarities"] a[href*="/dp/"], .a-carousel-card a[href*="/dp/"]'
     ).each((_, el) => {
-      const alt = $(el).attr("alt")?.trim();
+      const href = $(el).attr("href") ?? "";
+      const asinMatch = href.match(/\/dp\/([A-Z0-9]{10})/i);
+      if (asinMatch && asinMatch[1].toUpperCase() !== asin.toUpperCase()) {
+        compAsins.add(asinMatch[1].toUpperCase());
+      }
+      const alt = $(el).find("img").attr("alt")?.trim();
       const text = alt || $(el).text().trim();
       if (text && text.length > 3) compTitles.add(text);
     });
@@ -171,8 +237,35 @@ export async function scrapeProductPage(
       isbn13,
       compTitles: Array.from(compTitles).slice(0, 15),
       categories: Array.from(categories).slice(0, 15),
+      compAsins: Array.from(compAsins).slice(0, 5),
     };
   } catch {
-    return empty;
+    return EMPTY_PRODUCT_PAGE;
   }
+}
+
+const RELATED_CATEGORY_ASIN_LIMIT = 3;
+
+/**
+ * One hop out: scrapes a handful of the "customers also bought" titles'
+ * own product pages for their categories, borrowing thematic keywords from
+ * books already proven to sell to the same readers. Each lookup degrades
+ * independently — a blocked or missing page just contributes nothing.
+ */
+export async function scrapeRelatedCategories(
+  compAsins: string[],
+  marketplace: Marketplace
+): Promise<string[]> {
+  const targets = compAsins.slice(0, RELATED_CATEGORY_ASIN_LIMIT);
+  if (targets.length === 0) return [];
+
+  const results = await mapWithConcurrency(targets, targets.length, (asin) =>
+    scrapeProductPage(asin, marketplace)
+  );
+
+  const categories = new Set<string>();
+  for (const result of results) {
+    for (const category of result.categories) categories.add(category);
+  }
+  return Array.from(categories);
 }

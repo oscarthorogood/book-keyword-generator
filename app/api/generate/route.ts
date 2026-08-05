@@ -3,11 +3,19 @@ import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazo
 import { enrichBookMetadata } from "@/lib/bookMetadata";
 import { buildBulksheet } from "@/lib/bulksheet";
 import {
+  buildBuyerIntentCandidates,
+  buildCategoryCandidates,
   buildCompTitleCandidates,
   buildGenreMetadataCandidates,
+  finalizeKeywords,
   mergeKeywordCandidates,
 } from "@/lib/keywordMerge";
-import { getAutocompleteKeywordSet, scrapeProductPage } from "@/lib/scrape";
+import {
+  buildAutocompleteSeeds,
+  getAutocompleteKeywordSet,
+  scrapeProductPage,
+  scrapeRelatedCategories,
+} from "@/lib/scrape";
 import { GenerateRequest, KeywordCandidate, Marketplace, MatchType, SourceStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -87,9 +95,11 @@ export async function POST(req: NextRequest) {
     error: productPage.title ? undefined : "Could not load or parse the product page.",
   });
 
-  const seedTerms = [productPage.title, request.asin].filter((t): t is string => !!t);
+  const seedTerms = productPage.title
+    ? buildAutocompleteSeeds(productPage.title, productPage.author)
+    : [request.asin];
 
-  const [adsApiResult, autocompleteResult, bookMetadata] = await Promise.all([
+  const [adsApiResult, autocompleteResult, bookMetadata, relatedCategories] = await Promise.all([
     isAdsApiConfigured()
       ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
           .then((candidates) => ({ candidates, error: undefined as string | undefined }))
@@ -98,15 +108,14 @@ export async function POST(req: NextRequest) {
           candidates: [] as KeywordCandidate[],
           error: "Amazon Ads API credentials not configured.",
         }),
-    seedTerms.length > 0
-      ? getAutocompleteKeywordSet(seedTerms, request.marketplace)
-      : Promise.resolve([] as KeywordCandidate[]),
+    getAutocompleteKeywordSet(seedTerms, request.marketplace),
     enrichBookMetadata({
       isbn10: productPage.isbn10,
       isbn13: productPage.isbn13,
       title: productPage.title,
       author: productPage.author,
     }),
+    scrapeRelatedCategories(productPage.compAsins, request.marketplace),
   ]);
 
   sourceStatuses.push({
@@ -132,13 +141,34 @@ export async function POST(req: NextRequest) {
   });
 
   const genreMetadataCandidates = buildGenreMetadataCandidates(bookMetadata);
-  const compTitleCandidates = buildCompTitleCandidates(productPage);
+  const compTitleCandidates = mergeKeywordCandidates(
+    buildCompTitleCandidates(productPage),
+    buildCategoryCandidates(relatedCategories, "comp-title")
+  );
+  const buyerIntentCandidates = buildBuyerIntentCandidates(
+    genreMetadataCandidates.map((c) => c.text),
+    productPage.title
+  );
 
-  const keywords = mergeKeywordCandidates(
-    adsApiResult.candidates,
-    autocompleteResult,
-    compTitleCandidates,
-    genreMetadataCandidates
+  sourceStatuses.push({
+    source: "comp-title",
+    ok: compTitleCandidates.length > 0,
+    count: compTitleCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "genre-metadata",
+    ok: genreMetadataCandidates.length > 0,
+    count: genreMetadataCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "buyer-intent",
+    ok: buyerIntentCandidates.length > 0,
+    count: buyerIntentCandidates.length,
+  });
+
+  const keywords = finalizeKeywords(
+    [adsApiResult.candidates, autocompleteResult, compTitleCandidates, genreMetadataCandidates, buyerIntentCandidates],
+    request.defaultBid
   );
 
   if (keywords.length === 0) {
