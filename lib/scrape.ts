@@ -67,7 +67,22 @@ async function mapWithConcurrency<T, R>(
   return results;
 }
 
-const AUTOCOMPLETE_MODIFIERS = ["book", "series", "novel", "audiobook", "kindle"];
+// Base terms plus format, series-order, and recency/bestseller modifiers —
+// patterns confirmed against a real 30-day search term report (see the
+// learnings doc): format ("hardcover"/"paperback"), series-order ("books in
+// order"), and recency/bestseller intent ("best sellers"/"new release").
+const AUTOCOMPLETE_MODIFIERS = [
+  "book",
+  "series",
+  "novel",
+  "audiobook",
+  "kindle",
+  "hardcover",
+  "paperback",
+  "books in order",
+  "best sellers",
+  "new release",
+];
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
 const MAX_AUTOCOMPLETE_SEEDS = 40;
 const MAX_GOOGLE_SUGGEST_SEEDS = 20;

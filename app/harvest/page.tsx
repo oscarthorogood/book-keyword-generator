@@ -1,42 +1,36 @@
 "use client";
 
 import Link from "next/link";
-import { FormEvent, useMemo, useState } from "react";
+import { ChangeEvent, FormEvent, useMemo, useState } from "react";
 import { buildCampaignName } from "@/lib/naming";
 
-type MatchType = "broad" | "phrase" | "exact";
-type CampaignType = "SPA" | "SPM";
-
 const MARKETPLACES = ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const;
-const MATCH_TYPES: { value: MatchType; label: string }[] = [
-  { value: "broad", label: "Broad" },
-  { value: "phrase", label: "Phrase" },
-  { value: "exact", label: "Exact" },
-];
 
-interface SourceStatus {
-  source: string;
-  ok: boolean;
-  count?: number;
-  error?: string;
+interface HarvestSummary {
+  promoted: number;
+  negated: number;
+  monitored: number;
+  lowImpressions: number;
+  junk: number;
+  total: number;
 }
 
 function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function Home() {
+export default function Harvest() {
+  const [file, setFile] = useState<File | null>(null);
+
   const [asin, setAsin] = useState("");
   const [marketplace, setMarketplace] = useState<(typeof MARKETPLACES)[number]>("US");
-  const [campaignType, setCampaignType] = useState<CampaignType>("SPA");
   const [creatorInitials, setCreatorInitials] = useState("");
   const [authorName, setAuthorName] = useState("");
   const [bookTitle, setBookTitle] = useState("");
   const [seriesName, setSeriesName] = useState("");
-  const [variant, setVariant] = useState("1");
+  const [variant, setVariant] = useState("2");
   const [dailyBudget, setDailyBudget] = useState("10");
   const [startDate, setStartDate] = useState(todayIso());
-  const [matchTypes, setMatchTypes] = useState<MatchType[]>(["broad", "phrase", "exact"]);
 
   const [useRrpBidding, setUseRrpBidding] = useState(true);
   const [rrp, setRrp] = useState("14.99");
@@ -44,12 +38,14 @@ export default function Home() {
   const [estConversionRatePct, setEstConversionRatePct] = useState("8");
   const [defaultBid, setDefaultBid] = useState("0.75");
 
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [minImpressions, setMinImpressions] = useState("300");
+  const [minClicksToNegate, setMinClicksToNegate] = useState("8");
+  const [minOrdersToPromote, setMinOrdersToPromote] = useState("1");
+
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [sources, setSources] = useState<SourceStatus[] | null>(null);
-  const [keywordCount, setKeywordCount] = useState<number | null>(null);
-  const [productTargetCount, setProductTargetCount] = useState<number | null>(null);
-  const [recommendedRange, setRecommendedRange] = useState<string | null>(null);
+  const [summary, setSummary] = useState<HarvestSummary | null>(null);
   const [resultCampaignName, setResultCampaignName] = useState<string | null>(null);
 
   const previewName = useMemo(() => {
@@ -57,83 +53,75 @@ export default function Home() {
     return buildCampaignName({
       asin: asin.trim().toUpperCase(),
       marketplace,
-      campaignType,
+      campaignType: "SPM",
       creatorInitials: creatorInitials.trim(),
       authorName: authorName.trim(),
       bookTitle: bookTitle.trim(),
       seriesName: seriesName.trim() || undefined,
       variant: Number(variant) || 1,
     });
-  }, [asin, marketplace, campaignType, creatorInitials, authorName, bookTitle, seriesName, variant]);
+  }, [asin, marketplace, creatorInitials, authorName, bookTitle, seriesName, variant]);
 
-  function toggleMatchType(value: MatchType) {
-    setMatchTypes((prev) =>
-      prev.includes(value) ? prev.filter((m) => m !== value) : [...prev, value]
-    );
+  function handleFileChange(e: ChangeEvent<HTMLInputElement>) {
+    setFile(e.target.files?.[0] ?? null);
   }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+    if (!file) {
+      setErrorMessage("Attach a Search Term report (.xlsx or .csv) first.");
+      setStatus("error");
+      return;
+    }
+
     setStatus("loading");
     setErrorMessage(null);
-    setSources(null);
-    setKeywordCount(null);
-    setProductTargetCount(null);
-    setRecommendedRange(null);
+    setSummary(null);
     setResultCampaignName(null);
 
     try {
-      const body: Record<string, unknown> = {
-        asin,
-        marketplace,
-        campaignType,
-        creatorInitials,
-        authorName,
-        bookTitle,
-        seriesName: seriesName || undefined,
-        variant: Number(variant) || 1,
-        dailyBudget: Number(dailyBudget),
-        startDate,
-        matchTypes,
-      };
+      const form = new FormData();
+      form.set("file", file);
+      form.set("asin", asin);
+      form.set("marketplace", marketplace);
+      form.set("creatorInitials", creatorInitials);
+      form.set("authorName", authorName);
+      form.set("bookTitle", bookTitle);
+      if (seriesName) form.set("seriesName", seriesName);
+      form.set("variant", variant);
+      form.set("dailyBudget", dailyBudget);
+      form.set("startDate", startDate);
+      form.set("targetAcos", (Number(targetAcosPct) / 100).toString());
       if (useRrpBidding) {
-        body.bidEconomics = {
-          rrp: Number(rrp),
-          targetAcos: Number(targetAcosPct) / 100,
-          estConversionRate: Number(estConversionRatePct) / 100,
-        };
+        form.set("rrp", rrp);
+        form.set("estConversionRate", (Number(estConversionRatePct) / 100).toString());
       } else {
-        body.defaultBid = Number(defaultBid);
+        form.set("defaultBid", defaultBid);
+      }
+      if (showAdvanced) {
+        form.set("minImpressionsForSignal", minImpressions);
+        form.set("minClicksToNegate", minClicksToNegate);
+        form.set("minOrdersToPromote", minOrdersToPromote);
       }
 
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      });
+      const res = await fetch("/api/harvest", { method: "POST", body: form });
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
-        setSources(errBody.sources ?? null);
+        if (errBody.summary) setSummary(errBody.summary);
         setStatus("error");
         return;
       }
 
-      const sourceHeader = res.headers.get("X-Source-Status");
-      const countHeader = res.headers.get("X-Keyword-Count");
-      const productTargetHeader = res.headers.get("X-Product-Target-Count");
-      const rangeHeader = res.headers.get("X-Recommended-Keyword-Range");
+      const summaryHeader = res.headers.get("X-Harvest-Summary");
       const campaignNameHeader = res.headers.get("X-Campaign-Name");
-      if (sourceHeader) setSources(JSON.parse(decodeURIComponent(sourceHeader)));
-      if (countHeader) setKeywordCount(Number(countHeader));
-      if (productTargetHeader) setProductTargetCount(Number(productTargetHeader));
-      if (rangeHeader) setRecommendedRange(rangeHeader);
+      if (summaryHeader) setSummary(JSON.parse(decodeURIComponent(summaryHeader)));
       if (campaignNameHeader) setResultCampaignName(decodeURIComponent(campaignNameHeader));
 
       const disposition = res.headers.get("Content-Disposition") ?? "";
       const filenameMatch = disposition.match(/filename="([^"]+)"/);
-      const filename = filenameMatch?.[1] ?? "bulksheet.xlsx";
+      const filename = filenameMatch?.[1] ?? "harvest-bulksheet.xlsx";
 
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
@@ -153,44 +141,26 @@ export default function Home() {
   }
 
   const isLoading = status === "loading";
-  const isAuto = campaignType === "SPA";
 
   return (
     <main className="flex-1 flex justify-center px-4 py-12">
       <div className="w-full max-w-xl">
         <div className="flex items-center justify-between mb-1">
-          <h1 className="text-2xl font-semibold">Amazon Book Ads Builder</h1>
-          <Link href="/harvest" className="text-xs underline text-neutral-500 hover:text-neutral-700">
-            Harvest a Search Term report →
+          <h1 className="text-2xl font-semibold">Harvest Search Terms</h1>
+          <Link href="/" className="text-xs underline text-neutral-500 hover:text-neutral-700">
+            ← Back to generator
           </Link>
         </div>
         <p className="text-sm text-neutral-500 mb-8">
-          Launch a cheap Auto campaign first to discover what customers actually search
-          for, then come back and harvest the search term report into a Manual campaign.
-          Every campaign follows the <code>PB_...</code> naming convention so downstream
-          tooling can parse ASIN/Author back out of the name alone.
+          Upload the Search Term report from a running Auto (or Manual) campaign. Terms
+          that converted get promoted to exact-match keywords (or product targets, for
+          bare-ASIN terms), terms that spent without converting get negative-matched, and
+          everything else is left alone pending more data.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          <Field label="Campaign Type">
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={campaignType === "SPA"}
-                  onChange={() => setCampaignType("SPA")}
-                />
-                Auto (SPA) — cold-start discovery
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={campaignType === "SPM"}
-                  onChange={() => setCampaignType("SPM")}
-                />
-                Manual (SPM) — keyword/product targeting
-              </label>
-            </div>
+          <Field label="Search Term Report (.xlsx or .csv)">
+            <input required type="file" accept=".xlsx,.csv" onChange={handleFileChange} className="input" />
           </Field>
 
           <Field label="ASIN">
@@ -272,7 +242,7 @@ export default function Home() {
 
           {previewName && (
             <p className="text-xs text-neutral-500 -mt-3">
-              Campaign name: <code className="text-neutral-700 dark:text-neutral-300">{previewName}</code>
+              Output campaign name: <code className="text-neutral-700 dark:text-neutral-300">{previewName}</code>
             </p>
           )}
 
@@ -299,6 +269,23 @@ export default function Home() {
             </Field>
           </div>
 
+          <Field label="Target ACOS (%)">
+            <input
+              required
+              type="number"
+              min="1"
+              max="100"
+              step="1"
+              value={targetAcosPct}
+              onChange={(e) => setTargetAcosPct(e.target.value)}
+              className="input"
+            />
+            <span className="block text-xs text-neutral-500 mt-1">
+              Used both as the promotion cutoff (terms at or below this ACOS get
+              promoted) and, if deriving bids from RRP, as the bid cap input.
+            </span>
+          </Field>
+
           <Field label="Bid economics">
             <div className="space-y-3">
               <div className="flex gap-4 text-sm">
@@ -313,7 +300,7 @@ export default function Home() {
               </div>
 
               {useRrpBidding ? (
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-2 gap-3">
                   <label className="block">
                     <span className="block text-xs text-neutral-500 mb-1">RRP ($)</span>
                     <input
@@ -323,19 +310,6 @@ export default function Home() {
                       step="0.01"
                       value={rrp}
                       onChange={(e) => setRrp(e.target.value)}
-                      className="input"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="block text-xs text-neutral-500 mb-1">Target ACOS (%)</span>
-                    <input
-                      required
-                      type="number"
-                      min="1"
-                      max="100"
-                      step="1"
-                      value={targetAcosPct}
-                      onChange={(e) => setTargetAcosPct(e.target.value)}
                       className="input"
                     />
                   </label>
@@ -370,36 +344,55 @@ export default function Home() {
             </div>
           </Field>
 
-          {isAuto ? (
-            <p className="text-xs text-neutral-500 rounded-md border border-neutral-200 dark:border-neutral-800 p-3">
-              Auto campaigns don&apos;t take keywords — Amazon&apos;s engine targets
-              automatically via close-match/loose-match/substitutes/complements. This
-              just launches the campaign with tiered bids on those 4 default clauses.
-              Run this first, let it collect data, then harvest its search term report.
-            </p>
-          ) : (
-            <Field label="Match Types">
-              <div className="flex gap-4">
-                {MATCH_TYPES.map(({ value, label }) => (
-                  <label key={value} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={matchTypes.includes(value)}
-                      onChange={() => toggleMatchType(value)}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-            </Field>
+          <button
+            type="button"
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="text-xs underline text-neutral-500"
+          >
+            {showAdvanced ? "Hide" : "Show"} advanced thresholds
+          </button>
+
+          {showAdvanced && (
+            <div className="grid grid-cols-3 gap-3 rounded-md border border-neutral-200 dark:border-neutral-800 p-3">
+              <label className="block">
+                <span className="block text-xs text-neutral-500 mb-1">Min impressions for signal</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={minImpressions}
+                  onChange={(e) => setMinImpressions(e.target.value)}
+                  className="input"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-xs text-neutral-500 mb-1">Min clicks to negate</span>
+                <input
+                  type="number"
+                  min="0"
+                  value={minClicksToNegate}
+                  onChange={(e) => setMinClicksToNegate(e.target.value)}
+                  className="input"
+                />
+              </label>
+              <label className="block">
+                <span className="block text-xs text-neutral-500 mb-1">Min orders to promote</span>
+                <input
+                  type="number"
+                  min="1"
+                  value={minOrdersToPromote}
+                  onChange={(e) => setMinOrdersToPromote(e.target.value)}
+                  className="input"
+                />
+              </label>
+            </div>
           )}
 
           <button
             type="submit"
-            disabled={isLoading || (!isAuto && matchTypes.length === 0)}
+            disabled={isLoading}
             className="w-full rounded-md bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 py-2.5 text-sm font-medium disabled:opacity-50"
           >
-            {isLoading ? "Generating..." : `Generate ${isAuto ? "Auto" : "Manual"} Bulksheet`}
+            {isLoading ? "Harvesting..." : "Harvest Bulksheet"}
           </button>
         </form>
 
@@ -409,42 +402,37 @@ export default function Home() {
           </div>
         )}
 
-        {status === "success" && (() => {
-          const [recommendedMin] = recommendedRange?.split("-").map(Number) ?? [null];
-          const belowRecommendedMin =
-            keywordCount !== null && recommendedMin !== null && keywordCount < recommendedMin;
-          return (
-            <div
-              className={`mt-6 rounded-md border p-4 text-sm ${
-                belowRecommendedMin
-                  ? "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-300"
-                  : "border-green-300 bg-green-50 text-green-800 dark:bg-green-950/30 dark:border-green-900 dark:text-green-300"
-              }`}
-            >
-              Download started
-              {resultCampaignName ? ` — ${resultCampaignName}` : ""}.
-              {isAuto
-                ? " Auto campaign with tiered clause bids."
-                : ` ${keywordCount ?? "?"} keywords, ${productTargetCount ?? 0} product targets${
-                    recommendedRange ? ` (Amazon recommends ${recommendedRange} keywords per ad group)` : ""
-                  }.`}
-              {belowRecommendedMin &&
-                " That's below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
-            </div>
-          );
-        })()}
+        {status === "success" && (
+          <div className="mt-6 rounded-md border border-green-300 bg-green-50 dark:bg-green-950/30 dark:border-green-900 p-4 text-sm text-green-800 dark:text-green-300">
+            Download started{resultCampaignName ? ` — ${resultCampaignName}` : ""}.
+          </div>
+        )}
 
-        {sources && (
+        {summary && (
           <div className="mt-4 text-xs text-neutral-500 space-y-1">
-            <p className="font-medium text-neutral-600 dark:text-neutral-400">Sources</p>
-            {sources.map((s) => (
-              <div key={s.source} className="flex justify-between gap-2">
-                <span>{s.source}</span>
-                <span className={s.ok ? "text-green-600 dark:text-green-400" : "text-neutral-400"}>
-                  {s.ok ? `${s.count ?? ""} found` : s.error ?? "no results"}
-                </span>
-              </div>
-            ))}
+            <p className="font-medium text-neutral-600 dark:text-neutral-400">
+              {summary.total} search terms classified
+            </p>
+            <div className="flex justify-between">
+              <span>Promoted (exact keyword / product target)</span>
+              <span className="text-green-600 dark:text-green-400">{summary.promoted}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Negated (spent, no conversions)</span>
+              <span>{summary.negated}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Monitor (not enough signal yet)</span>
+              <span>{summary.monitored}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Low impressions</span>
+              <span>{summary.lowImpressions}</span>
+            </div>
+            <div className="flex justify-between">
+              <span>Junk (garbled / scraped artifacts)</span>
+              <span>{summary.junk}</span>
+            </div>
           </div>
         )}
       </div>

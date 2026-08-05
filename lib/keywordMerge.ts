@@ -1,3 +1,4 @@
+import { looksLikeAsin } from "./productTargets";
 import { BookMetadata, KeywordCandidate, KeywordSource, ProductPageData } from "./types";
 
 function normalize(text: string): string {
@@ -38,12 +39,43 @@ const GENERIC_STANDALONE_TERMS = new Set([
   "published",
 ]);
 
+// Scraped-page boilerplate that leaks in from rating widgets / review counts
+// on product pages ("4.5 out of 5 stars", "955)" from "(4.5 out of 5 stars |
+// 955)"). Confirmed present in real bulksheet output — see the learnings doc.
+const RATING_BOILERPLATE_PATTERNS = [
+  /^\d(\.\d)?\s*out of\s*\d\s*stars?$/i,
+  /^\d[\d,]*\)?$/, // bare counts like "955)" or "955"
+  /^\d[\d,]*\s*(ratings?|reviews?)$/i,
+  /^stars?$/i,
+];
+
+export function isScrapedBoilerplate(text: string): boolean {
+  return RATING_BOILERPLATE_PATTERNS.some((pattern) => pattern.test(text));
+}
+
+/**
+ * Sanity filter for garbled/bot search queries (e.g. "kidle books don't let
+ * him i.,;^4ntermedia#££te ngcs.mznv:7" — seen verbatim in a real search term
+ * report). Not linguistic, just cheap heuristics: too much of the string is
+ * punctuation/symbols, or it has a long run of non-alphanumeric characters.
+ */
+export function isGarbledText(text: string): boolean {
+  if (text.length === 0) return false;
+  const letters = (text.match(/[a-z]/gi) ?? []).length;
+  if (letters / text.length < 0.5) return true;
+  if (/[^a-z0-9\s'-]{3,}/i.test(text)) return true;
+  return false;
+}
+
 function isUsableKeyword(text: string): boolean {
   if (text.length < 3 || text.length > 80) return false;
   // Drop noisy Open Library / Google Books subjects (URLs, ID-like tags, etc.)
   if (/https?:\/\//.test(text)) return false;
   if (/^\d+$/.test(text)) return false;
   if (GENERIC_STANDALONE_TERMS.has(text)) return false;
+  if (looksLikeAsin(text)) return false; // route to product targeting instead, see lib/productTargets.ts
+  if (isScrapedBoilerplate(text)) return false;
+  if (isGarbledText(text)) return false;
   return true;
 }
 
@@ -110,32 +142,80 @@ export function buildCompTitleCandidates(productPage: ProductPageData): KeywordC
 }
 
 const BUYER_INTENT_GENRE_LIMIT = 6;
+const FORMAT_MODIFIERS = ["hardcover", "paperback", "hard back", "kindle books"];
 
 /**
  * Crosses the top genre/subject terms already extracted from metadata with
- * generic buyer-intent phrasing ("best X books", "X books for adults") to
- * generate long-tail candidates for free — no extra API calls, just
- * templating on data we already fetched.
+ * generic buyer-intent phrasing, plus format/series-order/recency templates
+ * — no extra API calls, just templating on data we already fetched. Pattern
+ * choices (format modifiers, series-order queries, recency/bestseller
+ * modifiers) are drawn from a real 30-day search term report; see the
+ * learnings doc.
  */
 export function buildBuyerIntentCandidates(
   genreTerms: string[],
-  title?: string
+  params: { title?: string; author?: string; seriesName?: string } = {}
 ): KeywordCandidate[] {
+  const { title, author, seriesName } = params;
   const texts = new Set<string>();
+  const currentYear = new Date().getFullYear();
 
   for (const genre of genreTerms.slice(0, BUYER_INTENT_GENRE_LIMIT)) {
     texts.add(`best ${genre} books`);
     texts.add(`${genre} books`);
     texts.add(`${genre} novel`);
+    texts.add(`new ${genre} books ${currentYear}`);
+    texts.add(`best selling ${genre} books`);
   }
+
+  for (const format of FORMAT_MODIFIERS) {
+    if (title) texts.add(`${title} ${format}`);
+    if (author) texts.add(`${author} ${format}`);
+  }
+
   if (title) {
     texts.add(`books like ${title}`);
+  }
+  if (author) {
+    texts.add(author);
+    texts.add(`${author} books`);
+    texts.add(`${author} books in order`);
+  }
+  if (seriesName) {
+    texts.add(`${seriesName} books in order`);
+    texts.add(`${seriesName} series`);
   }
 
   return Array.from(texts)
     .map((text) => normalize(text))
     .filter(isUsableKeyword)
     .map((text) => ({ text, sources: ["buyer-intent" as const] }));
+}
+
+/**
+ * Auto-targeting search terms sometimes surface bare ASINs (Amazon's
+ * complements/substitutes clauses match against other *products*, not text —
+ * see the learnings doc). Those belong on the product-targeting side, not in
+ * the keyword list, so split them out before anything reaches isUsableKeyword
+ * (which would otherwise just silently drop them).
+ */
+export function extractAsinCandidates(candidates: KeywordCandidate[]): {
+  keywords: KeywordCandidate[];
+  asins: string[];
+} {
+  const keywords: KeywordCandidate[] = [];
+  const asins: string[] = [];
+
+  for (const candidate of candidates) {
+    const text = candidate.text.trim();
+    if (looksLikeAsin(text)) {
+      asins.push(text.toUpperCase());
+    } else {
+      keywords.push(candidate);
+    }
+  }
+
+  return { keywords, asins };
 }
 
 /**
