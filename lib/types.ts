@@ -18,7 +18,9 @@ export type KeywordSource =
   | "autocomplete"
   | "comp-title"
   | "genre-metadata"
-  | "buyer-intent";
+  | "buyer-intent"
+  | "book-content"
+  | "google-autocomplete";
 
 export interface KeywordCandidate {
   text: string;
@@ -36,6 +38,7 @@ export interface BookMetadata {
   description?: string;
   categories: string[]; // Google Books categories
   subjects: string[]; // Open Library subjects
+  commonTerms: string[]; // Google Books "Common terms and phrases" (content-derived, best-effort)
 }
 
 export interface ProductPageData {

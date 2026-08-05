@@ -12,11 +12,12 @@ file out. Gated behind HTTP Basic Auth for private/single-user use.
 1. Scrapes the book's own Amazon product page for title/author/ISBN, "customers
    also bought" comp titles + their ASINs, and category/best-seller placement.
 2. In parallel: calls the Amazon Ads API keyword-recommendations endpoint,
-   sweeps Amazon's unofficial autocomplete endpoint across dozens of seed
-   phrases (title, title + book/series/audiobook/kindle, title + a–z — see
-   "Keyword generation" below), scrapes categories from a few of the comp
-   titles' own product pages, and looks up the book in Google Books + Open
-   Library for genre/subject data.
+   sweeps Amazon's *and* Google's unofficial autocomplete endpoints across
+   dozens of seed phrases (title, title + book/series/audiobook/kindle, title
+   + a–z — see "Keyword generation" below), scrapes categories from a few of
+   the comp titles' own product pages, looks up the book in Google Books +
+   Open Library for genre/subject data, and scrapes Google Books' own "About
+   this book" page for its content-derived "Common terms and phrases" list.
 3. All sources degrade gracefully — if one fails (no Ads API credentials, a
    blocked scrape, no ISBN match), the app carries on with whatever the other
    sources returned instead of failing the whole request.
@@ -48,6 +49,23 @@ better one:
   also bought" carousel gives us a few ASINs of directly comparable books; we
   scrape their category placement too, borrowing keywords from books already
   proven to sell to the same readers.
+- **Google autocomplete sweep** (`getGoogleAutocompleteKeywordSet` in
+  `lib/scrape.ts`) — the same alphabet-soup seeding, but against Google's own
+  unofficial search-suggest endpoint instead of Amazon's, to surface what
+  readers search for on the wider web (which can differ from Amazon's on-site
+  suggestions). Capped shorter than the Amazon sweep so the combined request
+  count for one generate call stays bounded.
+- **Google Books "Common terms and phrases" scrape**
+  (`scrapeGoogleBooksCommonTerms` in `lib/bookMetadata.ts`) — Google Books'
+  web page (not the API) sometimes shows a word list it auto-extracts from
+  the book's actual text, for titles it has preview/snippet access to. It's
+  a content-derived signal nothing else here provides. This scrapes Google's
+  web frontend rather than the official API, which is shakier ToS territory
+  and its exact page structure wasn't verified against a live page while
+  building this (the dev sandbox couldn't reach books.google.com) — the
+  parser tries a few plausible DOM shapes and degrades to "no extra terms"
+  if none match, but it's worth confirming it actually finds something once
+  deployed.
 - **Buyer-intent templating** (`buildBuyerIntentCandidates` in
   `lib/keywordMerge.ts`) — crosses the genre/subject terms already extracted
   with generic intent phrasing to generate long-tail candidates for free.
@@ -109,9 +127,16 @@ branch auto-deploys.
 - **Ads API app registration status is unknown** — check the Amazon Ads
   developer console for an existing Client ID/Secret before the first
   non-mocked run.
-- **Amazon autocomplete scrape is inherently fragile** (`lib/scrape.ts`) —
-  Amazon can change or block the unofficial endpoint without notice. It's
-  wired to fail soft (empty result), never to block the export.
+- **Amazon and Google autocomplete scrapes are inherently fragile**
+  (`lib/scrape.ts`) — both can change or block their unofficial endpoints
+  without notice. Wired to fail soft (empty result), never to block the export.
+- **Google Books "Common terms and phrases" scrape is unverified** — see the
+  note above; check after deploy that it's actually finding terms, and adjust
+  the DOM parsing in `scrapeGoogleBooksCommonTerms` if not.
+- **Function duration** — `app/api/generate/route.ts` sets `maxDuration = 60`
+  to give the autocomplete sweeps room to finish. If your Vercel plan caps
+  function duration lower than that, reduce `AUTOCOMPLETE_CONCURRENCY` /
+  `MAX_AUTOCOMPLETE_SEEDS` / `MAX_GOOGLE_SUGGEST_SEEDS` in `lib/scrape.ts`.
 - **Brand Analytics / Search Query Performance** was skipped for v1 — it needs
   Brand Registry via Seller Central, unconfirmed for this account.
 - **PA-API** was skipped for v1 — gated behind qualifying Amazon Associates

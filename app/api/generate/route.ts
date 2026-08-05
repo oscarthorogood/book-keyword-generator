@@ -3,6 +3,7 @@ import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazo
 import { enrichBookMetadata } from "@/lib/bookMetadata";
 import { buildBulksheet } from "@/lib/bulksheet";
 import {
+  buildBookContentCandidates,
   buildBuyerIntentCandidates,
   buildCategoryCandidates,
   buildCompTitleCandidates,
@@ -13,12 +14,17 @@ import {
 import {
   buildAutocompleteSeeds,
   getAutocompleteKeywordSet,
+  getGoogleAutocompleteKeywordSet,
   scrapeProductPage,
   scrapeRelatedCategories,
 } from "@/lib/scrape";
 import { GenerateRequest, KeywordCandidate, Marketplace, MatchType, SourceStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
+// Give the autocomplete sweeps (dozens of small outbound requests) room to
+// finish; if your Vercel plan caps function duration lower than this, lower
+// AUTOCOMPLETE_CONCURRENCY / MAX_AUTOCOMPLETE_SEEDS in lib/scrape.ts instead.
+export const maxDuration = 60;
 
 const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
 const MATCH_TYPES: MatchType[] = ["broad", "phrase", "exact"];
@@ -99,24 +105,26 @@ export async function POST(req: NextRequest) {
     ? buildAutocompleteSeeds(productPage.title, productPage.author)
     : [request.asin];
 
-  const [adsApiResult, autocompleteResult, bookMetadata, relatedCategories] = await Promise.all([
-    isAdsApiConfigured()
-      ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
-          .then((candidates) => ({ candidates, error: undefined as string | undefined }))
-          .catch((err: Error) => ({ candidates: [] as KeywordCandidate[], error: err.message }))
-      : Promise.resolve({
-          candidates: [] as KeywordCandidate[],
-          error: "Amazon Ads API credentials not configured.",
-        }),
-    getAutocompleteKeywordSet(seedTerms, request.marketplace),
-    enrichBookMetadata({
-      isbn10: productPage.isbn10,
-      isbn13: productPage.isbn13,
-      title: productPage.title,
-      author: productPage.author,
-    }),
-    scrapeRelatedCategories(productPage.compAsins, request.marketplace),
-  ]);
+  const [adsApiResult, autocompleteResult, googleAutocompleteResult, bookMetadata, relatedCategories] =
+    await Promise.all([
+      isAdsApiConfigured()
+        ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
+            .then((candidates) => ({ candidates, error: undefined as string | undefined }))
+            .catch((err: Error) => ({ candidates: [] as KeywordCandidate[], error: err.message }))
+        : Promise.resolve({
+            candidates: [] as KeywordCandidate[],
+            error: "Amazon Ads API credentials not configured.",
+          }),
+      getAutocompleteKeywordSet(seedTerms, request.marketplace),
+      getGoogleAutocompleteKeywordSet(seedTerms),
+      enrichBookMetadata({
+        isbn10: productPage.isbn10,
+        isbn13: productPage.isbn13,
+        title: productPage.title,
+        author: productPage.author,
+      }),
+      scrapeRelatedCategories(productPage.compAsins, request.marketplace),
+    ]);
 
   sourceStatuses.push({
     source: "ads-api",
@@ -130,9 +138,19 @@ export async function POST(req: NextRequest) {
     count: autocompleteResult.length,
   });
   sourceStatuses.push({
+    source: "google-autocomplete",
+    ok: googleAutocompleteResult.length > 0,
+    count: googleAutocompleteResult.length,
+  });
+  sourceStatuses.push({
     source: "google-books",
     ok: bookMetadata.categories.length > 0,
     count: bookMetadata.categories.length,
+  });
+  sourceStatuses.push({
+    source: "book-content",
+    ok: bookMetadata.commonTerms.length > 0,
+    count: bookMetadata.commonTerms.length,
   });
   sourceStatuses.push({
     source: "open-library",
@@ -141,6 +159,7 @@ export async function POST(req: NextRequest) {
   });
 
   const genreMetadataCandidates = buildGenreMetadataCandidates(bookMetadata);
+  const bookContentCandidates = buildBookContentCandidates(bookMetadata.commonTerms);
   const compTitleCandidates = mergeKeywordCandidates(
     buildCompTitleCandidates(productPage),
     buildCategoryCandidates(relatedCategories, "comp-title")
@@ -167,7 +186,15 @@ export async function POST(req: NextRequest) {
   });
 
   const keywords = finalizeKeywords(
-    [adsApiResult.candidates, autocompleteResult, compTitleCandidates, genreMetadataCandidates, buyerIntentCandidates],
+    [
+      adsApiResult.candidates,
+      autocompleteResult,
+      googleAutocompleteResult,
+      compTitleCandidates,
+      genreMetadataCandidates,
+      bookContentCandidates,
+      buyerIntentCandidates,
+    ],
     request.defaultBid
   );
 

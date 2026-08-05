@@ -70,7 +70,8 @@ async function mapWithConcurrency<T, R>(
 const AUTOCOMPLETE_MODIFIERS = ["book", "series", "novel", "audiobook", "kindle"];
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
 const MAX_AUTOCOMPLETE_SEEDS = 40;
-const AUTOCOMPLETE_CONCURRENCY = 10;
+const MAX_GOOGLE_SUGGEST_SEEDS = 20;
+const AUTOCOMPLETE_CONCURRENCY = 15;
 
 /**
  * Amazon's autocomplete returns different completions depending on the next
@@ -138,6 +139,52 @@ export async function getAutocompleteKeywordSet(
 ): Promise<KeywordCandidate[]> {
   const results = await mapWithConcurrency(seedTerms, AUTOCOMPLETE_CONCURRENCY, (term) =>
     getAutocompleteSuggestions(term, marketplace)
+  );
+  return results.flat();
+}
+
+/**
+ * Google's own unofficial search-suggest endpoint (the same one that powers
+ * the omnibox/search-box dropdown; widely used, well-established, no key).
+ * Surfaces what readers actually search for on the wider web, which can
+ * differ from what Amazon's own on-site autocomplete returns — a different
+ * signal from the same alphabet-soup seeding technique used for Amazon above.
+ */
+export async function getGoogleAutocompleteSuggestions(seedTerm: string): Promise<KeywordCandidate[]> {
+  const url = `https://www.google.com/complete/search?client=firefox&hl=en&q=${encodeURIComponent(
+    seedTerm
+  )}`;
+
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { headers: { "User-Agent": USER_AGENT, Accept: "application/json" } },
+      AUTOCOMPLETE_TIMEOUT_MS
+    );
+    if (!res.ok) return [];
+
+    const json = (await res.json()) as [string, string[]];
+    const suggestions = json?.[1] ?? [];
+
+    return suggestions
+      .map((s) => s?.trim().toLowerCase())
+      .filter((v): v is string => !!v)
+      .map((text) => ({ text, sources: ["google-autocomplete" as const] }));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Same seed list as the Amazon sweep, capped shorter (Google's endpoint gets
+ * queried once per seed just like Amazon's, so this bounds the *combined*
+ * request count for a single generate call).
+ */
+export async function getGoogleAutocompleteKeywordSet(seedTerms: string[]): Promise<KeywordCandidate[]> {
+  const results = await mapWithConcurrency(
+    seedTerms.slice(0, MAX_GOOGLE_SUGGEST_SEEDS),
+    AUTOCOMPLETE_CONCURRENCY,
+    (term) => getGoogleAutocompleteSuggestions(term)
   );
   return results.flat();
 }

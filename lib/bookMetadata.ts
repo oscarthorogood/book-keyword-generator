@@ -1,6 +1,10 @@
+import * as cheerio from "cheerio";
+import type { AnyNode } from "domhandler";
 import { BookMetadata } from "./types";
 
 const FETCH_TIMEOUT_MS = 8000;
+const USER_AGENT =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
 async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Response> {
   const controller = new AbortController();
@@ -13,6 +17,7 @@ async function fetchWithTimeout(url: string, init?: RequestInit): Promise<Respon
 }
 
 interface GoogleBooksVolume {
+  id?: string;
   volumeInfo?: {
     description?: string;
     categories?: string[];
@@ -23,12 +28,14 @@ interface GoogleBooksVolume {
  * Google Books API — free, works without a key (Google recommends one to
  * avoid throttling under heavy use, but a single-user tool like this is
  * fine without). Looks up by ISBN first, falls back to title+author search.
+ * Also returns the matched volume's ID so callers can look up the same book
+ * on the books.google.com web frontend (see scrapeGoogleBooksCommonTerms).
  */
 export async function lookupGoogleBooks(
   isbn: string | undefined,
   title: string | undefined,
   author: string | undefined
-): Promise<{ description?: string; categories: string[] }> {
+): Promise<{ description?: string; categories: string[]; volumeId?: string }> {
   const apiKey = process.env.GOOGLE_BOOKS_API_KEY;
   const query = isbn ? `isbn:${isbn}` : title ? `intitle:${title}${author ? `+inauthor:${author}` : ""}` : null;
   if (!query) return { categories: [] };
@@ -41,13 +48,80 @@ export async function lookupGoogleBooks(
     const res = await fetchWithTimeout(url);
     if (!res.ok) return { categories: [] };
     const json = (await res.json()) as { items?: GoogleBooksVolume[] };
-    const info = json.items?.[0]?.volumeInfo;
+    const item = json.items?.[0];
     return {
-      description: info?.description,
-      categories: info?.categories ?? [],
+      description: item?.volumeInfo?.description,
+      categories: item?.volumeInfo?.categories ?? [],
+      volumeId: item?.id,
     };
   } catch {
     return { categories: [] };
+  }
+}
+
+/**
+ * Google Books' "About this book" web page sometimes shows a "Common terms
+ * and phrases" word list that Google auto-extracts from the book's actual
+ * text (only available for titles Google has preview/snippet access to). It's
+ * a free, content-derived signal the official API above doesn't expose.
+ *
+ * This scrapes the web frontend rather than the API, which is shakier ToS
+ * territory than the API call above and Google can restructure or block the
+ * page without notice — for a low-volume single-user lookup tool this is the
+ * same risk class as the Amazon page/autocomplete scrapes elsewhere in this
+ * app, but it hasn't been verified against a live page (this environment
+ * can't reach books.google.com to check), so confirm it actually finds
+ * anything once deployed. Treat a miss as "no extra terms," never a hard
+ * failure — the section may simply not exist for a given book.
+ */
+export async function scrapeGoogleBooksCommonTerms(volumeId: string | undefined): Promise<string[]> {
+  if (!volumeId) return [];
+
+  const url = `https://books.google.com/books?id=${encodeURIComponent(volumeId)}`;
+
+  try {
+    const res = await fetchWithTimeout(url, {
+      headers: {
+        "User-Agent": USER_AGENT,
+        Accept: "text/html,application/xhtml+xml",
+        "Accept-Language": "en-US,en;q=0.9",
+      },
+    });
+    if (!res.ok) return [];
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    // .last() rather than .first(): when the heading's own wrapper element
+    // has no other content, its trimmed text also equals the heading string,
+    // so the outer wrapper matches too — .last() picks the innermost (most
+    // specific) match instead of that ancestor.
+    const heading = $("*")
+      .filter((_, el) => $(el).text().trim().toLowerCase() === "common terms and phrases")
+      .last();
+    if (heading.length === 0) return [];
+
+    // The exact DOM shape around this heading isn't verified against a live
+    // page (see note above), so try a few plausible layouts rather than
+    // betting on one: terms as unwrapped siblings, terms inside a wrapping
+    // sibling container, or terms as siblings within the heading's parent.
+    const terms = new Set<string>();
+    const collect = <T extends AnyNode>(anchors: cheerio.Cheerio<T>) => {
+      anchors.each((_, a) => {
+        const text = $(a).text().trim().toLowerCase();
+        if (text) terms.add(text);
+      });
+    };
+
+    collect(heading.nextAll("a"));
+    if (terms.size === 0 && heading.next().length) collect(heading.next().find("a"));
+    if (terms.size === 0) collect(heading.parent().find("a"));
+
+    return Array.from(terms)
+      .filter((t) => t.length > 1 && t.length < 40)
+      .slice(0, 40);
+  } catch {
+    return [];
   }
 }
 
@@ -107,9 +181,11 @@ export async function enrichBookMetadata(params: {
 }): Promise<BookMetadata> {
   const isbn = params.isbn13 ?? params.isbn10;
 
-  const [googleBooks, openLibrary] = await Promise.all([
-    lookupGoogleBooks(isbn, params.title, params.author),
-    lookupOpenLibrary(isbn, params.title, params.author),
+  const openLibraryPromise = lookupOpenLibrary(isbn, params.title, params.author);
+  const googleBooks = await lookupGoogleBooks(isbn, params.title, params.author);
+  const [openLibrary, commonTerms] = await Promise.all([
+    openLibraryPromise,
+    scrapeGoogleBooksCommonTerms(googleBooks.volumeId),
   ]);
 
   return {
@@ -120,5 +196,6 @@ export async function enrichBookMetadata(params: {
     description: googleBooks.description,
     categories: googleBooks.categories,
     subjects: openLibrary.subjects,
+    commonTerms,
   };
 }

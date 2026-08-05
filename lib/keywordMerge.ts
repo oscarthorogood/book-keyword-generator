@@ -85,6 +85,15 @@ export function buildGenreMetadataCandidates(metadata: BookMetadata): KeywordCan
   return mergeKeywordCandidates(categoryCandidates, subjectCandidates);
 }
 
+export function buildBookContentCandidates(commonTerms: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const term of commonTerms) {
+    const normalized = normalize(term);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["book-content" as const] }));
+}
+
 export function buildCompTitleCandidates(productPage: ProductPageData): KeywordCandidate[] {
   const titleTexts = new Set<string>();
   for (const title of productPage.compTitles) {
