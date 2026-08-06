@@ -40,15 +40,7 @@ import {
   scrapeProductPage,
   scrapeRelatedCompetitors,
 } from "@/lib/scrape";
-import {
-  BidEconomics,
-  CampaignType,
-  GenerateRequest,
-  KeywordCandidate,
-  Marketplace,
-  MatchType,
-  SourceStatus,
-} from "@/lib/types";
+import { BidEconomics, GenerateRequest, KeywordCandidate, Marketplace, MatchType, SourceStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
 // Give the autocomplete sweeps (dozens of small outbound requests) room to
@@ -58,7 +50,6 @@ export const maxDuration = 60;
 
 const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
 const MATCH_TYPES: MatchType[] = ["broad", "phrase", "exact"];
-const CAMPAIGN_TYPES: CampaignType[] = ["SPA", "SPM"];
 
 function validate(body: unknown): { value: GenerateRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "Invalid request body." };
@@ -70,9 +61,6 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
   }
   if (typeof b.marketplace !== "string" || !MARKETPLACES.includes(b.marketplace as Marketplace)) {
     return { error: `Marketplace must be one of ${MARKETPLACES.join(", ")}.` };
-  }
-  if (typeof b.campaignType !== "string" || !CAMPAIGN_TYPES.includes(b.campaignType as CampaignType)) {
-    return { error: "Campaign Type must be SPA (Auto) or SPM (Manual)." };
   }
   if (typeof b.creatorInitials !== "string" || !b.creatorInitials.trim()) {
     return { error: "Creator Initials are required — they're baked into the campaign name." };
@@ -90,22 +78,18 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
     return { error: "Start Date must be in YYYY-MM-DD format." };
   }
 
-  const campaignType = b.campaignType as CampaignType;
   const seriesName = typeof b.seriesName === "string" && b.seriesName.trim() ? b.seriesName.trim() : undefined;
   const variant =
     typeof b.variant === "number" && Number.isInteger(b.variant) && b.variant > 0 ? b.variant : 1;
 
-  let matchTypes: MatchType[] = [];
-  if (campaignType === "SPM") {
-    if (
-      !Array.isArray(b.matchTypes) ||
-      b.matchTypes.length === 0 ||
-      !b.matchTypes.every((m) => MATCH_TYPES.includes(m as MatchType))
-    ) {
-      return { error: "Select at least one match type (broad, phrase, exact)." };
-    }
-    matchTypes = b.matchTypes as MatchType[];
+  if (
+    !Array.isArray(b.matchTypes) ||
+    b.matchTypes.length === 0 ||
+    !b.matchTypes.every((m) => MATCH_TYPES.includes(m as MatchType))
+  ) {
+    return { error: "Select at least one match type (broad, phrase, exact)." };
   }
+  const matchTypes = b.matchTypes as MatchType[];
 
   let bidEconomics: BidEconomics | undefined;
   if (b.bidEconomics && typeof b.bidEconomics === "object") {
@@ -142,7 +126,6 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
     value: {
       asin,
       marketplace: b.marketplace as Marketplace,
-      campaignType,
       creatorInitials: b.creatorInitials.trim(),
       authorName: b.authorName.trim(),
       bookTitle: b.bookTitle.trim(),
@@ -187,23 +170,6 @@ export async function POST(req: NextRequest) {
 
   const baseBid = request.bidEconomics ? computeMaxCpc(request.bidEconomics) : (request.defaultBid as number);
   const campaignName = buildCampaignName(request);
-
-  // Auto (SPA) campaigns are the cheap cold-start step of the two-phase
-  // workflow (see learnings doc, section 1) — Amazon's own engine decides
-  // targeting, so this skips the entire keyword-research pipeline below and
-  // just launches the campaign with tiered bids on the 4 default clauses.
-  if (request.campaignType === "SPA") {
-    const buffer = await buildBulksheet({
-      campaignName,
-      autoAdGroupName: buildAdGroupName(request),
-      asin: request.asin,
-      campaignType: "SPA",
-      dailyBudget: request.dailyBudget,
-      startDate: request.startDate,
-      baseBid,
-    });
-    return fileResponse(buffer, campaignName, { "X-Campaign-Type": "SPA" });
-  }
 
   const sourceStatuses: SourceStatus[] = [];
 
@@ -471,13 +437,13 @@ export async function POST(req: NextRequest) {
 
   const adGroups: SpmAdGroup[] = [
     {
-      name: buildAdGroupName(request, "tropes"),
+      name: buildAdGroupName("tropes"),
       defaultBid: tropesBid,
       keywords: tropesKeywords,
       matchTypes: request.matchTypes,
     },
     {
-      name: buildAdGroupName(request, "comp-names"),
+      name: buildAdGroupName("comp-names"),
       defaultBid: compNamesBid,
       keywords: compNameKeywords,
       // Blueprint: Competitor Authors & Titles ad group is Exact Match only
@@ -485,7 +451,7 @@ export async function POST(req: NextRequest) {
       matchTypes: ["exact"],
     },
     {
-      name: buildAdGroupName(request, "product-targeting"),
+      name: buildAdGroupName("product-targeting"),
       defaultBid: productTargetingBid,
       productTargets,
     },
@@ -494,7 +460,6 @@ export async function POST(req: NextRequest) {
   const buffer = await buildBulksheet({
     campaignName,
     asin: request.asin,
-    campaignType: "SPM",
     dailyBudget: request.dailyBudget,
     startDate: request.startDate,
     baseBid,

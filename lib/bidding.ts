@@ -46,8 +46,9 @@ export const MATCH_TYPE_BID_MULTIPLIER: Record<"broad" | "phrase" | "exact", num
  * the highest-intent signal ("readers actively looking for their next
  * read"), product targeting places the ad directly on a competitor's page
  * (also high-intent), tropes/themes are the exploratory end — the blueprint
- * says start those at a moderate bid and let the harvest loop earn its way
- * up. These weights are a judgment call, not sourced from either doc.
+ * says start those at a moderate bid and earn the way up once real
+ * performance data shows which ones convert. These weights are a judgment
+ * call, not sourced from either doc.
  */
 export const AD_GROUP_BID_MULTIPLIER: Record<"tropes" | "comp-names" | "product-targeting", number> = {
   "comp-names": 1,

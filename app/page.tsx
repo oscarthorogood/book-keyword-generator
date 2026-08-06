@@ -1,12 +1,10 @@
 "use client";
 
-import Link from "next/link";
 import { FormEvent, useMemo, useState } from "react";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildCampaignName } from "@/lib/naming";
 
 type MatchType = "broad" | "phrase" | "exact";
-type CampaignType = "SPA" | "SPM";
 
 const MARKETPLACES = ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const;
 const MATCH_TYPES: { value: MatchType; label: string }[] = [
@@ -29,7 +27,6 @@ function todayIso(): string {
 export default function Home() {
   const [asin, setAsin] = useState("");
   const [marketplace, setMarketplace] = useState<(typeof MARKETPLACES)[number]>("US");
-  const [campaignType, setCampaignType] = useState<CampaignType>("SPA");
   const [creatorInitials, setCreatorInitials] = useState("");
   const [authorName, setAuthorName] = useState("");
   const [bookTitle, setBookTitle] = useState("");
@@ -77,14 +74,13 @@ export default function Home() {
     return buildCampaignName({
       asin: normalizedAsin,
       marketplace,
-      campaignType,
       creatorInitials: creatorInitials.trim(),
       authorName: authorName.trim(),
       bookTitle: bookTitle.trim(),
       seriesName: seriesName.trim() || undefined,
       variant: Number(variant) || 1,
     });
-  }, [asin, marketplace, campaignType, creatorInitials, authorName, bookTitle, seriesName, variant]);
+  }, [asin, marketplace, creatorInitials, authorName, bookTitle, seriesName, variant]);
 
   function toggleMatchType(value: MatchType) {
     setMatchTypes((prev) =>
@@ -162,7 +158,6 @@ export default function Home() {
       const body: Record<string, unknown> = {
         asin,
         marketplace,
-        campaignType,
         creatorInitials,
         authorName,
         bookTitle,
@@ -234,46 +229,20 @@ export default function Home() {
   }
 
   const isLoading = status === "loading";
-  const isAuto = campaignType === "SPA";
 
   return (
     <main className="flex-1 flex justify-center px-4 py-12">
       <div className="w-full max-w-xl">
-        <div className="flex items-center justify-between mb-1">
-          <h1 className="text-2xl font-semibold">Amazon Book Ads Builder</h1>
-          <Link href="/harvest" className="text-xs underline text-neutral-500 hover:text-neutral-700">
-            Harvest a Search Term report →
-          </Link>
-        </div>
+        <h1 className="text-2xl font-semibold mb-1">Amazon Book Ads Builder</h1>
         <p className="text-sm text-neutral-500 mb-8">
-          Launch a cheap Auto campaign first to discover what customers actually search
-          for, then come back and harvest the search term report into a Manual campaign.
-          Every campaign follows the <code>PB_...</code> naming convention so downstream
-          tooling can parse ASIN/Author back out of the name alone.
+          Enter an ASIN or ISBN to gather book metadata, scrape keyword candidates from
+          every available source, and get an AI-reviewed shortlist ready for a Manual
+          Sponsored Products campaign. Every campaign follows the <code>PB_...</code>{" "}
+          naming convention so downstream tooling can parse ASIN/Author back out of the
+          name alone.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          <Field label="Campaign Type">
-            <div className="flex gap-4 text-sm">
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={campaignType === "SPA"}
-                  onChange={() => setCampaignType("SPA")}
-                />
-                Auto (SPA) — cold-start discovery
-              </label>
-              <label className="flex items-center gap-2">
-                <input
-                  type="radio"
-                  checked={campaignType === "SPM"}
-                  onChange={() => setCampaignType("SPM")}
-                />
-                Manual (SPM) — keyword/product targeting
-              </label>
-            </div>
-          </Field>
-
           <Field label="ASIN or ISBN">
             <div className="flex gap-2">
               <input
@@ -540,41 +509,32 @@ export default function Home() {
             </div>
           </Field>
 
-          {isAuto ? (
-            <p className="text-xs text-neutral-500 rounded-md border border-neutral-200 dark:border-neutral-800 p-3">
-              Auto campaigns don&apos;t take keywords — Amazon&apos;s engine targets
-              automatically via close-match/loose-match/substitutes/complements. This
-              just launches the campaign with tiered bids on those 4 default clauses.
-              Run this first, let it collect data, then harvest its search term report.
-            </p>
-          ) : (
-            <Field label="Match Types (Tropes & Themes ad group)">
-              <div className="flex gap-4">
-                {MATCH_TYPES.map(({ value, label }) => (
-                  <label key={value} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={matchTypes.includes(value)}
-                      onChange={() => toggleMatchType(value)}
-                    />
-                    {label}
-                  </label>
-                ))}
-              </div>
-              <span className="block text-xs text-neutral-500 mt-1">
-                Applies to the Tropes &amp; Themes ad group only. Comp Authors &amp;
-                Titles is always Exact Match — readers searching a name are ready to
-                buy, so it isn&apos;t diluted with Broad/Phrase.
-              </span>
-            </Field>
-          )}
+          <Field label="Match Types (Tropes & Themes ad group)">
+            <div className="flex gap-4">
+              {MATCH_TYPES.map(({ value, label }) => (
+                <label key={value} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={matchTypes.includes(value)}
+                    onChange={() => toggleMatchType(value)}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <span className="block text-xs text-neutral-500 mt-1">
+              Applies to the Tropes &amp; Themes ad group only. Comp Authors &amp;
+              Titles is always Exact Match — readers searching a name are ready to
+              buy, so it isn&apos;t diluted with Broad/Phrase.
+            </span>
+          </Field>
 
           <button
             type="submit"
-            disabled={isLoading || (!isAuto && matchTypes.length === 0)}
+            disabled={isLoading || matchTypes.length === 0}
             className="w-full rounded-md bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 py-2.5 text-sm font-medium disabled:opacity-50"
           >
-            {isLoading ? "Generating..." : `Generate ${isAuto ? "Auto" : "Manual"} Bulksheet`}
+            {isLoading ? "Generating..." : "Generate Manual Bulksheet"}
           </button>
         </form>
 
@@ -597,20 +557,13 @@ export default function Home() {
               }`}
             >
               Download started
-              {resultCampaignName ? ` — ${resultCampaignName}` : ""}.
-              {isAuto ? (
-                " Auto campaign with tiered clause bids."
-              ) : (
-                <>
-                  {" "}
-                  {tropesKeywordCount ?? 0} Tropes &amp; Themes keywords, {compNameKeywordCount ?? 0} Comp
-                  Authors &amp; Titles keywords, {productTargetCount ?? 0} product targets
-                  {recommendedRange ? ` (Amazon recommends ${recommendedRange} per ad group)` : ""}.{" "}
-                  {aiRankingUsed
-                    ? "AI-ranked (Gemini)."
-                    : "Heuristic-ranked (set GEMINI_API_KEY to enable AI ranking)."}
-                </>
-              )}
+              {resultCampaignName ? ` — ${resultCampaignName}` : ""}.{" "}
+              {tropesKeywordCount ?? 0} Tropes &amp; Themes keywords, {compNameKeywordCount ?? 0} Comp
+              Authors &amp; Titles keywords, {productTargetCount ?? 0} product targets
+              {recommendedRange ? ` (Amazon recommends ${recommendedRange} per ad group)` : ""}.{" "}
+              {aiRankingUsed
+                ? "AI-ranked (Gemini)."
+                : "Heuristic-ranked (set GEMINI_API_KEY to enable AI ranking)."}
               {belowRecommendedMin &&
                 " Tropes & Themes is below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
             </div>

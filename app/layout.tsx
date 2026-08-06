@@ -14,7 +14,8 @@ const geistMono = Geist_Mono({
 
 export const metadata: Metadata = {
   title: "Amazon Book Ads Builder",
-  description: "Launch Auto campaigns, generate Manual keyword bulksheets, and harvest search term reports.",
+  description:
+    "Enter a book ASIN/ISBN, gather metadata, scrape keyword candidates from every source, and get an AI-reviewed shortlist for a Manual Sponsored Products campaign.",
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

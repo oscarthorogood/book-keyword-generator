@@ -1,91 +1,72 @@
 # Amazon Book Ads Builder
 
-A two-phase Sponsored Products campaign builder for books: launch a cheap Auto
-(SPA) campaign to let Amazon's own targeting discover what customers search
-for, then harvest its Search Term report into a Manual (SPM) campaign of
-exact-match keywords and product targets. A cold-start keyword generator is
-still available for going straight to Manual, but the harvest loop is the
-intended steady-state workflow. Built from two source docs: an analysis of a
-live account (`AmazonAdsKeywordGeneratorCampaignBuilderLearnings`) and a
-manual keyword-research process (`manual_amazon_book_ads_keyword_research_blueprint`)
+A Manual Sponsored Products campaign builder for books. The flow is
+deliberately simple: enter an ASIN or ISBN, the app gathers as much book
+metadata as it can find for free, scrapes keyword candidates from every
+source it knows how to query, runs an AI pass to judge which ones are
+actually worth testing, and hands back a ready-to-upload Bulksheet. Built
+from two source docs: an analysis of a live account
+(`AmazonAdsKeywordGeneratorCampaignBuilderLearnings`) and a manual
+keyword-research process (`manual_amazon_book_ads_keyword_research_blueprint`)
 — the latter's alphabet-soup search-bar harvest, best-seller "also bought"
 deep dive, review/blurb language mining, and 3-way campaign structure are
 all automated here to the extent a free scrape can approximate a human
 research pass.
 
-Two pages, two API routes, no database — stateless: one request in, one file
+This app only ever builds **Manual** campaigns — Amazon's engine-driven Auto
+campaigns and the promote/negate-from-a-report workflow aren't part of it by
+design; the whole point is a self-contained "ASIN in, best-effort keyword
+list out" tool. More functionality (including possibly that workflow) may
+get layered on later, but the core loop below is meant to stay simple.
+
+One page, two API routes, no database — stateless: one request in, one file
 out. Gated behind HTTP Basic Auth for private/single-user use.
 
 ## How it works
 
-### `/` — Generate (cold start)
-
-- **Auto (SPA):** skips keyword research entirely and just launches the
-  campaign, with tiered bids across Amazon's 4 default targeting clauses
-  (close-match / loose-match / substitutes / complements). This is the
-  cheap discovery step — run it first, let it collect data, then harvest.
-- **Manual (SPM):**
-  1. Scrapes the book's own Amazon product page for ISBN, "customers also
-     bought" comp titles + their ASINs, category/best-seller placement,
-     top-review excerpts, and the publisher's own description + bullets.
-  2. Crawls a hop past the immediate comp titles — each comp's own "also
-     bought" carousel — for more direct competitors' author, title, ASIN,
-     *and* review text (bounded: up to 5 first-hop + 6 second-hop pages),
-     approximating the research blueprint's best-seller deep dive.
-  3. In parallel: calls the Amazon Ads API keyword-recommendations endpoint,
-     sweeps Amazon's *and* Google's unofficial autocomplete endpoints across
-     dozens of seed phrases (title, format/series-order/recency modifiers,
-     title + a–z *and* a–z + title — see "Keyword generation" below), looks
-     up the book in Google Books + Open Library for genre/subject data,
-     scrapes Google Books' "About this book" page for its content-derived
-     "Common terms and phrases" list, and looks up the book on Goodreads for
-     community-tagged trope/genre shelves.
-  4. All sources degrade gracefully — if one fails (no Ads API credentials, a
-     blocked scrape, no ISBN match), the app carries on with whatever the
-     other sources returned instead of failing the whole request.
-  5. Templates genre/subject terms into buyer-intent phrases and Datamuse
-     synonym expansions, mines recurring phrases out of review excerpts
-     pooled across the seed book *and* every deep-crawled comp title, pulls
-     explicit comp mentions ("perfect for fans of X") out of the book's own
-     blurb, and generates format/series-order/recency modifiers seeded from
-     real search term data.
-  6. Merges everything, filters junk (generic terms, scraped-page boilerplate,
-     garbled/bot queries), collapses near-duplicates, routes bare-ASIN
-     "keywords"/ASIN-shaped candidates to product targeting instead of
-     dropping them, scores each surviving keyword by source agreement,
-     specificity (3-5 word phrases score highest), and phrase length.
-  7. Splits the result into 3 Ad Groups — **Tropes & Themes**, **Comp Authors
-     & Titles**, **Product Targeting** — each with its own bid tier, derived
-     from RRP × net margin × target ACOS × conversion rate (or a manual
-     override). Writes one Sponsored Products Bulksheet (Campaign / Ad Group /
-     Product Ad / Keyword / Product Targeting rows per ad group), best-scoring
-     keywords first in each.
-
-### `/harvest` — Promote/negate from a Search Term report
-
-Upload the Search Term report from a running Auto or Manual campaign:
-
-- Terms with orders at or below the target ACOS get **promoted** to
-  exact-match keywords (bare-ASIN terms become product targets instead),
-  bid slightly above the CPC that already proved it converts.
-- Terms that spent past a click threshold with zero orders get
-  **negative-matched**.
-- Everything else is left alone (**monitor** / **low-impressions**) rather
-  than hand-tuned — most of the long tail is expected to be dead weight (see
-  the learnings doc's power-law note), so the loop is built to be cheap and
-  automatic, not to optimize every row.
-- Garbled/bot queries and scraped-page rating boilerplate are filtered before
-  anything reaches the bulksheet.
-- Output follows the same naming convention with an incremented **variant**
-  number, matching the "duplicate the winner" pattern the downstream
-  monitoring tracker already expects (`Copy 1`, `Copy 2`, ...).
+1. Scrapes the book's own Amazon product page for ISBN, "customers also
+   bought" comp titles + their ASINs, category/best-seller placement,
+   top-review excerpts, and the publisher's own description + bullets.
+2. Crawls a hop past the immediate comp titles — each comp's own "also
+   bought" carousel — for more direct competitors' author, title, ASIN,
+   *and* review text (bounded: up to 5 first-hop + 6 second-hop pages),
+   approximating the research blueprint's best-seller deep dive.
+3. In parallel: calls the Amazon Ads API keyword-recommendations endpoint,
+   sweeps Amazon's *and* Google's unofficial autocomplete endpoints across
+   dozens of seed phrases (title, format/series-order/recency modifiers,
+   title + a–z *and* a–z + title — see "Keyword generation" below), looks
+   up the book in Google Books + Open Library for genre/subject data,
+   scrapes Google Books' "About this book" page for its content-derived
+   "Common terms and phrases" list, and looks up the book on Goodreads for
+   community-tagged trope/genre shelves.
+4. All sources degrade gracefully — if one fails (no Ads API credentials, a
+   blocked scrape, no ISBN match), the app carries on with whatever the
+   other sources returned instead of failing the whole request.
+5. Templates genre/subject terms into buyer-intent phrases and Datamuse
+   synonym expansions, mines recurring phrases out of review excerpts
+   pooled across the seed book *and* every deep-crawled comp title, pulls
+   explicit comp mentions ("perfect for fans of X") out of the book's own
+   blurb, and generates format/series-order/recency modifiers seeded from
+   real search term data.
+6. Merges everything, filters junk (generic terms, scraped-page boilerplate,
+   garbled/bot queries), collapses near-duplicates, routes bare-ASIN
+   "keywords"/ASIN-shaped candidates to product targeting instead of
+   dropping them, scores each surviving keyword by source agreement,
+   specificity (3-5 word phrases score highest), and phrase length.
+7. An optional AI pass (Google Gemini) reviews the heuristically-shortlisted
+   candidates against the book's actual context and decides which are worth
+   testing — see "AI-assisted ranking" below.
+8. Splits the result into 3 Ad Groups — **Tropes & Themes**, **Comp Authors
+   & Titles**, **Product Targeting** — each with its own bid tier, derived
+   from RRP × net margin × target ACOS × conversion rate (or a manual
+   override). Writes one Sponsored Products Bulksheet (Campaign / Ad Group /
+   Product Ad / Keyword / Product Targeting rows per ad group), best-scoring
+   keywords first in each.
 
 ## Campaign structure
 
-The Manual (SPM) generator splits into 3 Ad Groups under one campaign,
-matching the research blueprint's recommendation to track these separately
-(section 5) — one campaign, not 3, so the naming convention below keeps its
-fixed field count:
+The generator splits into 3 Ad Groups under one campaign, matching the
+research blueprint's recommendation to track these separately (section 5):
 
 | Ad Group | Contents | Match Types | Bid tier |
 | :--- | :--- | :--- | :--- |
@@ -93,38 +74,33 @@ fixed field count:
 | **Comp Authors & Titles** | Bare comparable author/title names, from the product page's own carousel and the deep 2-hop crawl | Exact only | 1.0× base (highest intent) |
 | **Product Targeting** | Comp ASINs (own carousel + 2-hop crawl), plus any ASIN-shaped autocomplete/Ads-API "keywords" | n/a (ASIN targeting) | 0.9× base |
 
-The Harvest flow uses a simpler 2-way split (**Harvested Keywords** +
-**Product Targeting**) since it's promoting/negating already-tested terms
-rather than doing fresh category research. Negative keywords from a harvest
-are written as **Campaign Negative Keyword** rows (no Ad Group scoping) so
-they suppress spend everywhere in the campaign, not just wherever the term
-happened to first show up.
-
 ## Campaign naming convention
 
 Every campaign this app creates follows:
 
 ```
-PB_{creator initials}_{ASIN}_{Author}_{Series Name}_{Title}_{Country}_{SPA|SPM}_{variant}
+PB_{creator initials}_{ASIN}_{Author}_{Series Name}_{Title}_{Country}_SPM_{variant}
 ```
 
-e.g. `PB_MO_103671165X_Andrew Raymond_A DC Mairead Maclean Mystery_The Long Isle_UK_SPA_1`
+e.g. `PB_MO_103671165X_Andrew Raymond_A DC Mairead Maclean Mystery_The Long Isle_UK_SPM_1`
 
 This isn't optional or free-text — it's what lets the downstream monitoring
 system parse ASIN and Author back out of the campaign name with a plain
-string split, no lookup table needed (`lib/naming.ts`). The generator and
-harvester both compute it server-side from structured fields rather than
-accepting a free-text campaign name.
+string split, no lookup table needed (`lib/naming.ts`). The generator
+computes it server-side from structured fields rather than accepting a
+free-text campaign name. The `SPM` token is fixed (this app only builds
+Manual campaigns) but kept in the name so the field count/position matches
+what downstream tooling already expects.
 
 ### ASIN or ISBN
 
-Every ASIN/ISBN field (Generate, Harvest, Autofill) accepts an ISBN instead
-of an ASIN — for print books, Amazon assigns the ISBN-10 directly as the
-ASIN, so they're the same value. ISBN-13 (with or without hyphens) is
-converted to its ISBN-10 equivalent and used as the ASIN
-(`normalizeAsinOrIsbn` in `lib/isbn.ts`); 979-prefixed ISBN-13s have no
-ISBN-10 equivalent and are rejected. All three routes normalize
-server-side — the client never has to get this right on its own.
+The ASIN/ISBN field (Generate, Autofill) accepts an ISBN instead of an ASIN
+— for print books, Amazon assigns the ISBN-10 directly as the ASIN, so
+they're the same value. ISBN-13 (with or without hyphens) is converted to
+its ISBN-10 equivalent and used as the ASIN (`normalizeAsinOrIsbn` in
+`lib/isbn.ts`); 979-prefixed ISBN-13s have no ISBN-10 equivalent and are
+rejected. Both routes normalize server-side — the client never has to get
+this right on its own.
 
 ## Bid economics
 
@@ -137,11 +113,9 @@ maxCpc = (RRP × 0.4) × targetAcos × estConversionRate   (lib/bidding.ts)
 ```
 
 That CPC ceiling is then tiered down for broader match types
-(`MATCH_TYPE_BID_MULTIPLIER`), for Auto-targeting's more exploratory clauses
-(substitutes/complements bid lower than close-match), and for the Manual
-campaign's 3 ad groups (`AD_GROUP_BID_MULTIPLIER` — see "Campaign structure"
-above). A manual Default Bid is still accepted as a fallback when RRP isn't
-known.
+(`MATCH_TYPE_BID_MULTIPLIER`) and for the campaign's 3 ad groups
+(`AD_GROUP_BID_MULTIPLIER` — see "Campaign structure" above). A manual
+Default Bid is still accepted as a fallback when RRP isn't known.
 
 ### Keyword generation, in more detail
 
@@ -309,7 +283,7 @@ selector-based extraction those rely on) — it's scoped to this one purpose.
 
 ## Autofill from ASIN — the Book Profile
 
-Both forms have an **Autofill** button next to the ASIN field (`/api/lookup`)
+The form has an **Autofill** button next to the ASIN field (`/api/lookup`)
 that builds a full book profile from the ASIN/ISBN alone, before the user
 fills in anything else:
 
@@ -398,11 +372,11 @@ branch auto-deploys.
 
 Amazon blocks/CAPTCHAs product-page requests from datacenter IP ranges at the
 network level — this is routine for Vercel, AWS, and similar cloud hosts, and
-much rarer from a home IP. When it happens, Autofill and the Manual (SPM)
-generator's comp-title/comp-name crawl, product targeting, and
-review-language mining all degrade to "no results" (never a hard failure —
-see `scrapeProductPage` in `lib/scrape.ts`), and `/api/lookup` returns a
-"blocked" error you can see in the UI.
+much rarer from a home IP. When it happens, Autofill and the generator's
+comp-title/comp-name crawl, product targeting, and review-language mining
+all degrade to "no results" (never a hard failure — see `scrapeProductPage`
+in `lib/scrape.ts`), and `/api/lookup` returns a "blocked" error you can see
+in the UI.
 
 The fix: set `SCRAPER_PROXY_API_KEY` to a [ScraperAPI](https://www.scraperapi.com)
 key (free tier is ~1,000 requests/month, plenty for single-user use). When
@@ -430,30 +404,16 @@ etc.), edit `resolveScraperProxyUrl` in `lib/scrape.ts` — most use a similar
   bulk-operations schema, but Amazon revises it periodically. Before the first
   real upload, download a fresh template from Campaign Manager > Bulk
   Operations and diff its header row against `COLUMNS` in that file.
-- **Auto-targeting clause and Product Targeting expression formats are
-  unverified.** `AUTO_TARGETING_CLAUSES` in `lib/bulksheet.ts` writes the
-  human-readable clause names (`close-match`, `loose-match`, `substitutes`,
-  `complements`) rather than the API's internal codes (e.g.
-  `queryHighRelMatches`), and product targets are written as `asin="B0..."`.
-  Both are the same class of assumption already flagged for the Keyword rows
-  above — confirm against a live downloaded template before uploading.
+- **Product Targeting expression format is unverified.** Product targets are
+  written as `asin="B0..."` — the same class of assumption already flagged
+  for the Keyword rows above — confirm against a live downloaded template
+  before uploading.
 - **Bid economics formula deviates from the source doc's literal wording** —
   see the comment in `lib/bidding.ts`. The doc states
   `(Net revenue × ACOS) / conversion rate`; this implements
   `(Net revenue × ACOS) × conversion rate` instead, since dividing by a
   fraction inflates the max CPC above the max spend per sale. Worth a second
   look if the resulting bids look off in practice.
-- **Harvest thresholds are untuned defaults** (`DEFAULT_HARVEST_THRESHOLDS` in
-  `lib/harvest.ts`) — 300 impressions / 8 clicks / 1 order / 35% ACOS are
-  reasonable starting points, not derived from this account's actual
-  distribution. Adjust via the Harvest page's "advanced thresholds" once
-  real harvest runs show how the promote/negate/monitor split lands.
-- **Search Term report column matching is best-effort** (`HEADER_ALIAS_MAP` in
-  `lib/harvest.ts`) — matches Amazon's current report headers
-  (`Customer Search Term`, `Targeting`, `Impressions`, `Clicks`, `Spend`,
-  `7 Day Total Orders (#)`, `7 Day Total Sales`) case/punctuation-insensitively.
-  If Amazon renames a column, that field silently reads as 0 rather than
-  erroring — spot-check the harvest summary counts after the first real run.
 - **Ads API keyword-recommendations request/response shape** in
   `lib/amazonAds.ts` is written against the documented v3
   `sp/targets/keywords/recommendations` contract. Verify against the live
@@ -512,9 +472,10 @@ etc.), edit `resolveScraperProxyUrl` in `lib/scrape.ts` — most use a similar
   Brand Registry via Seller Central, unconfirmed for this account.
 - **PA-API** was skipped for v1 — gated behind qualifying Amazon Associates
   sales, unconfirmed for this account.
-- Default match-type mix for the cold-start generator is still user-chosen
-  (broad/phrase/exact, any combination); the harvester always promotes to
-  exact match only, matching the doc's harvesting guidance.
+- Default match-type mix for the Tropes & Themes ad group is still
+  user-chosen (broad/phrase/exact, any combination) — no auto-tuning based
+  on real performance data yet, since that would mean ingesting a Search
+  Term report, which isn't part of this tool's scope right now.
 
 ## Stack
 
