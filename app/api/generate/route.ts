@@ -1,26 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
+import { isAiRankingConfigured, mergeAiRanking, rankKeywordsWithAi } from "@/lib/aiRanker";
+import { AD_GROUP_BID_MULTIPLIER, computeMaxCpc, round2 } from "@/lib/bidding";
 import { enrichBookMetadata } from "@/lib/bookMetadata";
-import { buildBulksheet } from "@/lib/bulksheet";
+import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
+import { getSynonymExpansionCandidates } from "@/lib/datamuse";
+import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
+import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
 import {
   buildBookContentCandidates,
   buildBuyerIntentCandidates,
-  buildCategoryCandidates,
+  buildCompNameCandidates,
   buildCompTitleCandidates,
+  buildDescriptionCandidates,
   buildGenreMetadataCandidates,
-  finalizeKeywords,
+  buildKnownTagCandidates,
+  collapseNearDuplicates,
+  COMP_NAME_MAX_KEYWORDS,
+  extractAsinCandidates,
   mergeKeywordCandidates,
   RECOMMENDED_MAX_KEYWORDS,
   RECOMMENDED_MIN_KEYWORDS,
+  scoreAndTierBids,
+  splitKeywordsByCategory,
 } from "@/lib/keywordMerge";
+import { normalizeAsinOrIsbn } from "@/lib/isbn";
+import { buildAdGroupName, buildCampaignName } from "@/lib/naming";
+import {
+  buildProductTargetCandidates,
+  mergeProductTargetCandidates,
+  PRODUCT_TARGET_MAX,
+} from "@/lib/productTargets";
+import { mineReviewLanguage } from "@/lib/reviewMining";
 import {
   buildAutocompleteSeeds,
   getAutocompleteKeywordSet,
   getGoogleAutocompleteKeywordSet,
+  getProductPageUrl,
   scrapeProductPage,
-  scrapeRelatedCategories,
+  scrapeRelatedCompetitors,
 } from "@/lib/scrape";
-import { GenerateRequest, KeywordCandidate, Marketplace, MatchType, SourceStatus } from "@/lib/types";
+import { BidEconomics, GenerateRequest, KeywordCandidate, Marketplace, MatchType, SourceStatus } from "@/lib/types";
 
 export const runtime = "nodejs";
 // Give the autocomplete sweeps (dozens of small outbound requests) room to
@@ -30,23 +50,26 @@ export const maxDuration = 60;
 
 const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
 const MATCH_TYPES: MatchType[] = ["broad", "phrase", "exact"];
-const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
 function validate(body: unknown): { value: GenerateRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "Invalid request body." };
   const b = body as Record<string, unknown>;
 
-  if (typeof b.asin !== "string" || !ASIN_PATTERN.test(b.asin.trim())) {
-    return { error: "ASIN must be a 10-character alphanumeric code." };
+  const asin = typeof b.asin === "string" ? normalizeAsinOrIsbn(b.asin) : null;
+  if (!asin) {
+    return { error: "Enter a valid ASIN, ISBN-10, or ISBN-13." };
   }
   if (typeof b.marketplace !== "string" || !MARKETPLACES.includes(b.marketplace as Marketplace)) {
     return { error: `Marketplace must be one of ${MARKETPLACES.join(", ")}.` };
   }
-  if (typeof b.campaignName !== "string" || !b.campaignName.trim()) {
-    return { error: "Campaign Name is required." };
+  if (typeof b.creatorInitials !== "string" || !b.creatorInitials.trim()) {
+    return { error: "Creator Initials are required — they're baked into the campaign name." };
   }
-  if (typeof b.adGroupName !== "string" || !b.adGroupName.trim()) {
-    return { error: "Ad Group Name is required." };
+  if (typeof b.authorName !== "string" || !b.authorName.trim()) {
+    return { error: "Author Name is required." };
+  }
+  if (typeof b.bookTitle !== "string" || !b.bookTitle.trim()) {
+    return { error: "Book Title is required." };
   }
   if (typeof b.dailyBudget !== "number" || !Number.isFinite(b.dailyBudget) || b.dailyBudget <= 0) {
     return { error: "Daily Budget must be a positive number." };
@@ -54,9 +77,11 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
   if (typeof b.startDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(b.startDate)) {
     return { error: "Start Date must be in YYYY-MM-DD format." };
   }
-  if (typeof b.defaultBid !== "number" || !Number.isFinite(b.defaultBid) || b.defaultBid <= 0) {
-    return { error: "Default Bid must be a positive number." };
-  }
+
+  const seriesName = typeof b.seriesName === "string" && b.seriesName.trim() ? b.seriesName.trim() : undefined;
+  const variant =
+    typeof b.variant === "number" && Number.isInteger(b.variant) && b.variant > 0 ? b.variant : 1;
+
   if (
     !Array.isArray(b.matchTypes) ||
     b.matchTypes.length === 0 ||
@@ -64,19 +89,69 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
   ) {
     return { error: "Select at least one match type (broad, phrase, exact)." };
   }
+  const matchTypes = b.matchTypes as MatchType[];
+
+  let bidEconomics: BidEconomics | undefined;
+  if (b.bidEconomics && typeof b.bidEconomics === "object") {
+    const e = b.bidEconomics as Record<string, unknown>;
+    if (
+      typeof e.rrp === "number" &&
+      e.rrp > 0 &&
+      typeof e.targetAcos === "number" &&
+      e.targetAcos > 0 &&
+      e.targetAcos <= 1 &&
+      typeof e.estConversionRate === "number" &&
+      e.estConversionRate > 0 &&
+      e.estConversionRate <= 1
+    ) {
+      bidEconomics = { rrp: e.rrp, targetAcos: e.targetAcos, estConversionRate: e.estConversionRate };
+    }
+  }
+
+  const defaultBid = typeof b.defaultBid === "number" && b.defaultBid > 0 ? b.defaultBid : undefined;
+
+  if (!bidEconomics && defaultBid === undefined) {
+    return {
+      error:
+        "Provide RRP + target ACOS + expected conversion rate to derive a bid, or set a manual Default Bid.",
+    };
+  }
+
+  const knownTags =
+    Array.isArray(b.knownTags) && b.knownTags.every((t) => typeof t === "string")
+      ? (b.knownTags as string[]).map((t) => t.trim()).filter(Boolean)
+      : undefined;
 
   return {
     value: {
-      asin: b.asin.trim().toUpperCase(),
+      asin,
       marketplace: b.marketplace as Marketplace,
-      campaignName: b.campaignName.trim(),
-      adGroupName: b.adGroupName.trim(),
+      creatorInitials: b.creatorInitials.trim(),
+      authorName: b.authorName.trim(),
+      bookTitle: b.bookTitle.trim(),
+      seriesName,
+      variant,
       dailyBudget: b.dailyBudget,
       startDate: b.startDate,
-      defaultBid: b.defaultBid,
-      matchTypes: b.matchTypes as MatchType[],
+      matchTypes,
+      bidEconomics,
+      defaultBid,
+      knownTags,
     },
   };
+}
+
+function fileResponse(buffer: Buffer, campaignName: string, extraHeaders: Record<string, string>): NextResponse {
+  const filename = `${campaignName.replace(/[^a-z0-9\-_]+/gi, "_")}-bulksheet.xlsx`;
+  return new NextResponse(new Uint8Array(buffer), {
+    status: 200,
+    headers: {
+      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "X-Campaign-Name": encodeURIComponent(campaignName),
+      ...extraHeaders,
+    },
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -93,6 +168,9 @@ export async function POST(req: NextRequest) {
   }
   const request = validated.value;
 
+  const baseBid = request.bidEconomics ? computeMaxCpc(request.bidEconomics) : (request.defaultBid as number);
+  const campaignName = buildCampaignName(request);
+
   const sourceStatuses: SourceStatus[] = [];
 
   const productPage = await scrapeProductPage(request.asin, request.marketplace);
@@ -103,11 +181,9 @@ export async function POST(req: NextRequest) {
     error: productPage.title ? undefined : "Could not load or parse the product page.",
   });
 
-  const seedTerms = productPage.title
-    ? buildAutocompleteSeeds(productPage.title, productPage.author)
-    : [request.asin];
+  const seedTerms = buildAutocompleteSeeds(request.bookTitle, request.authorName);
 
-  const [adsApiResult, autocompleteResult, googleAutocompleteResult, bookMetadata, relatedCategories] =
+  const [adsApiResult, autocompleteResult, googleAutocompleteResult, bookMetadata, relatedCompetitors, firecrawlMarkdown] =
     await Promise.all([
       isAdsApiConfigured()
         ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
@@ -122,10 +198,18 @@ export async function POST(req: NextRequest) {
       enrichBookMetadata({
         isbn10: productPage.isbn10,
         isbn13: productPage.isbn13,
-        title: productPage.title,
-        author: productPage.author,
+        title: request.bookTitle,
+        author: request.authorName,
       }),
-      scrapeRelatedCategories(productPage.compAsins, request.marketplace),
+      // Deep "also bought" crawl (manual research blueprint, section 3) —
+      // goes a hop past the target book's own carousel to approximate the
+      // blueprint's best-seller deep dive, bounded for serverless time.
+      scrapeRelatedCompetitors(request.asin, productPage.compAsins, request.marketplace),
+      // Richer natural-language context for the AI ranking pass below — not
+      // used for structured extraction (see lib/firecrawl.ts).
+      isFirecrawlConfigured()
+        ? scrapeMarkdown(getProductPageUrl(request.asin, request.marketplace))
+        : Promise.resolve(undefined),
     ]);
 
   sourceStatuses.push({
@@ -160,16 +244,53 @@ export async function POST(req: NextRequest) {
     count: bookMetadata.subjects.length,
   });
 
+  // Auto-targeting's complements/substitutes clauses match against other
+  // *products*, so some "search terms" here are actually bare ASINs — route
+  // those to product targeting instead of letting them fall out as junk
+  // keywords. See learnings doc, section 3.
+  const { keywords: adsApiKeywords, asins: adsApiAsins } = extractAsinCandidates(adsApiResult.candidates);
+  const { keywords: autocompleteKeywords, asins: autocompleteAsins } = extractAsinCandidates(autocompleteResult);
+  const { keywords: googleAutocompleteKeywords, asins: googleAsins } = extractAsinCandidates(
+    googleAutocompleteResult
+  );
+
   const genreMetadataCandidates = buildGenreMetadataCandidates(bookMetadata);
   const bookContentCandidates = buildBookContentCandidates(bookMetadata.commonTerms);
-  const compTitleCandidates = mergeKeywordCandidates(
-    buildCompTitleCandidates(productPage),
-    buildCategoryCandidates(relatedCategories, "comp-title")
-  );
-  const buyerIntentCandidates = buildBuyerIntentCandidates(
-    genreMetadataCandidates.map((c) => c.text),
-    productPage.title
-  );
+  // Mixed source tags: the comp titles' own titles are "comp-name" (bare
+  // name, high intent), their category placement is "comp-title" (thematic).
+  const compTitleCandidates = buildCompTitleCandidates(productPage);
+  const deepCompNameCandidates = buildCompNameCandidates(relatedCompetitors.competitors);
+  // Tags the user reviewed/kept on the Autofill book profile — high-trust,
+  // human-vetted genre/subgenre/tag signal, folded into both the seed terms
+  // below and the final candidate pool. See buildKnownTagCandidates.
+  const knownTagCandidates = buildKnownTagCandidates(request.knownTags ?? []);
+  const genreSeedTerms = [...genreMetadataCandidates.map((c) => c.text), ...(request.knownTags ?? [])];
+  const buyerIntentCandidates = buildBuyerIntentCandidates(genreSeedTerms, {
+    title: request.bookTitle,
+    author: request.authorName,
+    seriesName: request.seriesName,
+  });
+  // Publisher/author's own blurb — comp mentions ("perfect for fans of X")
+  // plus short marketing bullets, mixed comp-name/book-description tags.
+  const descriptionCandidates = buildDescriptionCandidates(productPage.description, productPage.bulletPoints);
+  // Pools review text across the seed book *and* every deep-crawled comp
+  // title, not just the seed book's own (often sparse) reviews.
+  const reviewLanguageCandidates = mineReviewLanguage([
+    ...productPage.reviewSnippets,
+    ...relatedCompetitors.reviewSnippets,
+  ]);
+
+  // Two more free, low-risk sources: Datamuse (a real API, no scraping risk)
+  // for synonym expansion of the genre/trope terms already found (now
+  // including user-curated tags), and a best-effort Goodreads lookup for
+  // community-tagged tropes/genres — the richest free source of exact
+  // fiction reader vocabulary, but a scrape with the same fragility/blocking
+  // caveats as the Amazon ones above.
+  const [synonymCandidates, goodreadsTags] = await Promise.all([
+    getSynonymExpansionCandidates(genreSeedTerms),
+    getGoodreadsTags(productPage.isbn10, request.bookTitle, request.authorName),
+  ]);
+  const goodreadsTagCandidates = buildGoodreadsTagCandidates(goodreadsTags);
 
   sourceStatuses.push({
     source: "comp-title",
@@ -177,51 +298,182 @@ export async function POST(req: NextRequest) {
     count: compTitleCandidates.length,
   });
   sourceStatuses.push({
+    source: "comp-name",
+    ok: deepCompNameCandidates.length > 0,
+    count: deepCompNameCandidates.length,
+  });
+  sourceStatuses.push({
     source: "genre-metadata",
     ok: genreMetadataCandidates.length > 0,
     count: genreMetadataCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "user-tag",
+    ok: knownTagCandidates.length > 0,
+    count: knownTagCandidates.length,
   });
   sourceStatuses.push({
     source: "buyer-intent",
     ok: buyerIntentCandidates.length > 0,
     count: buyerIntentCandidates.length,
   });
+  sourceStatuses.push({
+    source: "book-description",
+    ok: descriptionCandidates.length > 0,
+    count: descriptionCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "review-language",
+    ok: reviewLanguageCandidates.length > 0,
+    count: reviewLanguageCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "synonym",
+    ok: synonymCandidates.length > 0,
+    count: synonymCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "goodreads-tags",
+    ok: goodreadsTagCandidates.length > 0,
+    count: goodreadsTagCandidates.length,
+  });
 
-  const keywords = finalizeKeywords(
-    [
-      adsApiResult.candidates,
-      autocompleteResult,
-      googleAutocompleteResult,
-      compTitleCandidates,
-      genreMetadataCandidates,
-      bookContentCandidates,
-      buyerIntentCandidates,
-    ],
-    request.defaultBid
+  // Merge + dedupe everything once, then split into the two Manual ad group
+  // buckets the research blueprint recommends tracking separately (section
+  // 5) and score/cap each independently — a strong comp-author name
+  // shouldn't lose its ad group slot to a flood of tropes candidates sharing
+  // one combined cap.
+  const merged = mergeKeywordCandidates(
+    adsApiKeywords,
+    autocompleteKeywords,
+    googleAutocompleteKeywords,
+    compTitleCandidates,
+    deepCompNameCandidates,
+    knownTagCandidates,
+    genreMetadataCandidates,
+    bookContentCandidates,
+    buyerIntentCandidates,
+    descriptionCandidates,
+    reviewLanguageCandidates,
+    synonymCandidates,
+    goodreadsTagCandidates
+  );
+  const { tropes: tropesCandidates, compNames: compNameCandidates } = splitKeywordsByCategory(
+    collapseNearDuplicates(merged)
   );
 
-  if (keywords.length === 0) {
+  const tropesBid = round2(baseBid * AD_GROUP_BID_MULTIPLIER.tropes);
+  const compNamesBid = round2(baseBid * AD_GROUP_BID_MULTIPLIER["comp-names"]);
+  const productTargetingBid = round2(baseBid * AD_GROUP_BID_MULTIPLIER["product-targeting"]);
+
+  // Heuristic scoring narrows the raw candidate pool down to a shortlist
+  // first — real headroom above the final cap, so the AI pass (if
+  // configured) has genuine judgment calls to make rather than rubber-
+  // stamping an already-final list. This is also the sole path when AI
+  // ranking isn't configured, so it has to be a complete, good-enough
+  // ranking on its own, not just AI scaffolding.
+  const AI_SHORTLIST_MULTIPLIER = 1.6;
+  const tropesShortlist = scoreAndTierBids(tropesCandidates, tropesBid).slice(
+    0,
+    Math.round(RECOMMENDED_MAX_KEYWORDS * AI_SHORTLIST_MULTIPLIER)
+  );
+  const compNamesShortlist = scoreAndTierBids(compNameCandidates, compNamesBid).slice(
+    0,
+    Math.round(COMP_NAME_MAX_KEYWORDS * AI_SHORTLIST_MULTIPLIER)
+  );
+
+  let tropesKeywords: KeywordCandidate[];
+  let compNameKeywords: KeywordCandidate[];
+  let aiRankingUsed = false;
+
+  if (isAiRankingConfigured()) {
+    const ranked = await rankKeywordsWithAi(
+      {
+        title: request.bookTitle,
+        author: request.authorName,
+        seriesName: request.seriesName,
+        genreTerms: genreSeedTerms,
+        description: productPage.description,
+        pageMarkdown: firecrawlMarkdown,
+      },
+      tropesShortlist,
+      compNamesShortlist
+    );
+
+    if (ranked) {
+      const combinedShortlist = [...tropesShortlist, ...compNamesShortlist];
+      tropesKeywords = mergeAiRanking(combinedShortlist, ranked, "tropes", RECOMMENDED_MAX_KEYWORDS);
+      compNameKeywords = mergeAiRanking(combinedShortlist, ranked, "comp-names", COMP_NAME_MAX_KEYWORDS);
+      aiRankingUsed = true;
+    } else {
+      tropesKeywords = tropesShortlist.slice(0, RECOMMENDED_MAX_KEYWORDS);
+      compNameKeywords = compNamesShortlist.slice(0, COMP_NAME_MAX_KEYWORDS);
+    }
+  } else {
+    tropesKeywords = tropesShortlist.slice(0, RECOMMENDED_MAX_KEYWORDS);
+    compNameKeywords = compNamesShortlist.slice(0, COMP_NAME_MAX_KEYWORDS);
+  }
+
+  // Product targeting isn't just the whole targeting story on its own either
+  // — comp ASINs from the product page carousel, the deep crawl's first- and
+  // second-hop ASINs, plus any ASIN-shaped "keywords" pulled out above. See
+  // learnings doc, section 4.
+  const productTargets = mergeProductTargetCandidates(
+    buildProductTargetCandidates(productPage.compAsins, "comp-title"),
+    buildProductTargetCandidates(relatedCompetitors.productTargetAsins, "comp-title"),
+    buildProductTargetCandidates([...adsApiAsins, ...autocompleteAsins, ...googleAsins], "autocomplete")
+  ).slice(0, PRODUCT_TARGET_MAX);
+
+  if (tropesKeywords.length === 0 && compNameKeywords.length === 0 && productTargets.length === 0) {
     return NextResponse.json(
       {
         error:
-          "No keyword candidates could be generated for this ASIN. All sources failed or returned nothing.",
+          "No keyword or product-targeting candidates could be generated for this ASIN. All sources failed or returned nothing.",
         sources: sourceStatuses,
       },
       { status: 502 }
     );
   }
 
-  const buffer = await buildBulksheet(request, keywords);
-  const filename = `${request.campaignName.replace(/[^a-z0-9\-_]+/gi, "_")}-bulksheet.xlsx`;
-
-  return new NextResponse(new Uint8Array(buffer), {
-    status: 200,
-    headers: {
-      "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "X-Keyword-Count": String(keywords.length),
-      "X-Recommended-Keyword-Range": `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
-      "X-Source-Status": encodeURIComponent(JSON.stringify(sourceStatuses)),
+  const adGroups: SpmAdGroup[] = [
+    {
+      name: buildAdGroupName("tropes"),
+      defaultBid: tropesBid,
+      keywords: tropesKeywords,
+      matchTypes: request.matchTypes,
     },
+    {
+      name: buildAdGroupName("comp-names"),
+      defaultBid: compNamesBid,
+      keywords: compNameKeywords,
+      // Blueprint: Competitor Authors & Titles ad group is Exact Match only
+      // — readers searching a name are ready to buy, don't dilute with Broad.
+      matchTypes: ["exact"],
+    },
+    {
+      name: buildAdGroupName("product-targeting"),
+      defaultBid: productTargetingBid,
+      productTargets,
+    },
+  ];
+
+  const buffer = await buildBulksheet({
+    campaignName,
+    asin: request.asin,
+    dailyBudget: request.dailyBudget,
+    startDate: request.startDate,
+    baseBid,
+    adGroups,
+  });
+
+  return fileResponse(buffer, campaignName, {
+    "X-Keyword-Count": String(tropesKeywords.length + compNameKeywords.length),
+    "X-Tropes-Keyword-Count": String(tropesKeywords.length),
+    "X-Comp-Name-Keyword-Count": String(compNameKeywords.length),
+    "X-Product-Target-Count": String(productTargets.length),
+    "X-Recommended-Keyword-Range": `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
+    "X-Source-Status": encodeURIComponent(JSON.stringify(sourceStatuses)),
+    "X-Ai-Ranking-Used": String(aiRankingUsed),
+    "X-Firecrawl-Used": String(!!firecrawlMarkdown),
   });
 }

@@ -1,6 +1,8 @@
 "use client";
 
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
+import { normalizeAsinOrIsbn } from "@/lib/isbn";
+import { buildCampaignName } from "@/lib/naming";
 
 type MatchType = "broad" | "phrase" | "exact";
 
@@ -25,18 +27,60 @@ function todayIso(): string {
 export default function Home() {
   const [asin, setAsin] = useState("");
   const [marketplace, setMarketplace] = useState<(typeof MARKETPLACES)[number]>("US");
-  const [campaignName, setCampaignName] = useState("");
-  const [adGroupName, setAdGroupName] = useState("");
+  const [creatorInitials, setCreatorInitials] = useState("");
+  const [authorName, setAuthorName] = useState("");
+  const [bookTitle, setBookTitle] = useState("");
+  const [seriesName, setSeriesName] = useState("");
+  const [variant, setVariant] = useState("1");
   const [dailyBudget, setDailyBudget] = useState("10");
   const [startDate, setStartDate] = useState(todayIso());
-  const [defaultBid, setDefaultBid] = useState("0.75");
   const [matchTypes, setMatchTypes] = useState<MatchType[]>(["broad", "phrase", "exact"]);
+
+  const [useRrpBidding, setUseRrpBidding] = useState(true);
+  const [rrp, setRrp] = useState("14.99");
+  const [targetAcosPct, setTargetAcosPct] = useState("35");
+  const [estConversionRatePct, setEstConversionRatePct] = useState("8");
+  const [defaultBid, setDefaultBid] = useState("0.75");
+
+  const [autofillStatus, setAutofillStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [autofillError, setAutofillError] = useState<string | null>(null);
+
+  // Book profile gathered by Autofill — genre/subgenre path, Best Sellers
+  // Rank standings, description, and a combined, prunable tag list from
+  // every free source (Amazon categories, Google Books, Open Library,
+  // Goodreads). The reviewed tag list feeds keyword generation as
+  // knownTags — see buildKnownTagCandidates in lib/keywordMerge.ts.
+  const [profileCategoryPath, setProfileCategoryPath] = useState<string[]>([]);
+  const [profileBestSellerRanks, setProfileBestSellerRanks] = useState<
+    { rank: number; category: string }[]
+  >([]);
+  const [profileDescription, setProfileDescription] = useState<string | null>(null);
+  const [profileTags, setProfileTags] = useState<string[]>([]);
+  const [newTagInput, setNewTagInput] = useState("");
 
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceStatus[] | null>(null);
-  const [keywordCount, setKeywordCount] = useState<number | null>(null);
+  const [tropesKeywordCount, setTropesKeywordCount] = useState<number | null>(null);
+  const [compNameKeywordCount, setCompNameKeywordCount] = useState<number | null>(null);
+  const [productTargetCount, setProductTargetCount] = useState<number | null>(null);
   const [recommendedRange, setRecommendedRange] = useState<string | null>(null);
+  const [resultCampaignName, setResultCampaignName] = useState<string | null>(null);
+  const [aiRankingUsed, setAiRankingUsed] = useState<boolean>(false);
+
+  const previewName = useMemo(() => {
+    const normalizedAsin = normalizeAsinOrIsbn(asin);
+    if (!normalizedAsin || !creatorInitials.trim() || !authorName.trim() || !bookTitle.trim()) return null;
+    return buildCampaignName({
+      asin: normalizedAsin,
+      marketplace,
+      creatorInitials: creatorInitials.trim(),
+      authorName: authorName.trim(),
+      bookTitle: bookTitle.trim(),
+      seriesName: seriesName.trim() || undefined,
+      variant: Number(variant) || 1,
+    });
+  }, [asin, marketplace, creatorInitials, authorName, bookTitle, seriesName, variant]);
 
   function toggleMatchType(value: MatchType) {
     setMatchTypes((prev) =>
@@ -44,44 +88,124 @@ export default function Home() {
     );
   }
 
+  async function handleAutofill() {
+    const normalized = normalizeAsinOrIsbn(asin);
+    if (!normalized) {
+      setAutofillError("Enter a valid ASIN, ISBN-10, or ISBN-13 first.");
+      setAutofillStatus("error");
+      return;
+    }
+
+    setAutofillStatus("loading");
+    setAutofillError(null);
+
+    try {
+      const res = await fetch(
+        `/api/lookup?asin=${encodeURIComponent(normalized)}&marketplace=${marketplace}`
+      );
+      const body = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setAutofillError(body.error ?? `Lookup failed (${res.status}).`);
+        setAutofillStatus("error");
+        return;
+      }
+
+      if (body.asin) setAsin(body.asin);
+      if (body.title) setBookTitle(body.title);
+      if (body.author) setAuthorName(body.author);
+      if (body.seriesName) setSeriesName(body.seriesName);
+      if (typeof body.price === "number") {
+        setRrp(body.price.toFixed(2));
+        setUseRrpBidding(true);
+      }
+      setProfileCategoryPath(Array.isArray(body.categoryPath) ? body.categoryPath : []);
+      setProfileBestSellerRanks(Array.isArray(body.bestSellerRanks) ? body.bestSellerRanks : []);
+      setProfileDescription(typeof body.description === "string" ? body.description : null);
+      setProfileTags(Array.isArray(body.tags) ? body.tags : []);
+
+      setAutofillStatus("idle");
+    } catch (err) {
+      setAutofillError(err instanceof Error ? err.message : "Something went wrong.");
+      setAutofillStatus("error");
+    }
+  }
+
+  function removeTag(tag: string) {
+    setProfileTags((prev) => prev.filter((t) => t !== tag));
+  }
+
+  function addTag() {
+    const trimmed = newTagInput.trim().toLowerCase();
+    if (trimmed && !profileTags.includes(trimmed)) {
+      setProfileTags((prev) => [...prev, trimmed]);
+    }
+    setNewTagInput("");
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setStatus("loading");
     setErrorMessage(null);
     setSources(null);
-    setKeywordCount(null);
+    setTropesKeywordCount(null);
+    setCompNameKeywordCount(null);
+    setProductTargetCount(null);
     setRecommendedRange(null);
+    setResultCampaignName(null);
 
     try {
+      const body: Record<string, unknown> = {
+        asin,
+        marketplace,
+        creatorInitials,
+        authorName,
+        bookTitle,
+        seriesName: seriesName || undefined,
+        variant: Number(variant) || 1,
+        dailyBudget: Number(dailyBudget),
+        startDate,
+        matchTypes,
+        knownTags: profileTags,
+      };
+      if (useRrpBidding) {
+        body.bidEconomics = {
+          rrp: Number(rrp),
+          targetAcos: Number(targetAcosPct) / 100,
+          estConversionRate: Number(estConversionRatePct) / 100,
+        };
+      } else {
+        body.defaultBid = Number(defaultBid);
+      }
+
       const res = await fetch("/api/generate", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          asin,
-          marketplace,
-          campaignName,
-          adGroupName,
-          dailyBudget: Number(dailyBudget),
-          startDate,
-          defaultBid: Number(defaultBid),
-          matchTypes,
-        }),
+        body: JSON.stringify(body),
       });
 
       if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        setErrorMessage(body.error ?? `Request failed (${res.status}).`);
-        setSources(body.sources ?? null);
+        const errBody = await res.json().catch(() => ({}));
+        setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
+        setSources(errBody.sources ?? null);
         setStatus("error");
         return;
       }
 
       const sourceHeader = res.headers.get("X-Source-Status");
-      const countHeader = res.headers.get("X-Keyword-Count");
+      const tropesHeader = res.headers.get("X-Tropes-Keyword-Count");
+      const compNameHeader = res.headers.get("X-Comp-Name-Keyword-Count");
+      const productTargetHeader = res.headers.get("X-Product-Target-Count");
       const rangeHeader = res.headers.get("X-Recommended-Keyword-Range");
+      const campaignNameHeader = res.headers.get("X-Campaign-Name");
+      const aiRankingHeader = res.headers.get("X-Ai-Ranking-Used");
       if (sourceHeader) setSources(JSON.parse(decodeURIComponent(sourceHeader)));
-      if (countHeader) setKeywordCount(Number(countHeader));
+      if (tropesHeader) setTropesKeywordCount(Number(tropesHeader));
+      if (compNameHeader) setCompNameKeywordCount(Number(compNameHeader));
+      if (productTargetHeader) setProductTargetCount(Number(productTargetHeader));
       if (rangeHeader) setRecommendedRange(rangeHeader);
+      if (campaignNameHeader) setResultCampaignName(decodeURIComponent(campaignNameHeader));
+      setAiRankingUsed(aiRankingHeader === "true");
 
       const disposition = res.headers.get("Content-Disposition") ?? "";
       const filenameMatch = disposition.match(/filename="([^"]+)"/);
@@ -109,22 +233,41 @@ export default function Home() {
   return (
     <main className="flex-1 flex justify-center px-4 py-12">
       <div className="w-full max-w-xl">
-        <h1 className="text-2xl font-semibold mb-1">Amazon Book Keyword Tool</h1>
+        <h1 className="text-2xl font-semibold mb-1">Amazon Book Ads Builder</h1>
         <p className="text-sm text-neutral-500 mb-8">
-          Enter an ASIN and campaign settings. You&apos;ll get back a Bulksheet-ready
-          .xlsx file to upload into Amazon Ads&apos; bulk operations tool.
+          Enter an ASIN or ISBN to gather book metadata, scrape keyword candidates from
+          every available source, and get an AI-reviewed shortlist ready for a Manual
+          Sponsored Products campaign. Every campaign follows the <code>PB_...</code>{" "}
+          naming convention so downstream tooling can parse ASIN/Author back out of the
+          name alone.
         </p>
 
         <form onSubmit={handleSubmit} className="space-y-5">
-          <Field label="ASIN">
-            <input
-              required
-              value={asin}
-              onChange={(e) => setAsin(e.target.value)}
-              placeholder="B0XXXXXXXX"
-              maxLength={10}
-              className="input"
-            />
+          <Field label="ASIN or ISBN">
+            <div className="flex gap-2">
+              <input
+                required
+                value={asin}
+                onChange={(e) => setAsin(e.target.value)}
+                placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
+                maxLength={17}
+                className="input"
+              />
+              <button
+                type="button"
+                onClick={handleAutofill}
+                disabled={autofillStatus === "loading"}
+                className="shrink-0 rounded-md border border-neutral-300 dark:border-neutral-700 px-3 text-sm disabled:opacity-50"
+              >
+                {autofillStatus === "loading" ? "Looking up…" : "Autofill"}
+              </button>
+            </div>
+            <span className="block text-xs text-neutral-500 mt-1">
+              Scrapes the product page to fill in Author, Title, Series, and RRP below.
+            </span>
+            {autofillStatus === "error" && autofillError && (
+              <span className="block text-xs text-red-600 dark:text-red-400 mt-1">{autofillError}</span>
+            )}
           </Field>
 
           <Field label="Marketplace">
@@ -141,25 +284,136 @@ export default function Home() {
             </select>
           </Field>
 
-          <Field label="Campaign Name">
+          <div className="grid grid-cols-2 gap-4">
+            <Field label="Creator Initials">
+              <input
+                required
+                value={creatorInitials}
+                onChange={(e) => setCreatorInitials(e.target.value)}
+                placeholder="MO"
+                className="input"
+              />
+            </Field>
+            <Field label="Variant / Copy #">
+              <input
+                required
+                type="number"
+                min="1"
+                step="1"
+                value={variant}
+                onChange={(e) => setVariant(e.target.value)}
+                className="input"
+              />
+            </Field>
+          </div>
+
+          <Field label="Author Name">
             <input
               required
-              value={campaignName}
-              onChange={(e) => setCampaignName(e.target.value)}
-              placeholder="Book Title - Manual - SP"
+              value={authorName}
+              onChange={(e) => setAuthorName(e.target.value)}
+              placeholder="Andrew Raymond"
               className="input"
             />
           </Field>
 
-          <Field label="Ad Group Name">
+          <Field label="Book Title">
             <input
               required
-              value={adGroupName}
-              onChange={(e) => setAdGroupName(e.target.value)}
-              placeholder="Keywords"
+              value={bookTitle}
+              onChange={(e) => setBookTitle(e.target.value)}
+              placeholder="The Long Isle"
               className="input"
             />
           </Field>
+
+          <Field label="Series Name (optional)">
+            <input
+              value={seriesName}
+              onChange={(e) => setSeriesName(e.target.value)}
+              placeholder="A DC Mairead Maclean Mystery"
+              className="input"
+            />
+          </Field>
+
+          {previewName && (
+            <p className="text-xs text-neutral-500 -mt-3">
+              Campaign name: <code className="text-neutral-700 dark:text-neutral-300">{previewName}</code>
+            </p>
+          )}
+
+          {(profileCategoryPath.length > 0 ||
+            profileBestSellerRanks.length > 0 ||
+            profileDescription ||
+            profileTags.length > 0) && (
+            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 p-4 space-y-3">
+              <p className="text-sm font-medium">Book Profile (from Autofill)</p>
+
+              {profileCategoryPath.length > 0 && (
+                <p className="text-xs text-neutral-500">
+                  <span className="font-medium text-neutral-600 dark:text-neutral-400">Category: </span>
+                  {profileCategoryPath.join(" › ")}
+                </p>
+              )}
+
+              {profileBestSellerRanks.length > 0 && (
+                <div className="text-xs text-neutral-500">
+                  <span className="font-medium text-neutral-600 dark:text-neutral-400">Best Sellers Rank: </span>
+                  {profileBestSellerRanks
+                    .map((r) => `#${r.rank.toLocaleString()} in ${r.category}`)
+                    .join(", ")}
+                </div>
+              )}
+
+              {profileDescription && (
+                <p className="text-xs text-neutral-500 line-clamp-3">
+                  <span className="font-medium text-neutral-600 dark:text-neutral-400">Description: </span>
+                  {profileDescription}
+                </p>
+              )}
+
+              <div>
+                <p className="text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">
+                  Tags ({profileTags.length}) — reviewed here feed keyword generation directly. Remove
+                  any that don&apos;t fit.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {profileTags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      title="Remove tag"
+                      className="text-xs rounded-full border border-neutral-300 dark:border-neutral-700 px-2.5 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      {tag} ×
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTag();
+                      }
+                    }}
+                    placeholder="Add a tag"
+                    className="input text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={addTag}
+                    className="shrink-0 rounded-md border border-neutral-300 dark:border-neutral-700 px-3 text-xs"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <Field label="Daily Budget ($)">
@@ -173,30 +427,89 @@ export default function Home() {
                 className="input"
               />
             </Field>
-            <Field label="Default Bid ($)">
+            <Field label="Start Date">
               <input
                 required
-                type="number"
-                min="0.02"
-                step="0.01"
-                value={defaultBid}
-                onChange={(e) => setDefaultBid(e.target.value)}
+                type="date"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
                 className="input"
               />
             </Field>
           </div>
 
-          <Field label="Start Date">
-            <input
-              required
-              type="date"
-              value={startDate}
-              onChange={(e) => setStartDate(e.target.value)}
-              className="input"
-            />
+          <Field label="Bid economics">
+            <div className="space-y-3">
+              <div className="flex gap-4 text-sm">
+                <label className="flex items-center gap-2">
+                  <input type="radio" checked={useRrpBidding} onChange={() => setUseRrpBidding(true)} />
+                  Derive from RRP
+                </label>
+                <label className="flex items-center gap-2">
+                  <input type="radio" checked={!useRrpBidding} onChange={() => setUseRrpBidding(false)} />
+                  Manual default bid
+                </label>
+              </div>
+
+              {useRrpBidding ? (
+                <div className="grid grid-cols-3 gap-3">
+                  <label className="block">
+                    <span className="block text-xs text-neutral-500 mb-1">RRP ($)</span>
+                    <input
+                      required
+                      type="number"
+                      min="0.01"
+                      step="0.01"
+                      value={rrp}
+                      onChange={(e) => setRrp(e.target.value)}
+                      className="input"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs text-neutral-500 mb-1">Target ACOS (%)</span>
+                    <input
+                      required
+                      type="number"
+                      min="1"
+                      max="100"
+                      step="1"
+                      value={targetAcosPct}
+                      onChange={(e) => setTargetAcosPct(e.target.value)}
+                      className="input"
+                    />
+                  </label>
+                  <label className="block">
+                    <span className="block text-xs text-neutral-500 mb-1">Est. conv. rate (%)</span>
+                    <input
+                      required
+                      type="number"
+                      min="0.1"
+                      max="100"
+                      step="0.1"
+                      value={estConversionRatePct}
+                      onChange={(e) => setEstConversionRatePct(e.target.value)}
+                      className="input"
+                    />
+                  </label>
+                </div>
+              ) : (
+                <label className="block">
+                  <span className="block text-xs text-neutral-500 mb-1">Default Bid ($)</span>
+                  <input
+                    required
+                    type="number"
+                    min="0.02"
+                    step="0.01"
+                    value={defaultBid}
+                    onChange={(e) => setDefaultBid(e.target.value)}
+                    className="input"
+                  />
+                </label>
+              )}
+            </div>
           </Field>
 
-          <Field label="Match Types">
+          <Field label="Match Types (Tropes & Themes ad group)">
             <div className="flex gap-4">
               {MATCH_TYPES.map(({ value, label }) => (
                 <label key={value} className="flex items-center gap-2 text-sm">
@@ -209,6 +522,11 @@ export default function Home() {
                 </label>
               ))}
             </div>
+            <span className="block text-xs text-neutral-500 mt-1">
+              Applies to the Tropes &amp; Themes ad group only. Comp Authors &amp;
+              Titles is always Exact Match — readers searching a name are ready to
+              buy, so it isn&apos;t diluted with Broad/Phrase.
+            </span>
           </Field>
 
           <button
@@ -216,7 +534,7 @@ export default function Home() {
             disabled={isLoading || matchTypes.length === 0}
             className="w-full rounded-md bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 py-2.5 text-sm font-medium disabled:opacity-50"
           >
-            {isLoading ? "Generating..." : "Generate Bulksheet"}
+            {isLoading ? "Generating..." : "Generate Manual Bulksheet"}
           </button>
         </form>
 
@@ -229,7 +547,7 @@ export default function Home() {
         {status === "success" && (() => {
           const [recommendedMin] = recommendedRange?.split("-").map(Number) ?? [null];
           const belowRecommendedMin =
-            keywordCount !== null && recommendedMin !== null && keywordCount < recommendedMin;
+            tropesKeywordCount !== null && recommendedMin !== null && tropesKeywordCount < recommendedMin;
           return (
             <div
               className={`mt-6 rounded-md border p-4 text-sm ${
@@ -238,10 +556,16 @@ export default function Home() {
                   : "border-green-300 bg-green-50 text-green-800 dark:bg-green-950/30 dark:border-green-900 dark:text-green-300"
               }`}
             >
-              Download started — {keywordCount ?? "?"} keywords
-              {recommendedRange ? ` (Amazon recommends ${recommendedRange} per ad group)` : ""}.
+              Download started
+              {resultCampaignName ? ` — ${resultCampaignName}` : ""}.{" "}
+              {tropesKeywordCount ?? 0} Tropes &amp; Themes keywords, {compNameKeywordCount ?? 0} Comp
+              Authors &amp; Titles keywords, {productTargetCount ?? 0} product targets
+              {recommendedRange ? ` (Amazon recommends ${recommendedRange} per ad group)` : ""}.{" "}
+              {aiRankingUsed
+                ? "AI-ranked (Gemini)."
+                : "Heuristic-ranked (set GEMINI_API_KEY to enable AI ranking)."}
               {belowRecommendedMin &&
-                " That's below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
+                " Tropes & Themes is below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
             </div>
           );
         })()}
