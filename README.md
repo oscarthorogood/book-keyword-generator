@@ -265,6 +265,48 @@ better one:
   (`PRODUCT_TARGET_MAX` in `lib/productTargets.ts`) — both independent of the
   Tropes cap since they're now separate ad groups, not one shared budget.
 
+## AI-assisted ranking
+
+With ~10 different free sources feeding the candidate pool (Ads API, Amazon
++ Google autocomplete, Google Books API + web scrape, Open Library, Amazon
+comp-title/comp-name crawling, review-language mining, book description
+mining, Datamuse synonym expansion, Goodreads tags), the harder problem
+shifts from "find enough keywords" to "which of these hundreds of candidates
+are actually worth testing, and in which ad group." Two ranking stages
+handle that, in order:
+
+1. **Heuristic pre-filter** (`scoreAndTierBids` in `lib/keywordMerge.ts`,
+   unchanged) — scores every raw candidate by source agreement, phrase
+   length, and Ads-API presence. This runs first regardless of AI
+   configuration, and narrows the raw pool down to a shortlist 1.6× the
+   final per-ad-group cap (`AI_SHORTLIST_MULTIPLIER` in the generate route).
+   **This is also the sole ranking when AI isn't configured** — it's a
+   complete, good-enough ranking on its own, not just scaffolding for the AI
+   step.
+2. **AI final pass** (`rankKeywordsWithAi` in `lib/aiRanker.ts`, optional) —
+   sends that shortlist, plus book context (title/author/series/genre terms/
+   description, and optionally a Firecrawl markdown scrape of the product
+   page for richer natural-language context — `lib/firecrawl.ts`), to Google
+   Gemini's free tier. Gemini judges each candidate's real-world relevance to
+   *this specific book* — something no heuristic can do — can reclassify a
+   candidate between Tropes/Comp-Names, can drop candidates the heuristic
+   would've kept, and returns a 0-100 relevance score used for final sort
+   order and the per-ad-group cap.
+
+Uses Gemini rather than a paid API specifically to keep this optional step
+free — no credit card required for Google AI Studio's free tier. If
+`GEMINI_API_KEY` is unset, or the API call fails or times out for any
+reason, the app **silently falls back to the heuristic shortlist** — the AI
+pass never blocks the export, matching the fail-soft pattern every other
+optional source in this app follows. Whether it actually ran is reported via
+the `X-Ai-Ranking-Used` response header and shown in the success banner.
+
+`FIRECRAWL_API_KEY` only has an effect when `GEMINI_API_KEY` is also set —
+it purely enriches the context Gemini sees, it isn't an independent feature.
+Firecrawl is not used as a fetch mechanism for the structured scrapes
+elsewhere in this app (its markdown output would break the cheerio
+selector-based extraction those rely on) — it's scoped to this one purpose.
+
 ## Autofill from ASIN
 
 Both forms have an **Autofill** button next to the ASIN field
@@ -309,6 +351,9 @@ Optional:
 
 - `SCRAPER_PROXY_API_KEY` — see "Scraping from a cloud deployment" below.
   Needed on Vercel/most cloud hosts; not needed for local dev.
+- `GEMINI_API_KEY` / `FIRECRAWL_API_KEY` — see "AI-assisted ranking" above.
+  Neither is required; the app ranks keywords with the heuristic scorer
+  alone when they're unset.
 
 ### Deploy
 
@@ -404,6 +449,19 @@ etc.), edit `resolveScraperProxyUrl` in `lib/scrape.ts` — most use a similar
   Spot-check the `goodreads-tags` source count after deploy; if it's
   consistently empty even with `SCRAPER_PROXY_API_KEY` set, the selectors
   are the more likely culprit than blocking.
+- **Gemini and Firecrawl request/response shapes are unverified against a
+  live call** — both were written against their documented API contracts
+  (Gemini's `generateContent` + `responseSchema`, Firecrawl's `/v1/scrape`)
+  from a network-restricted environment that couldn't reach either service
+  to confirm. Both fail soft (silent fallback to heuristic-only ranking /
+  no extra context) rather than erroring, so a contract mismatch degrades
+  quietly — check `X-Ai-Ranking-Used` and the server logs
+  (`[rankKeywordsWithAi] ...` / `[scrapeMarkdown] ...`) after the first real
+  run to confirm they're actually working, not just failing silently.
+- **Gemini model name will need updating eventually** — `GEMINI_MODEL` in
+  `lib/aiRanker.ts` is hardcoded to a specific Flash model. Google's model
+  lineup moves fast; if AI ranking starts silently falling back (a 404 in
+  the logs), check aistudio.google.com for the current free-tier model name.
 - **Deep-crawl request budget is a judgment call, not a measured one** —
   5 first-hop + 6 second-hop page scrapes (`FIRST_HOP_ASIN_LIMIT` /
   `SECOND_HOP_ASIN_LIMIT` in `lib/scrape.ts`) run concurrently within the

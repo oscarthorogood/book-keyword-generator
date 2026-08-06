@@ -374,12 +374,16 @@ function looksLikeBotCheck(html: string): boolean {
  * on total failure. Logs the reason server-side (HTTP status / bot-check
  * detection / thrown error) since scrape failures are otherwise silent.
  */
+export function getProductPageUrl(asin: string, marketplace: Marketplace): string {
+  const domain = AMAZON_DOMAINS[marketplace];
+  return `https://www.${domain}/dp/${encodeURIComponent(asin)}`;
+}
+
 export async function scrapeProductPage(
   asin: string,
   marketplace: Marketplace
 ): Promise<ProductPageData> {
-  const domain = AMAZON_DOMAINS[marketplace];
-  const url = `https://www.${domain}/dp/${encodeURIComponent(asin)}`;
+  const url = getProductPageUrl(asin, marketplace);
   const fetchUrl = resolveProductPageFetchUrl(url, marketplace);
   const logPrefix = `[scrapeProductPage] ${asin} (${marketplace})`;
 

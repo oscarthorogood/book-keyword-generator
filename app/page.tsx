@@ -56,6 +56,7 @@ export default function Home() {
   const [productTargetCount, setProductTargetCount] = useState<number | null>(null);
   const [recommendedRange, setRecommendedRange] = useState<string | null>(null);
   const [resultCampaignName, setResultCampaignName] = useState<string | null>(null);
+  const [aiRankingUsed, setAiRankingUsed] = useState<boolean>(false);
 
   const previewName = useMemo(() => {
     const normalizedAsin = normalizeAsinOrIsbn(asin);
@@ -172,12 +173,14 @@ export default function Home() {
       const productTargetHeader = res.headers.get("X-Product-Target-Count");
       const rangeHeader = res.headers.get("X-Recommended-Keyword-Range");
       const campaignNameHeader = res.headers.get("X-Campaign-Name");
+      const aiRankingHeader = res.headers.get("X-Ai-Ranking-Used");
       if (sourceHeader) setSources(JSON.parse(decodeURIComponent(sourceHeader)));
       if (tropesHeader) setTropesKeywordCount(Number(tropesHeader));
       if (compNameHeader) setCompNameKeywordCount(Number(compNameHeader));
       if (productTargetHeader) setProductTargetCount(Number(productTargetHeader));
       if (rangeHeader) setRecommendedRange(rangeHeader);
       if (campaignNameHeader) setResultCampaignName(decodeURIComponent(campaignNameHeader));
+      setAiRankingUsed(aiRankingHeader === "true");
 
       const disposition = res.headers.get("Content-Disposition") ?? "";
       const filenameMatch = disposition.match(/filename="([^"]+)"/);
@@ -499,7 +502,10 @@ export default function Home() {
                   {" "}
                   {tropesKeywordCount ?? 0} Tropes &amp; Themes keywords, {compNameKeywordCount ?? 0} Comp
                   Authors &amp; Titles keywords, {productTargetCount ?? 0} product targets
-                  {recommendedRange ? ` (Amazon recommends ${recommendedRange} per ad group)` : ""}.
+                  {recommendedRange ? ` (Amazon recommends ${recommendedRange} per ad group)` : ""}.{" "}
+                  {aiRankingUsed
+                    ? "AI-ranked (Gemini)."
+                    : "Heuristic-ranked (set GEMINI_API_KEY to enable AI ranking)."}
                 </>
               )}
               {belowRecommendedMin &&

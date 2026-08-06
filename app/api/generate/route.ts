@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
+import { isAiRankingConfigured, mergeAiRanking, rankKeywordsWithAi } from "@/lib/aiRanker";
 import { AD_GROUP_BID_MULTIPLIER, computeMaxCpc, round2 } from "@/lib/bidding";
 import { enrichBookMetadata } from "@/lib/bookMetadata";
 import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
 import { getSynonymExpansionCandidates } from "@/lib/datamuse";
+import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
 import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
 import {
   buildBookContentCandidates,
@@ -33,6 +35,7 @@ import {
   buildAutocompleteSeeds,
   getAutocompleteKeywordSet,
   getGoogleAutocompleteKeywordSet,
+  getProductPageUrl,
   scrapeProductPage,
   scrapeRelatedCompetitors,
 } from "@/lib/scrape";
@@ -207,7 +210,7 @@ export async function POST(req: NextRequest) {
 
   const seedTerms = buildAutocompleteSeeds(request.bookTitle, request.authorName);
 
-  const [adsApiResult, autocompleteResult, googleAutocompleteResult, bookMetadata, relatedCompetitors] =
+  const [adsApiResult, autocompleteResult, googleAutocompleteResult, bookMetadata, relatedCompetitors, firecrawlMarkdown] =
     await Promise.all([
       isAdsApiConfigured()
         ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
@@ -229,6 +232,11 @@ export async function POST(req: NextRequest) {
       // goes a hop past the target book's own carousel to approximate the
       // blueprint's best-seller deep dive, bounded for serverless time.
       scrapeRelatedCompetitors(request.asin, productPage.compAsins, request.marketplace),
+      // Richer natural-language context for the AI ranking pass below — not
+      // used for structured extraction (see lib/firecrawl.ts).
+      isFirecrawlConfigured()
+        ? scrapeMarkdown(getProductPageUrl(request.asin, request.marketplace))
+        : Promise.resolve(undefined),
     ]);
 
   sourceStatuses.push({
@@ -373,8 +381,53 @@ export async function POST(req: NextRequest) {
   const compNamesBid = round2(baseBid * AD_GROUP_BID_MULTIPLIER["comp-names"]);
   const productTargetingBid = round2(baseBid * AD_GROUP_BID_MULTIPLIER["product-targeting"]);
 
-  const tropesKeywords = scoreAndTierBids(tropesCandidates, tropesBid).slice(0, RECOMMENDED_MAX_KEYWORDS);
-  const compNameKeywords = scoreAndTierBids(compNameCandidates, compNamesBid).slice(0, COMP_NAME_MAX_KEYWORDS);
+  // Heuristic scoring narrows the raw candidate pool down to a shortlist
+  // first — real headroom above the final cap, so the AI pass (if
+  // configured) has genuine judgment calls to make rather than rubber-
+  // stamping an already-final list. This is also the sole path when AI
+  // ranking isn't configured, so it has to be a complete, good-enough
+  // ranking on its own, not just AI scaffolding.
+  const AI_SHORTLIST_MULTIPLIER = 1.6;
+  const tropesShortlist = scoreAndTierBids(tropesCandidates, tropesBid).slice(
+    0,
+    Math.round(RECOMMENDED_MAX_KEYWORDS * AI_SHORTLIST_MULTIPLIER)
+  );
+  const compNamesShortlist = scoreAndTierBids(compNameCandidates, compNamesBid).slice(
+    0,
+    Math.round(COMP_NAME_MAX_KEYWORDS * AI_SHORTLIST_MULTIPLIER)
+  );
+
+  let tropesKeywords: KeywordCandidate[];
+  let compNameKeywords: KeywordCandidate[];
+  let aiRankingUsed = false;
+
+  if (isAiRankingConfigured()) {
+    const ranked = await rankKeywordsWithAi(
+      {
+        title: request.bookTitle,
+        author: request.authorName,
+        seriesName: request.seriesName,
+        genreTerms: genreMetadataCandidates.map((c) => c.text),
+        description: productPage.description,
+        pageMarkdown: firecrawlMarkdown,
+      },
+      tropesShortlist,
+      compNamesShortlist
+    );
+
+    if (ranked) {
+      const combinedShortlist = [...tropesShortlist, ...compNamesShortlist];
+      tropesKeywords = mergeAiRanking(combinedShortlist, ranked, "tropes", RECOMMENDED_MAX_KEYWORDS);
+      compNameKeywords = mergeAiRanking(combinedShortlist, ranked, "comp-names", COMP_NAME_MAX_KEYWORDS);
+      aiRankingUsed = true;
+    } else {
+      tropesKeywords = tropesShortlist.slice(0, RECOMMENDED_MAX_KEYWORDS);
+      compNameKeywords = compNamesShortlist.slice(0, COMP_NAME_MAX_KEYWORDS);
+    }
+  } else {
+    tropesKeywords = tropesShortlist.slice(0, RECOMMENDED_MAX_KEYWORDS);
+    compNameKeywords = compNamesShortlist.slice(0, COMP_NAME_MAX_KEYWORDS);
+  }
 
   // Product targeting isn't just the whole targeting story on its own either
   // — comp ASINs from the product page carousel, the deep crawl's first- and
@@ -436,5 +489,7 @@ export async function POST(req: NextRequest) {
     "X-Product-Target-Count": String(productTargets.length),
     "X-Recommended-Keyword-Range": `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
     "X-Source-Status": encodeURIComponent(JSON.stringify(sourceStatuses)),
+    "X-Ai-Ranking-Used": String(aiRankingUsed),
+    "X-Firecrawl-Used": String(!!firecrawlMarkdown),
   });
 }
