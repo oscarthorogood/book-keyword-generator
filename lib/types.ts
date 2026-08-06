@@ -45,6 +45,8 @@ export interface GenerateRequest extends CampaignIdentity {
   bidEconomics?: BidEconomics;
   /** Manual fallback/override when bid economics aren't supplied. */
   defaultBid?: number;
+  /** User-reviewed/pruned tags from the Autofill book profile — see lib/keywordMerge.ts#buildKnownTagCandidates. */
+  knownTags?: string[];
 }
 
 export type KeywordSource =
@@ -60,6 +62,7 @@ export type KeywordSource =
   | "book-description"
   | "synonym"
   | "goodreads-tags"
+  | "user-tag"
   | "harvest";
 
 export interface KeywordCandidate {
@@ -90,7 +93,11 @@ export interface ProductPageData {
   /** Best-effort list price scrape, for prefilling the RRP field — not guaranteed to be the print RRP specifically. */
   price?: number;
   compTitles: string[]; // "customers also bought" style titles
-  categories: string[]; // browse node / bestseller category text
+  categories: string[]; // browse node / bestseller category text (flat, deduped)
+  /** Ordered breadcrumb trail (e.g. ["Books", "Mystery, Thriller & Suspense", "Cozy", "Culinary"]) — genre/subgenre in Amazon's own hierarchy order. */
+  categoryPath: string[];
+  /** Best Sellers Rank entries with the actual rank number, not just the category name. */
+  bestSellerRanks: { rank: number; category: string }[];
   compAsins: string[]; // ASINs of "customers also bought" titles, for the deep competitor crawl
   reviewSnippets: string[]; // top-review excerpt text embedded on the page, for review-language mining
   description?: string; // publisher/author blurb, for comp-mention + description mining

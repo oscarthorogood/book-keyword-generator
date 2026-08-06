@@ -307,19 +307,52 @@ Firecrawl is not used as a fetch mechanism for the structured scrapes
 elsewhere in this app (its markdown output would break the cheerio
 selector-based extraction those rely on) — it's scoped to this one purpose.
 
-## Autofill from ASIN
+## Autofill from ASIN — the Book Profile
 
-Both forms have an **Autofill** button next to the ASIN field
-(`/api/lookup`) that scrapes just the target book's own product page —
-title, author, series, and a best-effort list price — and fills in Book
-Title / Author Name / Series Name / RRP. It's a lighter-weight version of
-the full product-page scrape in the generate pipeline (no comp crawl, no
-keyword research), so it responds quickly enough to run before the user
-fills in the rest of the form. Series and price extraction are best-effort
-(`extractSeriesName` / `extractPrice` in `lib/scrape.ts`) — Amazon shows
-several prices per page (Kindle/paperback/hardcover) and this just takes the
-first one found, so treat the prefilled RRP as a starting point to verify,
-not a guaranteed print list price.
+Both forms have an **Autofill** button next to the ASIN field (`/api/lookup`)
+that builds a full book profile from the ASIN/ISBN alone, before the user
+fills in anything else:
+
+- Title, author, series, and a best-effort list price — fills Book Title /
+  Author Name / Series Name / RRP directly.
+- **Category path** — Amazon's own breadcrumb hierarchy in order (e.g.
+  `Books › Mystery, Thriller & Suspense › Cozy › Culinary`), so genre and
+  subgenre are read off Amazon's own taxonomy rather than guessed at.
+- **Best Sellers Rank** — the actual rank numbers (`#12 in Cozy Mystery`),
+  not just the category names the rest of the pipeline uses.
+- **Description + bullets** — the publisher's own blurb, same extraction the
+  generate pipeline uses for comp-mention mining (`buildDescriptionCandidates`).
+- **A combined, deduped tag list** — every free source this app already
+  queries, pulled into one list on this first call: the category path,
+  Google Books categories, Open Library subjects, and Goodreads shelf tags.
+  Shown as removable chips on the Generate form (`app/page.tsx`) — prune
+  anything irrelevant, or add your own — and whatever's left when you hit
+  Generate is sent as `knownTags` on the request.
+
+`knownTags` isn't just informational — it's folded directly into keyword
+generation as a new high-trust `user-tag` source
+(`buildKnownTagCandidates` in `lib/keywordMerge.ts`, scored above an
+algorithmically-agreed-upon term since a human reviewed it) and used to seed
+buyer-intent templating, Datamuse synonym expansion, and the AI ranking
+step's book context. A human-curated genre list at the top of the funnel is
+meant to raise the floor on everything downstream, not just add one more
+source alongside the rest.
+
+This is a heavier call than the old title/author-only Autofill — it now
+also calls Google Books, Open Library, and Goodreads in parallel after the
+Amazon scrape, so `/api/lookup`'s `maxDuration` is 45s (vs 20s before) to
+give Goodreads' occasional two-hop lookup (search + book page) room. Series
+and price extraction remain best-effort (`extractSeriesName` /
+`extractPrice` in `lib/scrape.ts`) — Amazon shows several prices per page
+(Kindle/paperback/hardcover) and this just takes the first one found, so
+treat the prefilled RRP as a starting point to verify, not a guaranteed
+print list price.
+
+"Region" isn't part of this yet — the whole profile is scraped from
+whichever single marketplace is selected in the form. Cross-marketplace
+comparison (does this book rank differently on .com vs .co.uk?) would mean
+scraping the same ASIN across multiple domains, which isn't built — flag if
+that's worth adding.
 
 ## Setup
 

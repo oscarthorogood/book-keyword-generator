@@ -264,6 +264,8 @@ function extractIsbns($: cheerio.CheerioAPI): { isbn10?: string; isbn13?: string
 const EMPTY_PRODUCT_PAGE: ProductPageData = {
   compTitles: [],
   categories: [],
+  categoryPath: [],
+  bestSellerRanks: [],
   compAsins: [],
   reviewSnippets: [],
   bulletPoints: [],
@@ -440,18 +442,37 @@ export async function scrapeProductPage(
     });
 
     const categories = new Set<string>();
-    $("#wayfinding-breadcrumbs_feature_div a, #detailBulletsWrapper_feature_div a").each(
-      (_, el) => {
-        const text = $(el).text().trim();
-        if (text) categories.add(text);
+    // Ordered breadcrumb trail — Amazon's own hierarchy order, so the last
+    // couple of entries approximate genre -> subgenre without us having to
+    // guess at depth (categories go 2-5 levels deep depending on the node).
+    const categoryPath: string[] = [];
+    $("#wayfinding-breadcrumbs_feature_div a").each((_, el) => {
+      const text = $(el).text().trim();
+      if (text) {
+        categories.add(text);
+        categoryPath.push(text);
       }
-    );
+    });
+    $("#detailBulletsWrapper_feature_div a").each((_, el) => {
+      const text = $(el).text().trim();
+      if (text) categories.add(text);
+    });
+
+    // Best Sellers Rank — capturing the rank number, not just the category
+    // name, so the app can show "this book is #12 in Cozy Mystery" rather
+    // than just the category itself.
+    const bestSellerRanks: { rank: number; category: string }[] = [];
     $("#detailBulletsWrapper_feature_div li, #productDetails_detailBullets_sections1 tr").each(
       (_, el) => {
         const text = $(el).text().replace(/\s+/g, " ").trim();
         if (/Best Sellers Rank/i.test(text)) {
-          const matches = text.matchAll(/#[\d,]+\s+in\s+([A-Za-z0-9 &'\-]+)/g);
-          for (const m of matches) categories.add(m[1].trim());
+          const matches = text.matchAll(/#([\d,]+)\s+in\s+([A-Za-z0-9 &'\-]+)/g);
+          for (const m of matches) {
+            const category = m[2].trim();
+            categories.add(category);
+            const rank = parseInt(m[1].replace(/,/g, ""), 10);
+            if (Number.isFinite(rank)) bestSellerRanks.push({ rank, category });
+          }
         }
       }
     );
@@ -465,6 +486,8 @@ export async function scrapeProductPage(
       price: extractPrice($),
       compTitles: Array.from(compTitles).slice(0, 15),
       categories: Array.from(categories).slice(0, 15),
+      categoryPath,
+      bestSellerRanks: bestSellerRanks.slice(0, 10),
       compAsins: Array.from(compAsins).slice(0, 5),
       reviewSnippets: extractReviewSnippets($),
       description: extractDescription($),

@@ -1,18 +1,30 @@
 import { NextRequest, NextResponse } from "next/server";
+import { enrichBookMetadata } from "@/lib/bookMetadata";
+import { getGoodreadsTags } from "@/lib/goodreads";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { scrapeProductPage } from "@/lib/scrape";
 import { Marketplace } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 20;
+// Longer than the plain page scrape alone (20s) to give the parallel Google
+// Books / Open Library / Goodreads lookups room — Goodreads in particular
+// can chain two sequential fetches (search + book page) when there's no
+// direct ISBN match.
+export const maxDuration = 45;
 
 const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
 
 /**
- * Lightweight lookup used by the "Autofill" button on the Generate/Harvest
- * forms — scrapes just the target book's own product page (no comp crawl,
- * no keyword research) and returns title/author/series/price so the user
- * doesn't have to type them in by hand before they've even seen the book.
+ * Builds a full "book profile" from the ASIN/ISBN alone — used by the
+ * Autofill button on the Generate/Harvest forms. Beyond title/author/series/
+ * price, this now also surfaces genre/subgenre (Amazon's own category
+ * breadcrumb), Best Sellers Rank standings, the publisher's description +
+ * bullets, and a combined, deduped tag list pulled from every free source
+ * this app already knows how to query (Amazon categories, Google Books,
+ * Open Library, Goodreads shelves) — the idea being to front-load as much
+ * signal as possible into one reviewable step, which the user can then prune
+ * before it feeds the full keyword-generation pipeline (see knownTags on
+ * GenerateRequest and buildKnownTagCandidates in lib/keywordMerge.ts).
  */
 export async function GET(req: NextRequest) {
   const rawAsin = req.nextUrl.searchParams.get("asin") ?? "";
@@ -44,11 +56,38 @@ export async function GET(req: NextRequest) {
     );
   }
 
+  const [bookMetadata, goodreadsTags] = await Promise.all([
+    enrichBookMetadata({
+      isbn10: productPage.isbn10,
+      isbn13: productPage.isbn13,
+      title: productPage.title,
+      author: productPage.author,
+    }),
+    getGoodreadsTags(productPage.isbn10, productPage.title, productPage.author),
+  ]);
+
+  const tags = Array.from(
+    new Set(
+      [...productPage.categoryPath, ...bookMetadata.categories, ...bookMetadata.subjects, ...goodreadsTags]
+        .map((t) => t.trim())
+        .filter(Boolean)
+    )
+  );
+
   return NextResponse.json({
     asin,
     title: productPage.title,
     author: productPage.author,
     seriesName: productPage.seriesName,
     price: productPage.price,
+    description: productPage.description,
+    bulletPoints: productPage.bulletPoints,
+    categoryPath: productPage.categoryPath,
+    bestSellerRanks: productPage.bestSellerRanks,
+    compTitles: productPage.compTitles,
+    googleBooksCategories: bookMetadata.categories,
+    openLibrarySubjects: bookMetadata.subjects,
+    goodreadsTags,
+    tags,
   });
 }

@@ -14,6 +14,7 @@ import {
   buildCompTitleCandidates,
   buildDescriptionCandidates,
   buildGenreMetadataCandidates,
+  buildKnownTagCandidates,
   collapseNearDuplicates,
   COMP_NAME_MAX_KEYWORDS,
   extractAsinCandidates,
@@ -132,6 +133,11 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
     };
   }
 
+  const knownTags =
+    Array.isArray(b.knownTags) && b.knownTags.every((t) => typeof t === "string")
+      ? (b.knownTags as string[]).map((t) => t.trim()).filter(Boolean)
+      : undefined;
+
   return {
     value: {
       asin,
@@ -147,6 +153,7 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
       matchTypes,
       bidEconomics,
       defaultBid,
+      knownTags,
     },
   };
 }
@@ -287,7 +294,12 @@ export async function POST(req: NextRequest) {
   // name, high intent), their category placement is "comp-title" (thematic).
   const compTitleCandidates = buildCompTitleCandidates(productPage);
   const deepCompNameCandidates = buildCompNameCandidates(relatedCompetitors.competitors);
-  const buyerIntentCandidates = buildBuyerIntentCandidates(genreMetadataCandidates.map((c) => c.text), {
+  // Tags the user reviewed/kept on the Autofill book profile — high-trust,
+  // human-vetted genre/subgenre/tag signal, folded into both the seed terms
+  // below and the final candidate pool. See buildKnownTagCandidates.
+  const knownTagCandidates = buildKnownTagCandidates(request.knownTags ?? []);
+  const genreSeedTerms = [...genreMetadataCandidates.map((c) => c.text), ...(request.knownTags ?? [])];
+  const buyerIntentCandidates = buildBuyerIntentCandidates(genreSeedTerms, {
     title: request.bookTitle,
     author: request.authorName,
     seriesName: request.seriesName,
@@ -303,12 +315,13 @@ export async function POST(req: NextRequest) {
   ]);
 
   // Two more free, low-risk sources: Datamuse (a real API, no scraping risk)
-  // for synonym expansion of the genre/trope terms already found, and a
-  // best-effort Goodreads lookup for community-tagged tropes/genres — the
-  // richest free source of exact fiction reader vocabulary, but a scrape
-  // with the same fragility/blocking caveats as the Amazon ones above.
+  // for synonym expansion of the genre/trope terms already found (now
+  // including user-curated tags), and a best-effort Goodreads lookup for
+  // community-tagged tropes/genres — the richest free source of exact
+  // fiction reader vocabulary, but a scrape with the same fragility/blocking
+  // caveats as the Amazon ones above.
   const [synonymCandidates, goodreadsTags] = await Promise.all([
-    getSynonymExpansionCandidates(genreMetadataCandidates.map((c) => c.text)),
+    getSynonymExpansionCandidates(genreSeedTerms),
     getGoodreadsTags(productPage.isbn10, request.bookTitle, request.authorName),
   ]);
   const goodreadsTagCandidates = buildGoodreadsTagCandidates(goodreadsTags);
@@ -327,6 +340,11 @@ export async function POST(req: NextRequest) {
     source: "genre-metadata",
     ok: genreMetadataCandidates.length > 0,
     count: genreMetadataCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "user-tag",
+    ok: knownTagCandidates.length > 0,
+    count: knownTagCandidates.length,
   });
   sourceStatuses.push({
     source: "buyer-intent",
@@ -365,6 +383,7 @@ export async function POST(req: NextRequest) {
     googleAutocompleteKeywords,
     compTitleCandidates,
     deepCompNameCandidates,
+    knownTagCandidates,
     genreMetadataCandidates,
     bookContentCandidates,
     buyerIntentCandidates,
@@ -407,7 +426,7 @@ export async function POST(req: NextRequest) {
         title: request.bookTitle,
         author: request.authorName,
         seriesName: request.seriesName,
-        genreTerms: genreMetadataCandidates.map((c) => c.text),
+        genreTerms: genreSeedTerms,
         description: productPage.description,
         pageMarkdown: firecrawlMarkdown,
       },

@@ -170,6 +170,24 @@ export function buildCompNameCandidates(competitors: RelatedCompetitor[]): Keywo
   return Array.from(texts).map((text) => ({ text, sources: ["comp-name" as const] }));
 }
 
+/**
+ * Tags the user reviewed and kept on the Autofill book profile (genre/
+ * subgenre from Amazon's category breadcrumb, Google Books categories, Open
+ * Library subjects, Goodreads shelves — see /api/lookup) get folded straight
+ * into the tropes candidate pool as their own high-trust source, and also
+ * seed buyer-intent templating and Datamuse synonym expansion in the
+ * generate route. A human already vetted these, so they skip the usual
+ * generic-term filtering that would otherwise drop a short tag like "cozy".
+ */
+export function buildKnownTagCandidates(tags: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const tag of tags) {
+    const normalized = normalize(tag);
+    if (normalized.length >= 2 && normalized.length <= 80) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["user-tag" as const] }));
+}
+
 // Patterns publishers/authors use to explicitly name comparable authors or
 // titles in a book's own blurb — a hand-picked, high-confidence signal
 // nothing else here sources (comp-title/comp-name come from Amazon's
@@ -430,6 +448,10 @@ export function scoreAndTierBids(
 
       let score = sourceCount * 2 + phraseLengthScore(wordCount);
       if (candidate.sources.includes("ads-api")) score += 3;
+      // A human reviewed and kept this tag on the Autofill book profile —
+      // worth trusting more than an algorithmically-agreed-upon term, though
+      // not as much as real Ads API bid data.
+      if (candidate.sources.includes("user-tag")) score += 2;
 
       let suggestedBid = candidate.suggestedBid;
       if (suggestedBid === undefined) {

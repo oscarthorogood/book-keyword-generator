@@ -48,6 +48,19 @@ export default function Home() {
   const [autofillStatus, setAutofillStatus] = useState<"idle" | "loading" | "error">("idle");
   const [autofillError, setAutofillError] = useState<string | null>(null);
 
+  // Book profile gathered by Autofill — genre/subgenre path, Best Sellers
+  // Rank standings, description, and a combined, prunable tag list from
+  // every free source (Amazon categories, Google Books, Open Library,
+  // Goodreads). The reviewed tag list feeds keyword generation as
+  // knownTags — see buildKnownTagCandidates in lib/keywordMerge.ts.
+  const [profileCategoryPath, setProfileCategoryPath] = useState<string[]>([]);
+  const [profileBestSellerRanks, setProfileBestSellerRanks] = useState<
+    { rank: number; category: string }[]
+  >([]);
+  const [profileDescription, setProfileDescription] = useState<string | null>(null);
+  const [profileTags, setProfileTags] = useState<string[]>([]);
+  const [newTagInput, setNewTagInput] = useState("");
+
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceStatus[] | null>(null);
@@ -110,12 +123,28 @@ export default function Home() {
         setRrp(body.price.toFixed(2));
         setUseRrpBidding(true);
       }
+      setProfileCategoryPath(Array.isArray(body.categoryPath) ? body.categoryPath : []);
+      setProfileBestSellerRanks(Array.isArray(body.bestSellerRanks) ? body.bestSellerRanks : []);
+      setProfileDescription(typeof body.description === "string" ? body.description : null);
+      setProfileTags(Array.isArray(body.tags) ? body.tags : []);
 
       setAutofillStatus("idle");
     } catch (err) {
       setAutofillError(err instanceof Error ? err.message : "Something went wrong.");
       setAutofillStatus("error");
     }
+  }
+
+  function removeTag(tag: string) {
+    setProfileTags((prev) => prev.filter((t) => t !== tag));
+  }
+
+  function addTag() {
+    const trimmed = newTagInput.trim().toLowerCase();
+    if (trimmed && !profileTags.includes(trimmed)) {
+      setProfileTags((prev) => [...prev, trimmed]);
+    }
+    setNewTagInput("");
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -142,6 +171,7 @@ export default function Home() {
         dailyBudget: Number(dailyBudget),
         startDate,
         matchTypes,
+        knownTags: profileTags,
       };
       if (useRrpBidding) {
         body.bidEconomics = {
@@ -341,6 +371,79 @@ export default function Home() {
             <p className="text-xs text-neutral-500 -mt-3">
               Campaign name: <code className="text-neutral-700 dark:text-neutral-300">{previewName}</code>
             </p>
+          )}
+
+          {(profileCategoryPath.length > 0 ||
+            profileBestSellerRanks.length > 0 ||
+            profileDescription ||
+            profileTags.length > 0) && (
+            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 p-4 space-y-3">
+              <p className="text-sm font-medium">Book Profile (from Autofill)</p>
+
+              {profileCategoryPath.length > 0 && (
+                <p className="text-xs text-neutral-500">
+                  <span className="font-medium text-neutral-600 dark:text-neutral-400">Category: </span>
+                  {profileCategoryPath.join(" › ")}
+                </p>
+              )}
+
+              {profileBestSellerRanks.length > 0 && (
+                <div className="text-xs text-neutral-500">
+                  <span className="font-medium text-neutral-600 dark:text-neutral-400">Best Sellers Rank: </span>
+                  {profileBestSellerRanks
+                    .map((r) => `#${r.rank.toLocaleString()} in ${r.category}`)
+                    .join(", ")}
+                </div>
+              )}
+
+              {profileDescription && (
+                <p className="text-xs text-neutral-500 line-clamp-3">
+                  <span className="font-medium text-neutral-600 dark:text-neutral-400">Description: </span>
+                  {profileDescription}
+                </p>
+              )}
+
+              <div>
+                <p className="text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">
+                  Tags ({profileTags.length}) — reviewed here feed keyword generation directly. Remove
+                  any that don&apos;t fit.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-2">
+                  {profileTags.map((tag) => (
+                    <button
+                      key={tag}
+                      type="button"
+                      onClick={() => removeTag(tag)}
+                      title="Remove tag"
+                      className="text-xs rounded-full border border-neutral-300 dark:border-neutral-700 px-2.5 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
+                    >
+                      {tag} ×
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={newTagInput}
+                    onChange={(e) => setNewTagInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addTag();
+                      }
+                    }}
+                    placeholder="Add a tag"
+                    className="input text-xs"
+                  />
+                  <button
+                    type="button"
+                    onClick={addTag}
+                    className="shrink-0 rounded-md border border-neutral-300 dark:border-neutral-700 px-3 text-xs"
+                  >
+                    Add
+                  </button>
+                </div>
+              </div>
+            </div>
           )}
 
           <div className="grid grid-cols-2 gap-4">
