@@ -226,6 +226,20 @@ better one:
   (`PRODUCT_TARGET_MAX` in `lib/productTargets.ts`) — both independent of the
   Tropes cap since they're now separate ad groups, not one shared budget.
 
+## Autofill from ASIN
+
+Both forms have an **Autofill** button next to the ASIN field
+(`/api/lookup`) that scrapes just the target book's own product page —
+title, author, series, and a best-effort list price — and fills in Book
+Title / Author Name / Series Name / RRP. It's a lighter-weight version of
+the full product-page scrape in the generate pipeline (no comp crawl, no
+keyword research), so it responds quickly enough to run before the user
+fills in the rest of the form. Series and price extraction are best-effort
+(`extractSeriesName` / `extractPrice` in `lib/scrape.ts`) — Amazon shows
+several prices per page (Kindle/paperback/hardcover) and this just takes the
+first one found, so treat the prefilled RRP as a starting point to verify,
+not a guaranteed print list price.
+
 ## Setup
 
 ```bash

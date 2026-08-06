@@ -249,10 +249,57 @@ function extractReviewSnippets($: cheerio.CheerioAPI): string[] {
 }
 
 /**
- * Scrapes the book's own Amazon product page for title/author/ISBN plus
- * thematic context: "customers also bought" titles + their ASINs, and
- * category/best-seller placement text. Best-effort — returns whatever it can
- * find, empty arrays on total failure.
+ * Amazon's series widget shows text like "Book 3 of 12: Kill Squad" near the
+ * byline — tries a few plausible selectors and strips the leading "Book N of
+ * M:" prefix, since the naming convention wants the series name alone.
+ */
+function extractSeriesName($: cheerio.CheerioAPI): string | undefined {
+  const selectors = [
+    "#seriesBulletWidget_feature_div a",
+    '[data-feature-name="seriesTitle"] a',
+    "#series-title .a-size-medium",
+    "#SeriesSubtitle a",
+  ];
+
+  for (const selector of selectors) {
+    const raw = $(selector).first().text().replace(/\s+/g, " ").trim();
+    if (!raw) continue;
+    const stripped = raw.replace(/^book\s+\d+(\.\d+)?\s+of\s+\d+\s*:\s*/i, "").trim();
+    if (stripped) return stripped;
+  }
+  return undefined;
+}
+
+/**
+ * Best-effort list price scrape for prefilling the RRP field in the form.
+ * Amazon shows several prices on one page (Kindle/paperback/hardcover); this
+ * just grabs the first one found rather than picking a specific format, so
+ * treat the prefilled value as a starting point to double-check, not a
+ * guaranteed print RRP.
+ */
+function extractPrice($: cheerio.CheerioAPI): number | undefined {
+  const selectors = [
+    "#corePriceDisplay_desktop_feature_div .a-price .a-offscreen",
+    "#tmmSwatches .a-price .a-offscreen",
+    ".a-price .a-offscreen",
+  ];
+
+  for (const selector of selectors) {
+    const text = $(selector).first().text().trim();
+    const match = text.match(/[\d,]+\.\d{2}/);
+    if (!match) continue;
+    const value = parseFloat(match[0].replace(/,/g, ""));
+    if (Number.isFinite(value)) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Scrapes the book's own Amazon product page for title/author/ISBN/series/
+ * price plus thematic context: "customers also bought" titles + their
+ * ASINs, category/best-seller placement text, and review excerpts.
+ * Best-effort — returns whatever it can find, empty arrays/undefined fields
+ * on total failure.
  */
 export async function scrapeProductPage(
   asin: string,
@@ -324,6 +371,8 @@ export async function scrapeProductPage(
       author,
       isbn10,
       isbn13,
+      seriesName: extractSeriesName($),
+      price: extractPrice($),
       compTitles: Array.from(compTitles).slice(0, 15),
       categories: Array.from(categories).slice(0, 15),
       compAsins: Array.from(compAsins).slice(0, 5),

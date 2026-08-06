@@ -44,6 +44,9 @@ export default function Home() {
   const [estConversionRatePct, setEstConversionRatePct] = useState("8");
   const [defaultBid, setDefaultBid] = useState("0.75");
 
+  const [autofillStatus, setAutofillStatus] = useState<"idle" | "loading" | "error">("idle");
+  const [autofillError, setAutofillError] = useState<string | null>(null);
+
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceStatus[] | null>(null);
@@ -71,6 +74,44 @@ export default function Home() {
     setMatchTypes((prev) =>
       prev.includes(value) ? prev.filter((m) => m !== value) : [...prev, value]
     );
+  }
+
+  async function handleAutofill() {
+    const trimmed = asin.trim().toUpperCase();
+    if (!/^[A-Z0-9]{10}$/.test(trimmed)) {
+      setAutofillError("Enter a valid 10-character ASIN first.");
+      setAutofillStatus("error");
+      return;
+    }
+
+    setAutofillStatus("loading");
+    setAutofillError(null);
+
+    try {
+      const res = await fetch(
+        `/api/lookup?asin=${encodeURIComponent(trimmed)}&marketplace=${marketplace}`
+      );
+      const body = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        setAutofillError(body.error ?? `Lookup failed (${res.status}).`);
+        setAutofillStatus("error");
+        return;
+      }
+
+      if (body.title) setBookTitle(body.title);
+      if (body.author) setAuthorName(body.author);
+      if (body.seriesName) setSeriesName(body.seriesName);
+      if (typeof body.price === "number") {
+        setRrp(body.price.toFixed(2));
+        setUseRrpBidding(true);
+      }
+
+      setAutofillStatus("idle");
+    } catch (err) {
+      setAutofillError(err instanceof Error ? err.message : "Something went wrong.");
+      setAutofillStatus("error");
+    }
   }
 
   async function handleSubmit(e: FormEvent) {
@@ -198,14 +239,30 @@ export default function Home() {
           </Field>
 
           <Field label="ASIN">
-            <input
-              required
-              value={asin}
-              onChange={(e) => setAsin(e.target.value)}
-              placeholder="B0XXXXXXXX"
-              maxLength={10}
-              className="input"
-            />
+            <div className="flex gap-2">
+              <input
+                required
+                value={asin}
+                onChange={(e) => setAsin(e.target.value)}
+                placeholder="B0XXXXXXXX"
+                maxLength={10}
+                className="input"
+              />
+              <button
+                type="button"
+                onClick={handleAutofill}
+                disabled={autofillStatus === "loading"}
+                className="shrink-0 rounded-md border border-neutral-300 dark:border-neutral-700 px-3 text-sm disabled:opacity-50"
+              >
+                {autofillStatus === "loading" ? "Looking up…" : "Autofill"}
+              </button>
+            </div>
+            <span className="block text-xs text-neutral-500 mt-1">
+              Scrapes the product page to fill in Author, Title, Series, and RRP below.
+            </span>
+            {autofillStatus === "error" && autofillError && (
+              <span className="block text-xs text-red-600 dark:text-red-400 mt-1">{autofillError}</span>
+            )}
           </Field>
 
           <Field label="Marketplace">

@@ -83,6 +83,9 @@ export interface ProductPageData {
   author?: string;
   isbn10?: string;
   isbn13?: string;
+  seriesName?: string;
+  /** Best-effort list price scrape, for prefilling the RRP field — not guaranteed to be the print RRP specifically. */
+  price?: number;
   compTitles: string[]; // "customers also bought" style titles
   categories: string[]; // browse node / bestseller category text
   compAsins: string[]; // ASINs of "customers also bought" titles, for the deep competitor crawl
