@@ -26,25 +26,29 @@ out. Gated behind HTTP Basic Auth for private/single-user use.
   cheap discovery step — run it first, let it collect data, then harvest.
 - **Manual (SPM):**
   1. Scrapes the book's own Amazon product page for ISBN, "customers also
-     bought" comp titles + their ASINs, category/best-seller placement, and
-     top-review excerpts.
+     bought" comp titles + their ASINs, category/best-seller placement,
+     top-review excerpts, and the publisher's own description + bullets.
   2. Crawls a hop past the immediate comp titles — each comp's own "also
-     bought" carousel — for more direct competitors' author, title, and ASIN
-     (bounded: up to 5 first-hop + 6 second-hop pages), approximating the
-     research blueprint's best-seller deep dive.
+     bought" carousel — for more direct competitors' author, title, ASIN,
+     *and* review text (bounded: up to 5 first-hop + 6 second-hop pages),
+     approximating the research blueprint's best-seller deep dive.
   3. In parallel: calls the Amazon Ads API keyword-recommendations endpoint,
      sweeps Amazon's *and* Google's unofficial autocomplete endpoints across
      dozens of seed phrases (title, format/series-order/recency modifiers,
      title + a–z *and* a–z + title — see "Keyword generation" below), looks
-     up the book in Google Books + Open Library for genre/subject data, and
+     up the book in Google Books + Open Library for genre/subject data,
      scrapes Google Books' "About this book" page for its content-derived
-     "Common terms and phrases" list.
+     "Common terms and phrases" list, and looks up the book on Goodreads for
+     community-tagged trope/genre shelves.
   4. All sources degrade gracefully — if one fails (no Ads API credentials, a
      blocked scrape, no ISBN match), the app carries on with whatever the
      other sources returned instead of failing the whole request.
-  5. Templates genre/subject terms into buyer-intent phrases, mines recurring
-     phrases out of review excerpts, and generates format/series-order/recency
-     modifiers seeded from real search term data.
+  5. Templates genre/subject terms into buyer-intent phrases and Datamuse
+     synonym expansions, mines recurring phrases out of review excerpts
+     pooled across the seed book *and* every deep-crawled comp title, pulls
+     explicit comp mentions ("perfect for fans of X") out of the book's own
+     blurb, and generates format/series-order/recency modifiers seeded from
+     real search term data.
   6. Merges everything, filters junk (generic terms, scraped-page boilerplate,
      garbled/bot queries), collapses near-duplicates, routes bare-ASIN
      "keywords"/ASIN-shaped candidates to product targeting instead of
@@ -160,19 +164,44 @@ better one:
 - **Deep 2-hop "also bought" crawl** (`scrapeRelatedCompetitors` in
   `lib/scrape.ts`) — goes past the target book's own comp-title carousel to
   each comp's *own* carousel, harvesting more directly comparable books'
-  author, title, and ASIN (bounded: 5 first-hop + 6 second-hop pages), an
-  automated approximation of the research blueprint's best-seller deep dive.
-  There's no way to automate the blueprint's "3-second rule" fit check
-  (subgenre/tone/cover match) — this surfaces candidates for the scoring
-  pipeline to rank, not a pre-vetted competitor list.
-- **Review/blurb language mining** (`mineReviewLanguage` in
-  `lib/reviewMining.ts`) — frequency-counts recurring 2-4 word phrases across
-  the review excerpts embedded on the product page (e.g. "slow burn",
-  "locked room mystery"), on the theory that readers describe books
-  differently than authors do. Only the 5-star-adjacent "recurring buzzword"
-  half of the blueprint's review-mining step is automated; the 3-star "gap
-  analysis" read ("I was hoping for more X") needs genuine reading
-  comprehension, not phrase counting, and is left as a manual step.
+  author, title, ASIN, and review text (bounded: 5 first-hop + 6 second-hop
+  pages), an automated approximation of the research blueprint's best-seller
+  deep dive. There's no way to automate the blueprint's "3-second rule" fit
+  check (subgenre/tone/cover match) — this surfaces candidates for the
+  scoring pipeline to rank, not a pre-vetted competitor list.
+- **Review/blurb language mining, pooled across comps** (`mineReviewLanguage`
+  in `lib/reviewMining.ts`) — frequency-counts recurring 2-4 word phrases
+  (e.g. "slow burn", "locked room mystery") across review excerpts pooled
+  from the seed book *and* every deep-crawled comp title, not just the seed
+  book's own (often review-sparse) page — a phrase recurring across several
+  bestselling comps' reviews is a stronger signal than one repeating within
+  a single book's handful of reviews. Only the 5-star-adjacent "recurring
+  buzzword" half of the blueprint's review-mining step is automated; the
+  3-star "gap analysis" read ("I was hoping for more X") needs genuine
+  reading comprehension, not phrase counting, and is left as a manual step.
+- **Book description + bullet mining** (`buildDescriptionCandidates` in
+  `lib/keywordMerge.ts`) — the publisher/author's own blurb and "About this
+  item" bullets, never previously scraped. Explicit comp mentions ("perfect
+  for fans of Richard Osman") become high-confidence comp-name candidates;
+  short (2-8 word) bullets are taken as candidates directly rather than
+  n-gram-mined for sub-phrases, since a single blurb doesn't repeat itself
+  the way review text does — a frequency filter would zero everything out.
+- **Datamuse synonym expansion** (`getSynonymExpansionCandidates` in
+  `lib/datamuse.ts`) — a free, no-key, no-scraping-risk API
+  ([api.datamuse.com](https://api.datamuse.com)) that expands the top
+  genre/trope terms into related words ("detective" → "sleuth",
+  "investigator", "gumshoe") the alphabet-soup sweep can't reach because
+  they don't share a prefix with anything already seeded.
+- **Goodreads trope/shelf tags** (`getGoodreadsTags` in `lib/goodreads.ts`)
+  — looks the book up by ISBN (falling back to a title+author search) and
+  scrapes its community-tagged genre/trope shelves ("enemies-to-lovers",
+  "found-family", "cozy-mystery") — arguably the richest free source of
+  exact fiction trope vocabulary, since it's crowd-tagged rather than
+  inferred. Unverified against live Goodreads markup (same caveat as every
+  other DOM-shape guess in this app) and routes through the same
+  `SCRAPER_PROXY_API_KEY` as the Amazon scrapes if configured, since it's
+  unconfirmed whether Goodreads (Amazon-owned, separate infra) blocks
+  cloud IPs the same way.
 - **Google autocomplete sweep** (`getGoogleAutocompleteKeywordSet` in
   `lib/scrape.ts`) — the same alphabet-soup seeding, but against Google's own
   unofficial search-suggest endpoint instead of Amazon's, to surface what
@@ -299,20 +328,21 @@ see `scrapeProductPage` in `lib/scrape.ts`), and `/api/lookup` returns a
 
 The fix: set `SCRAPER_PROXY_API_KEY` to a [ScraperAPI](https://www.scraperapi.com)
 key (free tier is ~1,000 requests/month, plenty for single-user use). When
-set, `scrapeProductPage`'s fetch routes through ScraperAPI's residential/
-rotating-IP proxy (`resolveProductPageFetchUrl` in `lib/scrape.ts`) instead of
-hitting `amazon.com` directly; unset, it falls back to a direct fetch (fine
-for local dev). This is scoped to the full product-page HTML fetch only —
-**not** the autocomplete JSON endpoints (`getAutocompleteSuggestions`), which
-run dozens of times per generate call and would burn through a proxy's free
-tier fast, and it's unconfirmed whether Amazon blocks those the same way. If
-you find autocomplete is *also* blocked on your deployment, the same
-`resolveProductPageFetchUrl` pattern can be applied there — check server logs
-first (`[scrapeProductPage] ... -> HTTP ...` / `... bot/CAPTCHA check`) to
-confirm before spending proxy credits on it.
+set, `scrapeProductPage`'s fetch — and the Goodreads lookup in
+`lib/goodreads.ts` — route through ScraperAPI's residential/rotating-IP proxy
+(`resolveScraperProxyUrl` in `lib/scrape.ts`) instead of hitting the target
+directly; unset, both fall back to a direct fetch (fine for local dev). This
+is scoped to full-page HTML fetches only — **not** the autocomplete JSON
+endpoints (`getAutocompleteSuggestions`) or the Datamuse API, which run
+dozens of times per generate call and would burn through a proxy's free tier
+fast, and it's unconfirmed whether Amazon blocks the autocomplete endpoint
+the same way it blocks the product page. If you find autocomplete is *also*
+blocked on your deployment, the same `resolveScraperProxyUrl` pattern can be
+applied there — check server logs first (`[scrapeProductPage] ... -> HTTP
+...` / `... bot/CAPTCHA check`) to confirm before spending proxy credits on it.
 
 To swap in a different proxy provider (ScrapingBee, ZenRows, Bright Data,
-etc.), edit `resolveProductPageFetchUrl` — most use a similar
+etc.), edit `resolveScraperProxyUrl` in `lib/scrape.ts` — most use a similar
 `?api_key=...&url=...` query-param shape.
 
 ## Known open items
@@ -362,6 +392,18 @@ etc.), edit `resolveProductPageFetchUrl` — most use a similar
   `review-collapsed` markup; if Amazon restructures the reviews section, this
   degrades to "no review-language candidates," not an error. Spot-check the
   `review-language` source count after deploy.
+- **Description/bullet selectors are unverified too** — `extractDescription`
+  / `extractBulletPoints` in `lib/scrape.ts` target
+  `#bookDescription_feature_div` / `#feature-bullets`, current as of writing
+  but not confirmed against a live page. Same fail-soft behavior as
+  everything else here.
+- **Goodreads markup is unverified and its blocking behavior unknown** —
+  `extractShelfTags` in `lib/goodreads.ts` guesses at current Goodreads
+  genre-tag selectors, and whether Goodreads applies the same datacenter-IP
+  blocking Amazon does (it's Amazon-owned but separate infra) is untested.
+  Spot-check the `goodreads-tags` source count after deploy; if it's
+  consistently empty even with `SCRAPER_PROXY_API_KEY` set, the selectors
+  are the more likely culprit than blocking.
 - **Deep-crawl request budget is a judgment call, not a measured one** —
   5 first-hop + 6 second-hop page scrapes (`FIRST_HOP_ASIN_LIMIT` /
   `SECOND_HOP_ASIN_LIMIT` in `lib/scrape.ts`) run concurrently within the

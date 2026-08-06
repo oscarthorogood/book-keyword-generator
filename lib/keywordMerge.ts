@@ -170,6 +170,69 @@ export function buildCompNameCandidates(competitors: RelatedCompetitor[]): Keywo
   return Array.from(texts).map((text) => ({ text, sources: ["comp-name" as const] }));
 }
 
+// Patterns publishers/authors use to explicitly name comparable authors or
+// titles in a book's own blurb — a hand-picked, high-confidence signal
+// nothing else here sources (comp-title/comp-name come from Amazon's
+// algorithmic "also bought" carousel, not the publisher's own marketing copy).
+const COMPARABLE_MENTION_PATTERNS = [
+  /for (?:fans|readers) of ([^.,;\n]+)/gi,
+  /perfect for (?:fans|readers) of ([^.,;\n]+)/gi,
+  /if you (?:loved|enjoyed|love|enjoy) ([^.,;\n]+)/gi,
+  /in the tradition of ([^.,;\n]+)/gi,
+  /reminiscent of ([^.,;\n]+)/gi,
+];
+
+function extractComparableMentions(text: string): string[] {
+  const names = new Set<string>();
+  for (const pattern of COMPARABLE_MENTION_PATTERNS) {
+    for (const match of text.matchAll(pattern)) {
+      const parts = match[1].split(/,| and | & /i);
+      for (const part of parts) {
+        const normalized = normalize(part);
+        if (isUsableKeyword(normalized)) names.add(normalized);
+      }
+    }
+  }
+  return Array.from(names);
+}
+
+/**
+ * Mines the book's own Amazon description + "About this item" bullets —
+ * marketing copy the app didn't previously look at. Two different
+ * treatments for two different kinds of signal:
+ *  - Explicit comp mentions ("perfect for fans of Richard Osman") become
+ *    comp-name candidates — as high-confidence as the deep-crawl comp names,
+ *    just hand-picked by the publisher instead of inferred from a carousel.
+ *  - Bullets are taken as candidates directly rather than n-gram-mined for
+ *    sub-phrases (like review-language does) — a single blurb doesn't repeat
+ *    itself, so a frequency filter would zero everything out. Amazon's
+ *    feature-bullets for books are often already short marketing phrases in
+ *    their own right, so a short (2-8 word) bullet is trustworthy as-is.
+ */
+export function buildDescriptionCandidates(
+  description: string | undefined,
+  bulletPoints: string[]
+): KeywordCandidate[] {
+  const fullText = [description, ...bulletPoints].filter((t): t is string => !!t).join(". ");
+  const compNames = extractComparableMentions(fullText).map((text) => ({
+    text,
+    sources: ["comp-name" as const],
+  }));
+
+  const seen = new Set<string>();
+  const descriptive: KeywordCandidate[] = [];
+  for (const bullet of bulletPoints) {
+    const wordCount = bullet.trim().split(/\s+/).length;
+    if (wordCount < 2 || wordCount > 8) continue;
+    const normalized = normalize(bullet.replace(/\.$/, ""));
+    if (!isUsableKeyword(normalized) || seen.has(normalized)) continue;
+    seen.add(normalized);
+    descriptive.push({ text: normalized, sources: ["book-description" as const] });
+  }
+
+  return [...compNames, ...descriptive];
+}
+
 /**
  * Splits a finalized keyword list into the two Manual-campaign ad group
  * buckets the research blueprint recommends tracking separately: bare

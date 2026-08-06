@@ -37,28 +37,30 @@ const USER_AGENT =
 
 // Amazon blocks/CAPTCHAs product-page requests from datacenter IPs (Vercel,
 // AWS, etc.) at the network level — see lib/scrape.ts's looksLikeBotCheck.
-// When set, routes just the full product-page HTML fetch (scrapeProductPage)
-// through ScraperAPI's residential/rotating-IP proxy instead of hitting
-// Amazon directly. NOT applied to the autocomplete JSON endpoints below —
-// those run dozens of times per generate call, which would burn through a
-// proxy's free tier fast, and it's unconfirmed whether they're even blocked
-// the same way. Unset (local dev, usually a residential IP) falls back to a
-// direct fetch.
-const SCRAPER_PROXY_API_KEY = process.env.SCRAPER_PROXY_API_KEY;
+// When set, routes full-page HTML fetches (scrapeProductPage, and
+// lib/goodreads.ts) through ScraperAPI's residential/rotating-IP proxy
+// instead of hitting the target directly. NOT applied to the autocomplete
+// JSON endpoints below — those run dozens of times per generate call, which
+// would burn through a proxy's free tier fast, and it's unconfirmed whether
+// they're even blocked the same way. Unset (local dev, usually a
+// residential IP) falls back to a direct fetch everywhere.
+export const SCRAPER_PROXY_API_KEY = process.env.SCRAPER_PROXY_API_KEY;
 
-function resolveProductPageFetchUrl(targetUrl: string, marketplace: Marketplace): string {
+/** Generic ScraperAPI URL wrapper — pass a country_code when the target is country-specific (e.g. an Amazon marketplace domain). */
+export function resolveScraperProxyUrl(targetUrl: string, countryCode?: string): string {
   if (!SCRAPER_PROXY_API_KEY) return targetUrl;
-  const params = new URLSearchParams({
-    api_key: SCRAPER_PROXY_API_KEY,
-    url: targetUrl,
-    country_code: SCRAPER_PROXY_COUNTRY[marketplace],
-  });
+  const params = new URLSearchParams({ api_key: SCRAPER_PROXY_API_KEY, url: targetUrl });
+  if (countryCode) params.set("country_code", countryCode);
   return `https://api.scraperapi.com/?${params.toString()}`;
 }
 
-const PAGE_TIMEOUT_MS = 8000;
-// Proxied requests add relay latency on top of Amazon's own response time.
-const PROXIED_PAGE_TIMEOUT_MS = 20000;
+function resolveProductPageFetchUrl(targetUrl: string, marketplace: Marketplace): string {
+  return resolveScraperProxyUrl(targetUrl, SCRAPER_PROXY_COUNTRY[marketplace]);
+}
+
+export const PAGE_TIMEOUT_MS = 8000;
+// Proxied requests add relay latency on top of the target site's own response time.
+export const PROXIED_PAGE_TIMEOUT_MS = 20000;
 const AUTOCOMPLETE_TIMEOUT_MS = 4000;
 
 async function fetchWithTimeout(
@@ -264,6 +266,7 @@ const EMPTY_PRODUCT_PAGE: ProductPageData = {
   categories: [],
   compAsins: [],
   reviewSnippets: [],
+  bulletPoints: [],
 };
 
 /**
@@ -279,6 +282,26 @@ function extractReviewSnippets($: cheerio.CheerioAPI): string[] {
     if (text.length > 15) snippets.add(text);
   });
   return Array.from(snippets).slice(0, 20);
+}
+
+/**
+ * The publisher/author's own blurb — never looked at before this. Explicit
+ * comp mentions in here ("perfect for fans of X") are a high-confidence
+ * signal; see buildDescriptionCandidates in lib/keywordMerge.ts.
+ */
+function extractDescription($: cheerio.CheerioAPI): string | undefined {
+  const text = $("#bookDescription_feature_div").first().text().replace(/\s+/g, " ").trim();
+  return text || undefined;
+}
+
+/** Amazon's "About this item" feature bullets — often short marketing phrases in their own right, not just sentence fragments. */
+function extractBulletPoints($: cheerio.CheerioAPI): string[] {
+  const bullets = new Set<string>();
+  $("#feature-bullets li span.a-list-item").each((_, el) => {
+    const text = $(el).text().replace(/\s+/g, " ").trim();
+    if (text) bullets.add(text);
+  });
+  return Array.from(bullets).slice(0, 15);
 }
 
 /**
@@ -440,6 +463,8 @@ export async function scrapeProductPage(
       categories: Array.from(categories).slice(0, 15),
       compAsins: Array.from(compAsins).slice(0, 5),
       reviewSnippets: extractReviewSnippets($),
+      description: extractDescription($),
+      bulletPoints: extractBulletPoints($),
       fetchStatus: res.status,
     };
   } catch (err) {
@@ -469,7 +494,7 @@ export async function scrapeRelatedCompetitors(
 ): Promise<RelatedCompetitorCrawl> {
   const firstHopAsins = compAsins.slice(0, FIRST_HOP_ASIN_LIMIT);
   if (firstHopAsins.length === 0) {
-    return { categories: [], competitors: [], productTargetAsins: [] };
+    return { categories: [], competitors: [], productTargetAsins: [], reviewSnippets: [] };
   }
 
   const firstHopPages = await mapWithConcurrency(firstHopAsins, firstHopAsins.length, (asin) =>
@@ -479,11 +504,17 @@ export async function scrapeRelatedCompetitors(
   const categories = new Set<string>();
   const competitors = new Map<string, RelatedCompetitor>();
   const secondHopCandidates = new Set<string>();
+  // Pooling review text across every crawled comp title, not just the seed
+  // book — a phrase that recurs across several bestselling comps' reviews is
+  // a much stronger signal than one repeating within a single (often
+  // review-sparse) book's own reviews. See lib/reviewMining.ts.
+  const reviewSnippets: string[] = [];
 
   firstHopAsins.forEach((asin, i) => {
     const page = firstHopPages[i];
     for (const category of page.categories) categories.add(category);
     if (page.title || page.author) competitors.set(asin, { asin, author: page.author, title: page.title });
+    reviewSnippets.push(...page.reviewSnippets);
     for (const compAsin of page.compAsins) {
       if (compAsin !== seedAsin && !firstHopAsins.includes(compAsin)) secondHopCandidates.add(compAsin);
     }
@@ -497,6 +528,7 @@ export async function scrapeRelatedCompetitors(
     secondHopAsins.forEach((asin, i) => {
       const page = secondHopPages[i];
       if (page.title || page.author) competitors.set(asin, { asin, author: page.author, title: page.title });
+      reviewSnippets.push(...page.reviewSnippets);
     });
   }
 
@@ -504,5 +536,6 @@ export async function scrapeRelatedCompetitors(
     categories: Array.from(categories),
     competitors: Array.from(competitors.values()),
     productTargetAsins: [...firstHopAsins, ...secondHopAsins],
+    reviewSnippets,
   };
 }

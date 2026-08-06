@@ -3,11 +3,14 @@ import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazo
 import { AD_GROUP_BID_MULTIPLIER, computeMaxCpc, round2 } from "@/lib/bidding";
 import { enrichBookMetadata } from "@/lib/bookMetadata";
 import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
+import { getSynonymExpansionCandidates } from "@/lib/datamuse";
+import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
 import {
   buildBookContentCandidates,
   buildBuyerIntentCandidates,
   buildCompNameCandidates,
   buildCompTitleCandidates,
+  buildDescriptionCandidates,
   buildGenreMetadataCandidates,
   collapseNearDuplicates,
   COMP_NAME_MAX_KEYWORDS,
@@ -281,7 +284,26 @@ export async function POST(req: NextRequest) {
     author: request.authorName,
     seriesName: request.seriesName,
   });
-  const reviewLanguageCandidates = mineReviewLanguage(productPage.reviewSnippets);
+  // Publisher/author's own blurb — comp mentions ("perfect for fans of X")
+  // plus short marketing bullets, mixed comp-name/book-description tags.
+  const descriptionCandidates = buildDescriptionCandidates(productPage.description, productPage.bulletPoints);
+  // Pools review text across the seed book *and* every deep-crawled comp
+  // title, not just the seed book's own (often sparse) reviews.
+  const reviewLanguageCandidates = mineReviewLanguage([
+    ...productPage.reviewSnippets,
+    ...relatedCompetitors.reviewSnippets,
+  ]);
+
+  // Two more free, low-risk sources: Datamuse (a real API, no scraping risk)
+  // for synonym expansion of the genre/trope terms already found, and a
+  // best-effort Goodreads lookup for community-tagged tropes/genres — the
+  // richest free source of exact fiction reader vocabulary, but a scrape
+  // with the same fragility/blocking caveats as the Amazon ones above.
+  const [synonymCandidates, goodreadsTags] = await Promise.all([
+    getSynonymExpansionCandidates(genreMetadataCandidates.map((c) => c.text)),
+    getGoodreadsTags(productPage.isbn10, request.bookTitle, request.authorName),
+  ]);
+  const goodreadsTagCandidates = buildGoodreadsTagCandidates(goodreadsTags);
 
   sourceStatuses.push({
     source: "comp-title",
@@ -304,9 +326,24 @@ export async function POST(req: NextRequest) {
     count: buyerIntentCandidates.length,
   });
   sourceStatuses.push({
+    source: "book-description",
+    ok: descriptionCandidates.length > 0,
+    count: descriptionCandidates.length,
+  });
+  sourceStatuses.push({
     source: "review-language",
     ok: reviewLanguageCandidates.length > 0,
     count: reviewLanguageCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "synonym",
+    ok: synonymCandidates.length > 0,
+    count: synonymCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "goodreads-tags",
+    ok: goodreadsTagCandidates.length > 0,
+    count: goodreadsTagCandidates.length,
   });
 
   // Merge + dedupe everything once, then split into the two Manual ad group
@@ -323,7 +360,10 @@ export async function POST(req: NextRequest) {
     genreMetadataCandidates,
     bookContentCandidates,
     buyerIntentCandidates,
-    reviewLanguageCandidates
+    descriptionCandidates,
+    reviewLanguageCandidates,
+    synonymCandidates,
+    goodreadsTagCandidates
   );
   const { tropes: tropesCandidates, compNames: compNameCandidates } = splitKeywordsByCategory(
     collapseNearDuplicates(merged)

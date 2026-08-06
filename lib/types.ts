@@ -57,6 +57,9 @@ export type KeywordSource =
   | "book-content"
   | "google-autocomplete"
   | "review-language"
+  | "book-description"
+  | "synonym"
+  | "goodreads-tags"
   | "harvest";
 
 export interface KeywordCandidate {
@@ -90,6 +93,8 @@ export interface ProductPageData {
   categories: string[]; // browse node / bestseller category text
   compAsins: string[]; // ASINs of "customers also bought" titles, for the deep competitor crawl
   reviewSnippets: string[]; // top-review excerpt text embedded on the page, for review-language mining
+  description?: string; // publisher/author blurb, for comp-mention + description mining
+  bulletPoints: string[]; // Amazon's "About this item" feature bullets
   /** HTTP status of the product page fetch, when one was made — for diagnosing scrape failures. */
   fetchStatus?: number;
   /** True when the response looked like an Amazon bot/CAPTCHA check rather than the real product page. */
@@ -108,6 +113,8 @@ export interface RelatedCompetitorCrawl {
   competitors: RelatedCompetitor[];
   /** ASINs worth bidding on directly via product targeting (first + second hop). */
   productTargetAsins: string[];
+  /** Review excerpts pooled across every crawled comp title, for cross-comp review-language mining. */
+  reviewSnippets: string[];
 }
 
 export interface SourceStatus {
