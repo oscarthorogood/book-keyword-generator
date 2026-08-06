@@ -90,6 +90,10 @@ export interface ProductPageData {
   categories: string[]; // browse node / bestseller category text
   compAsins: string[]; // ASINs of "customers also bought" titles, for the deep competitor crawl
   reviewSnippets: string[]; // top-review excerpt text embedded on the page, for review-language mining
+  /** HTTP status of the product page fetch, when one was made — for diagnosing scrape failures. */
+  fetchStatus?: number;
+  /** True when the response looked like an Amazon bot/CAPTCHA check rather than the real product page. */
+  blocked?: boolean;
 }
 
 /** A comparable book discovered by the deep "also bought" crawl (lib/scrape.ts). */

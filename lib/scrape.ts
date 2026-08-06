@@ -294,12 +294,29 @@ function extractPrice($: cheerio.CheerioAPI): number | undefined {
   return undefined;
 }
 
+// Amazon serves a "Robot Check"/CAPTCHA interstitial instead of the real
+// page when it flags the request as automated — routine for cloud/datacenter
+// IPs (Vercel, AWS, etc.), much rarer from a residential IP. Detecting it
+// distinctly from "page structure changed" or "network failure" is the
+// difference between a fixable bug and a hosting-environment problem.
+const BOT_CHECK_PATTERNS = [
+  /to discuss automated access to amazon data/i,
+  /enter the characters you see below/i,
+  /type the characters you see in this image/i,
+  /api-services-support@amazon/i,
+];
+
+function looksLikeBotCheck(html: string): boolean {
+  return BOT_CHECK_PATTERNS.some((pattern) => pattern.test(html));
+}
+
 /**
  * Scrapes the book's own Amazon product page for title/author/ISBN/series/
  * price plus thematic context: "customers also bought" titles + their
  * ASINs, category/best-seller placement text, and review excerpts.
  * Best-effort — returns whatever it can find, empty arrays/undefined fields
- * on total failure.
+ * on total failure. Logs the reason server-side (HTTP status / bot-check
+ * detection / thrown error) since scrape failures are otherwise silent.
  */
 export async function scrapeProductPage(
   asin: string,
@@ -307,6 +324,7 @@ export async function scrapeProductPage(
 ): Promise<ProductPageData> {
   const domain = AMAZON_DOMAINS[marketplace];
   const url = `https://www.${domain}/dp/${encodeURIComponent(asin)}`;
+  const logPrefix = `[scrapeProductPage] ${asin} (${marketplace})`;
 
   try {
     const res = await fetchWithTimeout(
@@ -320,12 +338,23 @@ export async function scrapeProductPage(
       },
       PAGE_TIMEOUT_MS
     );
-    if (!res.ok) return EMPTY_PRODUCT_PAGE;
+    if (!res.ok) {
+      console.error(`${logPrefix} -> HTTP ${res.status}`);
+      return { ...EMPTY_PRODUCT_PAGE, fetchStatus: res.status };
+    }
 
     const html = await res.text();
+    if (looksLikeBotCheck(html)) {
+      console.error(`${logPrefix} -> HTTP ${res.status} but response looks like an Amazon bot/CAPTCHA check`);
+      return { ...EMPTY_PRODUCT_PAGE, fetchStatus: res.status, blocked: true };
+    }
+
     const $ = cheerio.load(html);
 
     const title = $("#productTitle").first().text().trim() || undefined;
+    if (!title) {
+      console.error(`${logPrefix} -> HTTP ${res.status}, page loaded but #productTitle not found (selector drift, or a partial/soft block)`);
+    }
     const author =
       $("#bylineInfo .author a, .author a.contributorNameID")
         .first()
@@ -377,8 +406,10 @@ export async function scrapeProductPage(
       categories: Array.from(categories).slice(0, 15),
       compAsins: Array.from(compAsins).slice(0, 5),
       reviewSnippets: extractReviewSnippets($),
+      fetchStatus: res.status,
     };
-  } catch {
+  } catch (err) {
+    console.error(`${logPrefix} -> fetch threw:`, err instanceof Error ? err.message : err);
     return EMPTY_PRODUCT_PAGE;
   }
 }
