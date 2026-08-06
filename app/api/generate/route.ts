@@ -1,28 +1,36 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
-import { computeMaxCpc } from "@/lib/bidding";
+import { AD_GROUP_BID_MULTIPLIER, computeMaxCpc, round2 } from "@/lib/bidding";
 import { enrichBookMetadata } from "@/lib/bookMetadata";
-import { buildBulksheet } from "@/lib/bulksheet";
+import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
 import {
   buildBookContentCandidates,
   buildBuyerIntentCandidates,
-  buildCategoryCandidates,
+  buildCompNameCandidates,
   buildCompTitleCandidates,
   buildGenreMetadataCandidates,
+  collapseNearDuplicates,
+  COMP_NAME_MAX_KEYWORDS,
   extractAsinCandidates,
-  finalizeKeywords,
   mergeKeywordCandidates,
   RECOMMENDED_MAX_KEYWORDS,
   RECOMMENDED_MIN_KEYWORDS,
+  scoreAndTierBids,
+  splitKeywordsByCategory,
 } from "@/lib/keywordMerge";
 import { buildAdGroupName, buildCampaignName } from "@/lib/naming";
-import { buildProductTargetCandidates, mergeProductTargetCandidates } from "@/lib/productTargets";
+import {
+  buildProductTargetCandidates,
+  mergeProductTargetCandidates,
+  PRODUCT_TARGET_MAX,
+} from "@/lib/productTargets";
+import { mineReviewLanguage } from "@/lib/reviewMining";
 import {
   buildAutocompleteSeeds,
   getAutocompleteKeywordSet,
   getGoogleAutocompleteKeywordSet,
   scrapeProductPage,
-  scrapeRelatedCategories,
+  scrapeRelatedCompetitors,
 } from "@/lib/scrape";
 import {
   BidEconomics,
@@ -165,7 +173,6 @@ export async function POST(req: NextRequest) {
 
   const baseBid = request.bidEconomics ? computeMaxCpc(request.bidEconomics) : (request.defaultBid as number);
   const campaignName = buildCampaignName(request);
-  const adGroupName = buildAdGroupName(request);
 
   // Auto (SPA) campaigns are the cheap cold-start step of the two-phase
   // workflow (see learnings doc, section 1) — Amazon's own engine decides
@@ -174,7 +181,7 @@ export async function POST(req: NextRequest) {
   if (request.campaignType === "SPA") {
     const buffer = await buildBulksheet({
       campaignName,
-      adGroupName,
+      autoAdGroupName: buildAdGroupName(request),
       asin: request.asin,
       campaignType: "SPA",
       dailyBudget: request.dailyBudget,
@@ -196,7 +203,7 @@ export async function POST(req: NextRequest) {
 
   const seedTerms = buildAutocompleteSeeds(request.bookTitle, request.authorName);
 
-  const [adsApiResult, autocompleteResult, googleAutocompleteResult, bookMetadata, relatedCategories] =
+  const [adsApiResult, autocompleteResult, googleAutocompleteResult, bookMetadata, relatedCompetitors] =
     await Promise.all([
       isAdsApiConfigured()
         ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
@@ -214,7 +221,10 @@ export async function POST(req: NextRequest) {
         title: request.bookTitle,
         author: request.authorName,
       }),
-      scrapeRelatedCategories(productPage.compAsins, request.marketplace),
+      // Deep "also bought" crawl (manual research blueprint, section 3) —
+      // goes a hop past the target book's own carousel to approximate the
+      // blueprint's best-seller deep dive, bounded for serverless time.
+      scrapeRelatedCompetitors(request.asin, productPage.compAsins, request.marketplace),
     ]);
 
   sourceStatuses.push({
@@ -261,20 +271,26 @@ export async function POST(req: NextRequest) {
 
   const genreMetadataCandidates = buildGenreMetadataCandidates(bookMetadata);
   const bookContentCandidates = buildBookContentCandidates(bookMetadata.commonTerms);
-  const compTitleCandidates = mergeKeywordCandidates(
-    buildCompTitleCandidates(productPage),
-    buildCategoryCandidates(relatedCategories, "comp-title")
-  );
+  // Mixed source tags: the comp titles' own titles are "comp-name" (bare
+  // name, high intent), their category placement is "comp-title" (thematic).
+  const compTitleCandidates = buildCompTitleCandidates(productPage);
+  const deepCompNameCandidates = buildCompNameCandidates(relatedCompetitors.competitors);
   const buyerIntentCandidates = buildBuyerIntentCandidates(genreMetadataCandidates.map((c) => c.text), {
     title: request.bookTitle,
     author: request.authorName,
     seriesName: request.seriesName,
   });
+  const reviewLanguageCandidates = mineReviewLanguage(productPage.reviewSnippets);
 
   sourceStatuses.push({
     source: "comp-title",
     ok: compTitleCandidates.length > 0,
     count: compTitleCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "comp-name",
+    ok: deepCompNameCandidates.length > 0,
+    count: deepCompNameCandidates.length,
   });
   sourceStatuses.push({
     source: "genre-metadata",
@@ -286,29 +302,50 @@ export async function POST(req: NextRequest) {
     ok: buyerIntentCandidates.length > 0,
     count: buyerIntentCandidates.length,
   });
+  sourceStatuses.push({
+    source: "review-language",
+    ok: reviewLanguageCandidates.length > 0,
+    count: reviewLanguageCandidates.length,
+  });
 
-  const keywords = finalizeKeywords(
-    [
-      adsApiKeywords,
-      autocompleteKeywords,
-      googleAutocompleteKeywords,
-      compTitleCandidates,
-      genreMetadataCandidates,
-      bookContentCandidates,
-      buyerIntentCandidates,
-    ],
-    baseBid
+  // Merge + dedupe everything once, then split into the two Manual ad group
+  // buckets the research blueprint recommends tracking separately (section
+  // 5) and score/cap each independently — a strong comp-author name
+  // shouldn't lose its ad group slot to a flood of tropes candidates sharing
+  // one combined cap.
+  const merged = mergeKeywordCandidates(
+    adsApiKeywords,
+    autocompleteKeywords,
+    googleAutocompleteKeywords,
+    compTitleCandidates,
+    deepCompNameCandidates,
+    genreMetadataCandidates,
+    bookContentCandidates,
+    buyerIntentCandidates,
+    reviewLanguageCandidates
   );
+  const { tropes: tropesCandidates, compNames: compNameCandidates } = splitKeywordsByCategory(
+    collapseNearDuplicates(merged)
+  );
+
+  const tropesBid = round2(baseBid * AD_GROUP_BID_MULTIPLIER.tropes);
+  const compNamesBid = round2(baseBid * AD_GROUP_BID_MULTIPLIER["comp-names"]);
+  const productTargetingBid = round2(baseBid * AD_GROUP_BID_MULTIPLIER["product-targeting"]);
+
+  const tropesKeywords = scoreAndTierBids(tropesCandidates, tropesBid).slice(0, RECOMMENDED_MAX_KEYWORDS);
+  const compNameKeywords = scoreAndTierBids(compNameCandidates, compNamesBid).slice(0, COMP_NAME_MAX_KEYWORDS);
 
   // Product targeting isn't just the whole targeting story on its own either
-  // — comp ASINs from the product page carousel plus any ASIN-shaped
-  // "keywords" pulled out above. See learnings doc, section 4.
+  // — comp ASINs from the product page carousel, the deep crawl's first- and
+  // second-hop ASINs, plus any ASIN-shaped "keywords" pulled out above. See
+  // learnings doc, section 4.
   const productTargets = mergeProductTargetCandidates(
     buildProductTargetCandidates(productPage.compAsins, "comp-title"),
+    buildProductTargetCandidates(relatedCompetitors.productTargetAsins, "comp-title"),
     buildProductTargetCandidates([...adsApiAsins, ...autocompleteAsins, ...googleAsins], "autocomplete")
-  );
+  ).slice(0, PRODUCT_TARGET_MAX);
 
-  if (keywords.length === 0 && productTargets.length === 0) {
+  if (tropesKeywords.length === 0 && compNameKeywords.length === 0 && productTargets.length === 0) {
     return NextResponse.json(
       {
         error:
@@ -319,21 +356,42 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const adGroups: SpmAdGroup[] = [
+    {
+      name: buildAdGroupName(request, "tropes"),
+      defaultBid: tropesBid,
+      keywords: tropesKeywords,
+      matchTypes: request.matchTypes,
+    },
+    {
+      name: buildAdGroupName(request, "comp-names"),
+      defaultBid: compNamesBid,
+      keywords: compNameKeywords,
+      // Blueprint: Competitor Authors & Titles ad group is Exact Match only
+      // — readers searching a name are ready to buy, don't dilute with Broad.
+      matchTypes: ["exact"],
+    },
+    {
+      name: buildAdGroupName(request, "product-targeting"),
+      defaultBid: productTargetingBid,
+      productTargets,
+    },
+  ];
+
   const buffer = await buildBulksheet({
     campaignName,
-    adGroupName,
     asin: request.asin,
     campaignType: "SPM",
     dailyBudget: request.dailyBudget,
     startDate: request.startDate,
     baseBid,
-    matchTypes: request.matchTypes,
-    keywords,
-    productTargets,
+    adGroups,
   });
 
   return fileResponse(buffer, campaignName, {
-    "X-Keyword-Count": String(keywords.length),
+    "X-Keyword-Count": String(tropesKeywords.length + compNameKeywords.length),
+    "X-Tropes-Keyword-Count": String(tropesKeywords.length),
+    "X-Comp-Name-Keyword-Count": String(compNameKeywords.length),
     "X-Product-Target-Count": String(productTargets.length),
     "X-Recommended-Keyword-Range": `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
     "X-Source-Status": encodeURIComponent(JSON.stringify(sourceStatuses)),

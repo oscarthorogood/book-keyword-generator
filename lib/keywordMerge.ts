@@ -1,5 +1,5 @@
 import { looksLikeAsin } from "./productTargets";
-import { BookMetadata, KeywordCandidate, KeywordSource, ProductPageData } from "./types";
+import { BookMetadata, KeywordCandidate, KeywordSource, ProductPageData, RelatedCompetitor } from "./types";
 
 function normalize(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -126,6 +126,14 @@ export function buildBookContentCandidates(commonTerms: string[]): KeywordCandid
   return Array.from(texts).map((text) => ({ text, sources: ["book-content" as const] }));
 }
 
+/**
+ * Splits the target book's own "customers also bought" carousel into two
+ * source-tagged buckets: the title strings themselves are comparable-title
+ * material ("comp-name" — blueprint's Comparable Titles column, high
+ * intent), while the comp titles' category/browse-node placement is
+ * thematic ("comp-title" — tropes/themes bucket). See
+ * lib/keywordMerge.ts#splitKeywordsByCategory for where that split gets used.
+ */
 export function buildCompTitleCandidates(productPage: ProductPageData): KeywordCandidate[] {
   const titleTexts = new Set<string>();
   for (const title of productPage.compTitles) {
@@ -134,11 +142,53 @@ export function buildCompTitleCandidates(productPage: ProductPageData): KeywordC
   }
   const titleCandidates = Array.from(titleTexts).map((text) => ({
     text,
-    sources: ["comp-title" as const],
+    sources: ["comp-name" as const],
   }));
 
   const categoryCandidates = buildCategoryCandidates(productPage.categories, "comp-title");
   return mergeKeywordCandidates(titleCandidates, categoryCandidates);
+}
+
+/**
+ * Comparable-author/title name candidates from the deep "also bought" crawl
+ * (scrapeRelatedCompetitors in lib/scrape.ts) — bare, high-intent names
+ * rather than thematic phrases. Maps to the blueprint's Comparable Authors /
+ * Comparable Titles columns.
+ */
+export function buildCompNameCandidates(competitors: RelatedCompetitor[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const competitor of competitors) {
+    if (competitor.author) {
+      const author = normalize(competitor.author);
+      if (isUsableKeyword(author)) texts.add(author);
+    }
+    if (competitor.title) {
+      const title = normalize(competitor.title);
+      if (isUsableKeyword(title)) texts.add(title);
+    }
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["comp-name" as const] }));
+}
+
+/**
+ * Splits a finalized keyword list into the two Manual-campaign ad group
+ * buckets the research blueprint recommends tracking separately: bare
+ * comparable author/title names (high purchase intent, exact match only)
+ * vs. everything else (thematic/tropes phrases, moderate bids, broader
+ * match types). See lib/bulksheet.ts and the generate route for how each
+ * bucket becomes its own Ad Group.
+ */
+export function splitKeywordsByCategory(keywords: KeywordCandidate[]): {
+  tropes: KeywordCandidate[];
+  compNames: KeywordCandidate[];
+} {
+  const tropes: KeywordCandidate[] = [];
+  const compNames: KeywordCandidate[] = [];
+  for (const keyword of keywords) {
+    if (keyword.sources.includes("comp-name")) compNames.push(keyword);
+    else tropes.push(keyword);
+  }
+  return { tropes, compNames };
 }
 
 const BUYER_INTENT_GENRE_LIMIT = 6;
@@ -287,6 +337,17 @@ export function collapseNearDuplicates(candidates: KeywordCandidate[]): KeywordC
   return Array.from(bySignature.values());
 }
 
+// The manual research blueprint's filter for the alphabet-soup harvest:
+// "only add phrases 3 to 5 words long... ignore generic single or two-word
+// terms." Applied here as a scoring bonus rather than a hard cutoff (a
+// strong 2-word comp-author name shouldn't be excluded), so ideal-length
+// phrases simply rank higher.
+function phraseLengthScore(wordCount: number): number {
+  if (wordCount >= 3 && wordCount <= 5) return 2;
+  if (wordCount === 2 || wordCount === 6) return 1;
+  return 0;
+}
+
 /**
  * Scores each candidate by how much independent agreement backs it (more
  * sources = more confidence) and whether it's a specific long-tail phrase
@@ -304,7 +365,7 @@ export function scoreAndTierBids(
       const sourceCount = candidate.sources.length;
       const wordCount = candidate.text.split(" ").length;
 
-      let score = sourceCount * 2 + (wordCount >= 2 ? 1 : 0);
+      let score = sourceCount * 2 + phraseLengthScore(wordCount);
       if (candidate.sources.includes("ads-api")) score += 3;
 
       let suggestedBid = candidate.suggestedBid;
@@ -327,18 +388,25 @@ export function scoreAndTierBids(
 export const RECOMMENDED_MIN_KEYWORDS = 25;
 export const RECOMMENDED_MAX_KEYWORDS = 50;
 
+// Blueprint's Comparable Authors/Titles harvest targets ~20-40 direct
+// competitors; caps the comp-names ad group independently of the tropes cap
+// above since they're two separate ad groups now, not one shared budget.
+export const COMP_NAME_MAX_KEYWORDS = 40;
+
 /**
  * Full pipeline from raw per-source candidate groups to the final keyword
  * list handed to the Bulksheet writer: merge + dedupe, collapse near-dupes,
- * score and tier bids, then cap at Amazon's recommended per-ad-group ceiling
- * (RECOMMENDED_MAX_KEYWORDS), keeping the best-scoring keywords first.
+ * score and tier bids, then cap at a per-ad-group ceiling (defaults to
+ * Amazon's recommended RECOMMENDED_MAX_KEYWORDS), keeping the best-scoring
+ * keywords first.
  */
 export function finalizeKeywords(
   groups: KeywordCandidate[][],
-  defaultBid: number
+  defaultBid: number,
+  maxResults: number = RECOMMENDED_MAX_KEYWORDS
 ): KeywordCandidate[] {
   const merged = mergeKeywordCandidates(...groups);
   const collapsed = collapseNearDuplicates(merged);
   const scored = scoreAndTierBids(collapsed, defaultBid);
-  return scored.slice(0, RECOMMENDED_MAX_KEYWORDS);
+  return scored.slice(0, maxResults);
 }

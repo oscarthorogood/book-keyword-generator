@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import { KeywordCandidate, Marketplace, ProductPageData } from "./types";
+import { KeywordCandidate, Marketplace, ProductPageData, RelatedCompetitor, RelatedCompetitorCrawl } from "./types";
 
 const AMAZON_DOMAINS: Record<Marketplace, string> = {
   US: "amazon.com",
@@ -84,15 +84,21 @@ const AUTOCOMPLETE_MODIFIERS = [
   "new release",
 ];
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
-const MAX_AUTOCOMPLETE_SEEDS = 40;
+// Suffix sweep (title + a..z) + prefix sweep (a..z + title) both cost a
+// letter each, plus title/modifiers/author — see buildAutocompleteSeeds.
+const MAX_AUTOCOMPLETE_SEEDS = 65;
 const MAX_GOOGLE_SUGGEST_SEEDS = 20;
 const AUTOCOMPLETE_CONCURRENCY = 15;
 
 /**
  * Amazon's autocomplete returns different completions depending on the next
  * character typed, so sweeping a-z after the title ("<title> a", "<title>
- * b", ...) harvests far more real suggestions than the bare title alone —
- * a well-known free technique for multiplying yield from the same endpoint.
+ * b", ...) harvests far more real suggestions than the bare title alone — a
+ * well-known free technique for multiplying yield from the same endpoint.
+ * Also sweeps the *reverse* order ("a <title>", "b <title>", ...), which
+ * catches modifier words that appear before the phrase instead of after it
+ * (e.g. "dark sci fi romance") — a query shape the suffix sweep alone can't
+ * reach. See the manual keyword research blueprint, section 2.
  */
 export function buildAutocompleteSeeds(title: string, author?: string): string[] {
   const cleanTitle = title.trim();
@@ -103,6 +109,7 @@ export function buildAutocompleteSeeds(title: string, author?: string): string[]
   for (const modifier of AUTOCOMPLETE_MODIFIERS) seeds.add(`${cleanTitle} ${modifier}`);
   if (author) seeds.add(`${cleanTitle} ${author}`);
   for (const letter of ALPHABET) seeds.add(`${cleanTitle} ${letter}`);
+  for (const letter of ALPHABET) seeds.add(`${letter} ${cleanTitle}`);
 
   return Array.from(seeds).slice(0, MAX_AUTOCOMPLETE_SEEDS);
 }
@@ -219,7 +226,27 @@ function extractIsbns($: cheerio.CheerioAPI): { isbn10?: string; isbn13?: string
   return { isbn10, isbn13 };
 }
 
-const EMPTY_PRODUCT_PAGE: ProductPageData = { compTitles: [], categories: [], compAsins: [] };
+const EMPTY_PRODUCT_PAGE: ProductPageData = {
+  compTitles: [],
+  categories: [],
+  compAsins: [],
+  reviewSnippets: [],
+};
+
+/**
+ * Amazon's product page often embeds a handful of top review excerpts
+ * server-side (separate from the full paginated /product-reviews/ page,
+ * which this app doesn't fetch to keep the request count down). These are
+ * mined for recurring reader vocabulary — see lib/reviewMining.ts.
+ */
+function extractReviewSnippets($: cheerio.CheerioAPI): string[] {
+  const snippets = new Set<string>();
+  $('[data-hook="review-body"], [data-hook="review-collapsed"]').each((_, el) => {
+    const text = $(el).text().replace(/\s+/g, " ").trim();
+    if (text.length > 15) snippets.add(text);
+  });
+  return Array.from(snippets).slice(0, 20);
+}
 
 /**
  * Scrapes the book's own Amazon product page for title/author/ISBN plus
@@ -300,34 +327,68 @@ export async function scrapeProductPage(
       compTitles: Array.from(compTitles).slice(0, 15),
       categories: Array.from(categories).slice(0, 15),
       compAsins: Array.from(compAsins).slice(0, 5),
+      reviewSnippets: extractReviewSnippets($),
     };
   } catch {
     return EMPTY_PRODUCT_PAGE;
   }
 }
 
-const RELATED_CATEGORY_ASIN_LIMIT = 3;
+const FIRST_HOP_ASIN_LIMIT = 5;
+const SECOND_HOP_ASIN_LIMIT = 6;
 
 /**
- * One hop out: scrapes a handful of the "customers also bought" titles'
- * own product pages for their categories, borrowing thematic keywords from
- * books already proven to sell to the same readers. Each lookup degrades
- * independently — a blocked or missing page just contributes nothing.
+ * Approximates the manual research blueprint's "Best-Seller & Also Bought
+ * Deep Dive" (section 3): follow the "customers also bought" trail out past
+ * the immediate comp titles to find more direct competitors — author, title,
+ * and ASIN for each — rather than stopping at one hop. Bounded to keep the
+ * request count sane for a serverless function: up to 5 first-hop pages,
+ * then up to 6 more second-hop pages found via *their* "also bought"
+ * carousels. There's no way to automate the blueprint's "3-second rule"
+ * (subgenre/tone/cover fit) — this surfaces candidates for the caller to
+ * filter via source-agreement scoring, not a vetted competitor list.
  */
-export async function scrapeRelatedCategories(
+export async function scrapeRelatedCompetitors(
+  seedAsin: string,
   compAsins: string[],
   marketplace: Marketplace
-): Promise<string[]> {
-  const targets = compAsins.slice(0, RELATED_CATEGORY_ASIN_LIMIT);
-  if (targets.length === 0) return [];
+): Promise<RelatedCompetitorCrawl> {
+  const firstHopAsins = compAsins.slice(0, FIRST_HOP_ASIN_LIMIT);
+  if (firstHopAsins.length === 0) {
+    return { categories: [], competitors: [], productTargetAsins: [] };
+  }
 
-  const results = await mapWithConcurrency(targets, targets.length, (asin) =>
+  const firstHopPages = await mapWithConcurrency(firstHopAsins, firstHopAsins.length, (asin) =>
     scrapeProductPage(asin, marketplace)
   );
 
   const categories = new Set<string>();
-  for (const result of results) {
-    for (const category of result.categories) categories.add(category);
+  const competitors = new Map<string, RelatedCompetitor>();
+  const secondHopCandidates = new Set<string>();
+
+  firstHopAsins.forEach((asin, i) => {
+    const page = firstHopPages[i];
+    for (const category of page.categories) categories.add(category);
+    if (page.title || page.author) competitors.set(asin, { asin, author: page.author, title: page.title });
+    for (const compAsin of page.compAsins) {
+      if (compAsin !== seedAsin && !firstHopAsins.includes(compAsin)) secondHopCandidates.add(compAsin);
+    }
+  });
+
+  const secondHopAsins = Array.from(secondHopCandidates).slice(0, SECOND_HOP_ASIN_LIMIT);
+  if (secondHopAsins.length > 0) {
+    const secondHopPages = await mapWithConcurrency(secondHopAsins, secondHopAsins.length, (asin) =>
+      scrapeProductPage(asin, marketplace)
+    );
+    secondHopAsins.forEach((asin, i) => {
+      const page = secondHopPages[i];
+      if (page.title || page.author) competitors.set(asin, { asin, author: page.author, title: page.title });
+    });
   }
-  return Array.from(categories);
+
+  return {
+    categories: Array.from(categories),
+    competitors: Array.from(competitors.values()),
+    productTargetAsins: [...firstHopAsins, ...secondHopAsins],
+  };
 }

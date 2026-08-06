@@ -47,7 +47,8 @@ export default function Home() {
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceStatus[] | null>(null);
-  const [keywordCount, setKeywordCount] = useState<number | null>(null);
+  const [tropesKeywordCount, setTropesKeywordCount] = useState<number | null>(null);
+  const [compNameKeywordCount, setCompNameKeywordCount] = useState<number | null>(null);
   const [productTargetCount, setProductTargetCount] = useState<number | null>(null);
   const [recommendedRange, setRecommendedRange] = useState<string | null>(null);
   const [resultCampaignName, setResultCampaignName] = useState<string | null>(null);
@@ -77,7 +78,8 @@ export default function Home() {
     setStatus("loading");
     setErrorMessage(null);
     setSources(null);
-    setKeywordCount(null);
+    setTropesKeywordCount(null);
+    setCompNameKeywordCount(null);
     setProductTargetCount(null);
     setRecommendedRange(null);
     setResultCampaignName(null);
@@ -121,12 +123,14 @@ export default function Home() {
       }
 
       const sourceHeader = res.headers.get("X-Source-Status");
-      const countHeader = res.headers.get("X-Keyword-Count");
+      const tropesHeader = res.headers.get("X-Tropes-Keyword-Count");
+      const compNameHeader = res.headers.get("X-Comp-Name-Keyword-Count");
       const productTargetHeader = res.headers.get("X-Product-Target-Count");
       const rangeHeader = res.headers.get("X-Recommended-Keyword-Range");
       const campaignNameHeader = res.headers.get("X-Campaign-Name");
       if (sourceHeader) setSources(JSON.parse(decodeURIComponent(sourceHeader)));
-      if (countHeader) setKeywordCount(Number(countHeader));
+      if (tropesHeader) setTropesKeywordCount(Number(tropesHeader));
+      if (compNameHeader) setCompNameKeywordCount(Number(compNameHeader));
       if (productTargetHeader) setProductTargetCount(Number(productTargetHeader));
       if (rangeHeader) setRecommendedRange(rangeHeader);
       if (campaignNameHeader) setResultCampaignName(decodeURIComponent(campaignNameHeader));
@@ -378,7 +382,7 @@ export default function Home() {
               Run this first, let it collect data, then harvest its search term report.
             </p>
           ) : (
-            <Field label="Match Types">
+            <Field label="Match Types (Tropes & Themes ad group)">
               <div className="flex gap-4">
                 {MATCH_TYPES.map(({ value, label }) => (
                   <label key={value} className="flex items-center gap-2 text-sm">
@@ -391,6 +395,11 @@ export default function Home() {
                   </label>
                 ))}
               </div>
+              <span className="block text-xs text-neutral-500 mt-1">
+                Applies to the Tropes &amp; Themes ad group only. Comp Authors &amp;
+                Titles is always Exact Match — readers searching a name are ready to
+                buy, so it isn&apos;t diluted with Broad/Phrase.
+              </span>
             </Field>
           )}
 
@@ -412,7 +421,7 @@ export default function Home() {
         {status === "success" && (() => {
           const [recommendedMin] = recommendedRange?.split("-").map(Number) ?? [null];
           const belowRecommendedMin =
-            keywordCount !== null && recommendedMin !== null && keywordCount < recommendedMin;
+            tropesKeywordCount !== null && recommendedMin !== null && tropesKeywordCount < recommendedMin;
           return (
             <div
               className={`mt-6 rounded-md border p-4 text-sm ${
@@ -423,13 +432,18 @@ export default function Home() {
             >
               Download started
               {resultCampaignName ? ` — ${resultCampaignName}` : ""}.
-              {isAuto
-                ? " Auto campaign with tiered clause bids."
-                : ` ${keywordCount ?? "?"} keywords, ${productTargetCount ?? 0} product targets${
-                    recommendedRange ? ` (Amazon recommends ${recommendedRange} keywords per ad group)` : ""
-                  }.`}
+              {isAuto ? (
+                " Auto campaign with tiered clause bids."
+              ) : (
+                <>
+                  {" "}
+                  {tropesKeywordCount ?? 0} Tropes &amp; Themes keywords, {compNameKeywordCount ?? 0} Comp
+                  Authors &amp; Titles keywords, {productTargetCount ?? 0} product targets
+                  {recommendedRange ? ` (Amazon recommends ${recommendedRange} per ad group)` : ""}.
+                </>
+              )}
               {belowRecommendedMin &&
-                " That's below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
+                " Tropes & Themes is below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
             </div>
           );
         })()}

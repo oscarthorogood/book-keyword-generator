@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { computeMaxCpc } from "@/lib/bidding";
-import { buildBulksheet } from "@/lib/bulksheet";
+import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
 import {
   buildHarvestOutputs,
   classifySearchTerms,
@@ -136,7 +136,6 @@ export async function POST(req: NextRequest) {
     variant,
   };
   const campaignName = buildCampaignName(identity);
-  const adGroupName = buildAdGroupName(identity);
 
   if (keywords.length === 0 && productTargets.length === 0 && negativeKeywords.length === 0) {
     return NextResponse.json(
@@ -148,17 +147,28 @@ export async function POST(req: NextRequest) {
     );
   }
 
+  const adGroups: SpmAdGroup[] = [
+    {
+      name: buildAdGroupName(identity, "harvested"),
+      defaultBid: baseBid,
+      keywords,
+      matchTypes: ["exact"],
+    },
+    {
+      name: buildAdGroupName(identity, "product-targeting"),
+      defaultBid: baseBid,
+      productTargets,
+    },
+  ];
+
   const workbook = await buildBulksheet({
     campaignName,
-    adGroupName,
     asin,
     campaignType: "SPM",
     dailyBudget,
     startDate,
     baseBid,
-    matchTypes: ["exact"],
-    keywords,
-    productTargets,
+    adGroups,
     negativeKeywords,
   });
 

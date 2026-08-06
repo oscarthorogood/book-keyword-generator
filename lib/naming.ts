@@ -37,8 +37,26 @@ export function buildCampaignName(identity: CampaignIdentity): string {
     .join(FIELD_SEPARATOR);
 }
 
-export function buildAdGroupName(identity: Pick<CampaignIdentity, "campaignType">): string {
-  return identity.campaignType === "SPA" ? "Auto Targeting" : "Keywords";
+/**
+ * Manual (SPM) campaigns split into separate ad groups per the research
+ * blueprint's 3-campaign recommendation (section 5) — kept as ad groups
+ * rather than separate campaigns so the naming convention's fixed field
+ * count stays intact (see buildCampaignName above).
+ */
+export type SpmAdGroupCategory = "tropes" | "comp-names" | "product-targeting" | "harvested";
+
+const SPM_AD_GROUP_NAMES: Record<SpmAdGroupCategory, string> = {
+  tropes: "Tropes & Themes",
+  "comp-names": "Comp Authors & Titles",
+  "product-targeting": "Product Targeting",
+  harvested: "Harvested Keywords",
+};
+
+export function buildAdGroupName(
+  identity: Pick<CampaignIdentity, "campaignType">,
+  category: SpmAdGroupCategory = "tropes"
+): string {
+  return identity.campaignType === "SPA" ? "Auto Targeting" : SPM_AD_GROUP_NAMES[category];
 }
 
 /** Parses a campaign name built by buildCampaignName back into its fields. Best-effort — returns null if the format doesn't match. */

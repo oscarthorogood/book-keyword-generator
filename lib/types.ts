@@ -51,10 +51,12 @@ export type KeywordSource =
   | "ads-api"
   | "autocomplete"
   | "comp-title"
+  | "comp-name"
   | "genre-metadata"
   | "buyer-intent"
   | "book-content"
   | "google-autocomplete"
+  | "review-language"
   | "harvest";
 
 export interface KeywordCandidate {
@@ -83,7 +85,22 @@ export interface ProductPageData {
   isbn13?: string;
   compTitles: string[]; // "customers also bought" style titles
   categories: string[]; // browse node / bestseller category text
-  compAsins: string[]; // ASINs of "customers also bought" titles, for one-hop category lookup
+  compAsins: string[]; // ASINs of "customers also bought" titles, for the deep competitor crawl
+  reviewSnippets: string[]; // top-review excerpt text embedded on the page, for review-language mining
+}
+
+/** A comparable book discovered by the deep "also bought" crawl (lib/scrape.ts). */
+export interface RelatedCompetitor {
+  asin: string;
+  author?: string;
+  title?: string;
+}
+
+export interface RelatedCompetitorCrawl {
+  categories: string[];
+  competitors: RelatedCompetitor[];
+  /** ASINs worth bidding on directly via product targeting (first + second hop). */
+  productTargetAsins: string[];
 }
 
 export interface SourceStatus {

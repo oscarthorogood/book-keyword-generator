@@ -7,8 +7,8 @@ import { CampaignType, KeywordCandidate, MatchType, ProductTargetCandidate } fro
  *
  * ASSUMPTION FLAGGED IN THE BUILD PLAN: this reflects Amazon's documented
  * Sponsored Products Bulksheet schema (Campaign / Ad Group / Product Ad /
- * Keyword / Product Targeting / Negative Keyword rows, joined by Campaign
- * Name + Ad Group Name text when creating new entities). Amazon revises this
+ * Keyword / Product Targeting / Campaign Negative Keyword rows, joined by
+ * Campaign Name + Ad Group Name text when creating new entities). Amazon revises this
  * schema periodically. Before relying on this for a real upload, download a
  * fresh template from Campaign Manager > Bulk Operations and diff its header
  * row against COLUMNS below.
@@ -71,19 +71,39 @@ function formatDate(isoDate: string): string {
   return `${month}/${day}/${year}`;
 }
 
+/**
+ * One Ad Group within a Manual (SPM) campaign. The research blueprint
+ * (section 5) recommends tracking tropes/themes, comp author/title names,
+ * and ASIN product targeting as separate campaigns for clean performance
+ * attribution; this app keeps them as separate Ad Groups under one campaign
+ * instead, so the naming convention's fixed field count isn't affected by
+ * which categories a given book happens to have data for.
+ */
+export interface SpmAdGroup {
+  name: string;
+  /** This ad group's own default bid (baseBid scaled by AD_GROUP_BID_MULTIPLIER — see lib/bidding.ts). */
+  defaultBid: number;
+  /** Keyword rows for this ad group, if any. */
+  keywords?: KeywordCandidate[];
+  /** Match types to write for every keyword above (ignored if keywords is empty). */
+  matchTypes?: MatchType[];
+  /** Product Targeting rows for this ad group, if any. */
+  productTargets?: ProductTargetCandidate[];
+}
+
 export interface BulksheetInput {
   campaignName: string;
-  adGroupName: string;
   asin: string;
   campaignType: CampaignType;
   dailyBudget: number;
   startDate: string;
-  /** Base CPC ceiling (from RRP-derived bid economics, or a manual override) that match-type/clause multipliers scale off of. */
+  /** Base CPC ceiling (from RRP-derived bid economics, or a manual override) everything else scales off of. */
   baseBid: number;
-  /** Manual (SPM) only. */
-  matchTypes?: MatchType[];
-  keywords?: KeywordCandidate[];
-  productTargets?: ProductTargetCandidate[];
+  /** Auto (SPA) only — defaults to "Auto Targeting". */
+  autoAdGroupName?: string;
+  /** Manual (SPM) only. Ad groups with neither keywords nor product targets are skipped. */
+  adGroups?: SpmAdGroup[];
+  /** Manual (SPM) only. Written as Campaign Negative Keyword rows (no Ad Group Name) so they suppress spend across every ad group in the campaign. */
   negativeKeywords?: string[];
 }
 
@@ -112,27 +132,28 @@ export async function buildBulksheet(input: BulksheetInput): Promise<Buffer> {
     "Bidding Strategy": "Dynamic bids - down only",
   });
 
-  rows.push({
-    Product: "Sponsored Products",
-    Entity: "Ad Group",
-    Operation: "Create",
-    "Campaign Name": input.campaignName,
-    "Ad Group Name": input.adGroupName,
-    State: "enabled",
-    "Ad Group Default Bid": input.baseBid,
-  });
-
-  rows.push({
-    Product: "Sponsored Products",
-    Entity: "Product Ad",
-    Operation: "Create",
-    "Campaign Name": input.campaignName,
-    "Ad Group Name": input.adGroupName,
-    State: "enabled",
-    ASIN: input.asin,
-  });
-
   if (isAuto) {
+    const adGroupName = input.autoAdGroupName ?? "Auto Targeting";
+
+    rows.push({
+      Product: "Sponsored Products",
+      Entity: "Ad Group",
+      Operation: "Create",
+      "Campaign Name": input.campaignName,
+      "Ad Group Name": adGroupName,
+      State: "enabled",
+      "Ad Group Default Bid": input.baseBid,
+    });
+    rows.push({
+      Product: "Sponsored Products",
+      Entity: "Product Ad",
+      Operation: "Create",
+      "Campaign Name": input.campaignName,
+      "Ad Group Name": adGroupName,
+      State: "enabled",
+      ASIN: input.asin,
+    });
+
     // Auto campaigns don't take keyword/product-target rows — Amazon's own
     // engine decides what to match. The only thing worth expressing per
     // clause is a bid, so each of the 4 default targeting groups gets its
@@ -143,50 +164,76 @@ export async function buildBulksheet(input: BulksheetInput): Promise<Buffer> {
         Entity: "Product Targeting",
         Operation: "Create",
         "Campaign Name": input.campaignName,
-        "Ad Group Name": input.adGroupName,
+        "Ad Group Name": adGroupName,
         State: "enabled",
         Bid: round2(input.baseBid * clause.multiplier),
         "Product Targeting Expression": clause.expression,
       });
     }
   } else {
-    for (const keyword of input.keywords ?? []) {
-      for (const matchType of input.matchTypes ?? []) {
-        const bid = keyword.suggestedBid ?? input.baseBid;
-        rows.push({
-          Product: "Sponsored Products",
-          Entity: "Keyword",
-          Operation: "Create",
-          "Campaign Name": input.campaignName,
-          "Ad Group Name": input.adGroupName,
-          State: "enabled",
-          "Keyword Text": keyword.text,
-          "Match Type": MATCH_TYPE_LABEL[matchType],
-          Bid: round2(bid * MATCH_TYPE_BID_MULTIPLIER[matchType]),
-        });
-      }
-    }
+    for (const adGroup of input.adGroups ?? []) {
+      const hasKeywords = (adGroup.keywords?.length ?? 0) > 0;
+      const hasProductTargets = (adGroup.productTargets?.length ?? 0) > 0;
+      if (!hasKeywords && !hasProductTargets) continue;
 
-    for (const target of input.productTargets ?? []) {
       rows.push({
         Product: "Sponsored Products",
-        Entity: "Product Targeting",
+        Entity: "Ad Group",
         Operation: "Create",
         "Campaign Name": input.campaignName,
-        "Ad Group Name": input.adGroupName,
+        "Ad Group Name": adGroup.name,
         State: "enabled",
-        Bid: round2(target.suggestedBid ?? input.baseBid),
-        "Product Targeting Expression": `asin="${target.asin}"`,
+        "Ad Group Default Bid": adGroup.defaultBid,
       });
+      // Each ad group advertising this ASIN needs its own Product Ad row —
+      // Product Ad is scoped to Campaign + Ad Group + ASIN, not just ASIN.
+      rows.push({
+        Product: "Sponsored Products",
+        Entity: "Product Ad",
+        Operation: "Create",
+        "Campaign Name": input.campaignName,
+        "Ad Group Name": adGroup.name,
+        State: "enabled",
+        ASIN: input.asin,
+      });
+
+      for (const keyword of adGroup.keywords ?? []) {
+        for (const matchType of adGroup.matchTypes ?? []) {
+          const bid = keyword.suggestedBid ?? adGroup.defaultBid;
+          rows.push({
+            Product: "Sponsored Products",
+            Entity: "Keyword",
+            Operation: "Create",
+            "Campaign Name": input.campaignName,
+            "Ad Group Name": adGroup.name,
+            State: "enabled",
+            "Keyword Text": keyword.text,
+            "Match Type": MATCH_TYPE_LABEL[matchType],
+            Bid: round2(bid * MATCH_TYPE_BID_MULTIPLIER[matchType]),
+          });
+        }
+      }
+
+      for (const target of adGroup.productTargets ?? []) {
+        rows.push({
+          Product: "Sponsored Products",
+          Entity: "Product Targeting",
+          Operation: "Create",
+          "Campaign Name": input.campaignName,
+          "Ad Group Name": adGroup.name,
+          State: "enabled",
+          Bid: round2(target.suggestedBid ?? adGroup.defaultBid),
+          "Product Targeting Expression": `asin="${target.asin}"`,
+        });
+      }
     }
 
     for (const negative of input.negativeKeywords ?? []) {
       rows.push({
         Product: "Sponsored Products",
-        Entity: "Negative Keyword",
+        Entity: "Campaign Negative Keyword",
         Operation: "Create",
         "Campaign Name": input.campaignName,
-        "Ad Group Name": input.adGroupName,
         State: "enabled",
         "Keyword Text": negative,
         "Match Type": "Negative Exact",

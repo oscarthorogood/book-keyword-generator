@@ -2,6 +2,11 @@ import { KeywordSource, ProductTargetCandidate } from "./types";
 
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
+// Caps the Product Targeting ad group at a sane size — the deep 2-hop crawl
+// in lib/scrape.ts can surface up to ~11 ASINs on its own, plus whatever the
+// ads-api/autocomplete ASIN routing adds on top.
+export const PRODUCT_TARGET_MAX = 30;
+
 export function looksLikeAsin(text: string): boolean {
   return ASIN_PATTERN.test(text.trim());
 }
