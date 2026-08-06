@@ -1,13 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
-import { enrichBookMetadata } from "@/lib/bookMetadata";
+import {
+  enrichBookMetadata,
+  lookupLocSubjects,
+  lookupWikidataGenres,
+  lookupWikipediaCategories,
+} from "@/lib/bookMetadata";
 import { buildBulksheet } from "@/lib/bulksheet";
 import {
+  buildAuthorCatalogCandidates,
   buildBookContentCandidates,
   buildBuyerIntentCandidates,
   buildCategoryCandidates,
   buildCompTitleCandidates,
   buildGenreMetadataCandidates,
+  buildLocCandidates,
+  buildProductDescriptionCandidates,
+  buildQnaCandidates,
+  buildReviewCandidates,
+  buildSynonymCandidates,
+  buildWikidataCandidates,
+  buildWikipediaCandidates,
   finalizeKeywords,
   mergeKeywordCandidates,
   RECOMMENDED_MAX_KEYWORDS,
@@ -16,7 +29,12 @@ import {
 import {
   buildAutocompleteSeeds,
   getAutocompleteKeywordSet,
+  getDuckDuckGoAutocompleteKeywordSet,
   getGoogleAutocompleteKeywordSet,
+  getYoutubeAutocompleteKeywordSet,
+  scrapeAuthorCatalog,
+  scrapeCustomerQnA,
+  scrapeCustomerReviews,
   scrapeProductPage,
   scrapeRelatedCategories,
 } from "@/lib/scrape";
@@ -107,26 +125,49 @@ export async function POST(req: NextRequest) {
     ? buildAutocompleteSeeds(productPage.title, productPage.author)
     : [request.asin];
 
-  const [adsApiResult, autocompleteResult, googleAutocompleteResult, bookMetadata, relatedCategories] =
-    await Promise.all([
-      isAdsApiConfigured()
-        ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
-            .then((candidates) => ({ candidates, error: undefined as string | undefined }))
-            .catch((err: Error) => ({ candidates: [] as KeywordCandidate[], error: err.message }))
-        : Promise.resolve({
-            candidates: [] as KeywordCandidate[],
-            error: "Amazon Ads API credentials not configured.",
-          }),
-      getAutocompleteKeywordSet(seedTerms, request.marketplace),
-      getGoogleAutocompleteKeywordSet(seedTerms),
-      enrichBookMetadata({
-        isbn10: productPage.isbn10,
-        isbn13: productPage.isbn13,
-        title: productPage.title,
-        author: productPage.author,
-      }),
-      scrapeRelatedCategories(productPage.compAsins, request.marketplace),
-    ]);
+  const [
+    adsApiResult,
+    autocompleteResult,
+    googleAutocompleteResult,
+    youtubeAutocompleteResult,
+    duckDuckGoAutocompleteResult,
+    bookMetadata,
+    relatedCategories,
+    qnaQuestions,
+    reviewBodies,
+    authorCatalogTitles,
+    wikipediaCategories,
+    wikidataGenres,
+    locSubjects,
+  ] = await Promise.all([
+    isAdsApiConfigured()
+      ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
+          .then((candidates) => ({ candidates, error: undefined as string | undefined }))
+          .catch((err: Error) => ({ candidates: [] as KeywordCandidate[], error: err.message }))
+      : Promise.resolve({
+          candidates: [] as KeywordCandidate[],
+          error: "Amazon Ads API credentials not configured.",
+        }),
+    getAutocompleteKeywordSet(seedTerms, request.marketplace),
+    getGoogleAutocompleteKeywordSet(seedTerms),
+    getYoutubeAutocompleteKeywordSet(seedTerms),
+    getDuckDuckGoAutocompleteKeywordSet(seedTerms),
+    enrichBookMetadata({
+      isbn10: productPage.isbn10,
+      isbn13: productPage.isbn13,
+      title: productPage.title,
+      author: productPage.author,
+    }),
+    scrapeRelatedCategories(productPage.compAsins, request.marketplace),
+    scrapeCustomerQnA(request.asin, request.marketplace),
+    scrapeCustomerReviews(request.asin, request.marketplace),
+    productPage.authorUrl
+      ? scrapeAuthorCatalog(productPage.authorUrl, request.asin)
+      : Promise.resolve([] as string[]),
+    lookupWikipediaCategories(productPage.title),
+    lookupWikidataGenres(productPage.title),
+    lookupLocSubjects(productPage.title),
+  ]);
 
   sourceStatuses.push({
     source: "ads-api",
@@ -143,6 +184,16 @@ export async function POST(req: NextRequest) {
     source: "google-autocomplete",
     ok: googleAutocompleteResult.length > 0,
     count: googleAutocompleteResult.length,
+  });
+  sourceStatuses.push({
+    source: "youtube-autocomplete",
+    ok: youtubeAutocompleteResult.length > 0,
+    count: youtubeAutocompleteResult.length,
+  });
+  sourceStatuses.push({
+    source: "duckduckgo-autocomplete",
+    ok: duckDuckGoAutocompleteResult.length > 0,
+    count: duckDuckGoAutocompleteResult.length,
   });
   sourceStatuses.push({
     source: "google-books",
@@ -170,6 +221,14 @@ export async function POST(req: NextRequest) {
     genreMetadataCandidates.map((c) => c.text),
     productPage.title
   );
+  const synonymCandidates = buildSynonymCandidates(genreMetadataCandidates.map((c) => c.text));
+  const productDescriptionCandidates = buildProductDescriptionCandidates(productPage.descriptionText);
+  const qnaCandidates = buildQnaCandidates(qnaQuestions);
+  const reviewCandidates = buildReviewCandidates(reviewBodies);
+  const wikipediaCandidates = buildWikipediaCandidates(wikipediaCategories);
+  const wikidataCandidates = buildWikidataCandidates(wikidataGenres);
+  const locCandidates = buildLocCandidates(locSubjects);
+  const authorCatalogCandidates = buildAuthorCatalogCandidates(authorCatalogTitles);
 
   sourceStatuses.push({
     source: "comp-title",
@@ -186,16 +245,66 @@ export async function POST(req: NextRequest) {
     ok: buyerIntentCandidates.length > 0,
     count: buyerIntentCandidates.length,
   });
+  sourceStatuses.push({
+    source: "synonym-expansion",
+    ok: synonymCandidates.length > 0,
+    count: synonymCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "product-description",
+    ok: productDescriptionCandidates.length > 0,
+    count: productDescriptionCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "customer-qna",
+    ok: qnaCandidates.length > 0,
+    count: qnaCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "customer-reviews",
+    ok: reviewCandidates.length > 0,
+    count: reviewCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "wikipedia",
+    ok: wikipediaCandidates.length > 0,
+    count: wikipediaCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "wikidata",
+    ok: wikidataCandidates.length > 0,
+    count: wikidataCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "loc-subjects",
+    ok: locCandidates.length > 0,
+    count: locCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "author-catalog",
+    ok: authorCatalogCandidates.length > 0,
+    count: authorCatalogCandidates.length,
+  });
 
   const keywords = finalizeKeywords(
     [
       adsApiResult.candidates,
       autocompleteResult,
       googleAutocompleteResult,
+      youtubeAutocompleteResult,
+      duckDuckGoAutocompleteResult,
       compTitleCandidates,
       genreMetadataCandidates,
       bookContentCandidates,
       buyerIntentCandidates,
+      synonymCandidates,
+      productDescriptionCandidates,
+      qnaCandidates,
+      reviewCandidates,
+      wikipediaCandidates,
+      wikidataCandidates,
+      locCandidates,
+      authorCatalogCandidates,
     ],
     request.defaultBid
   );

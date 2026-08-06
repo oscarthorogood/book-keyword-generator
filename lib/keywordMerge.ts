@@ -1,3 +1,5 @@
+import { expandSynonyms } from "./synonyms";
+import { extractKeyPhrases } from "./textExtract";
 import { BookMetadata, KeywordCandidate, KeywordSource, ProductPageData } from "./types";
 
 function normalize(text: string): string {
@@ -136,6 +138,93 @@ export function buildBuyerIntentCandidates(
     .map((text) => normalize(text))
     .filter(isUsableKeyword)
     .map((text) => ({ text, sources: ["buyer-intent" as const] }));
+}
+
+/**
+ * Runs the local RAKE extractor over free-form scraped text (product
+ * descriptions, Q&A, reviews) and wraps the resulting phrases as candidates
+ * under `source`. Shared by the three content-mining sources below since
+ * they differ only in where the raw text came from.
+ */
+function buildTextMiningCandidates(texts: string[], source: KeywordSource): KeywordCandidate[] {
+  const combined = texts.join(". ");
+  const phrases = extractKeyPhrases(combined, 20);
+  const usable = new Set<string>();
+  for (const phrase of phrases) {
+    const normalized = normalize(phrase);
+    if (isUsableKeyword(normalized)) usable.add(normalized);
+  }
+  return Array.from(usable).map((text) => ({ text, sources: [source] }));
+}
+
+export function buildProductDescriptionCandidates(descriptionText: string | undefined): KeywordCandidate[] {
+  if (!descriptionText) return [];
+  return buildTextMiningCandidates([descriptionText], "product-description");
+}
+
+export function buildQnaCandidates(questions: string[]): KeywordCandidate[] {
+  return buildTextMiningCandidates(questions, "customer-qna");
+}
+
+export function buildReviewCandidates(reviewBodies: string[]): KeywordCandidate[] {
+  return buildTextMiningCandidates(reviewBodies, "customer-reviews");
+}
+
+/**
+ * Local, offline expansion of already-extracted genre terms into related
+ * buyer-search phrasing via the curated thesaurus in lib/synonyms.ts.
+ */
+export function buildSynonymCandidates(genreTerms: string[]): KeywordCandidate[] {
+  const expanded = expandSynonyms(genreTerms);
+  const texts = new Set<string>();
+  for (const term of expanded) {
+    const normalized = normalize(term);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["synonym-expansion" as const] }));
+}
+
+export function buildWikipediaCandidates(categories: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const category of categories) {
+    const normalized = normalize(category);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["wikipedia" as const] }));
+}
+
+export function buildWikidataCandidates(genres: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const genre of genres) {
+    const normalized = normalize(genre);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["wikidata" as const] }));
+}
+
+/**
+ * LCSH subject strings often chain subdivisions with " -- " (e.g. "Great
+ * Britain -- History -- Fiction"); split those into individual thematic
+ * terms the same way category strings are split above.
+ */
+export function buildLocCandidates(subjects: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const subject of subjects) {
+    for (const piece of subject.split(/--/)) {
+      const normalized = normalize(piece);
+      if (isUsableKeyword(normalized)) texts.add(normalized);
+    }
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["loc-subjects" as const] }));
+}
+
+export function buildAuthorCatalogCandidates(titles: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const title of titles) {
+    const normalized = normalize(title);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["author-catalog" as const] }));
 }
 
 /**

@@ -20,7 +20,17 @@ export type KeywordSource =
   | "genre-metadata"
   | "buyer-intent"
   | "book-content"
-  | "google-autocomplete";
+  | "google-autocomplete"
+  | "youtube-autocomplete"
+  | "duckduckgo-autocomplete"
+  | "product-description"
+  | "customer-qna"
+  | "customer-reviews"
+  | "synonym-expansion"
+  | "wikipedia"
+  | "wikidata"
+  | "loc-subjects"
+  | "author-catalog";
 
 export interface KeywordCandidate {
   text: string;
@@ -44,11 +54,13 @@ export interface BookMetadata {
 export interface ProductPageData {
   title?: string;
   author?: string;
+  authorUrl?: string; // absolute URL to the author's Amazon page, for author-catalog lookup
   isbn10?: string;
   isbn13?: string;
   compTitles: string[]; // "customers also bought" style titles
   categories: string[]; // browse node / bestseller category text
   compAsins: string[]; // ASINs of "customers also bought" titles, for one-hop category lookup
+  descriptionText?: string; // product description / editorial review copy, for local phrase extraction
 }
 
 export interface SourceStatus {
