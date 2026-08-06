@@ -188,6 +188,23 @@ export function buildKnownTagCandidates(tags: string[]): KeywordCandidate[] {
   return Array.from(texts).map((text) => ({ text, sources: ["user-tag" as const] }));
 }
 
+/**
+ * Keywords the user typed directly into the "add more" search bar. Same
+ * light length check as buildKnownTagCandidates (not the full
+ * isUsableKeyword pipeline) — a human explicitly asked for this exact term,
+ * so it skips generic-term/phrase-length filtering. The generate route
+ * still routes bare ASINs here to product targeting via extractAsinCandidates,
+ * and guarantees these a slot in the output regardless of scoring/caps.
+ */
+export function buildManualKeywordCandidates(keywords: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const keyword of keywords) {
+    const normalized = normalize(keyword);
+    if (normalized.length >= 2 && normalized.length <= 80) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["manual" as const] }));
+}
+
 // Patterns publishers/authors use to explicitly name comparable authors or
 // titles in a book's own blurb — a hand-picked, high-confidence signal
 // nothing else here sources (comp-title/comp-name come from Amazon's

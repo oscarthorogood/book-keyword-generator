@@ -38,6 +38,12 @@ export interface GenerateRequest extends CampaignIdentity {
   defaultBid?: number;
   /** User-reviewed/pruned tags from the Autofill book profile — see lib/keywordMerge.ts#buildKnownTagCandidates. */
   knownTags?: string[];
+  /** Which keyword sources to fold into the candidate pool. Omitted = every source (see ALL_KEYWORD_SOURCES in the generate route). */
+  sources?: KeywordSource[];
+  /** Which ad-group buckets to build into the Bulksheet. Omitted = all three. */
+  keywordTypes?: KeywordGroupType[];
+  /** Free-typed keywords the user explicitly wants included — bypass scoring/caps, guaranteed a slot. See buildManualKeywordCandidates. */
+  manualKeywords?: string[];
 }
 
 export type KeywordSource =
@@ -53,7 +59,11 @@ export type KeywordSource =
   | "book-description"
   | "synonym"
   | "goodreads-tags"
-  | "user-tag";
+  | "user-tag"
+  | "manual";
+
+/** The three ad-group buckets a Manual campaign splits into — see the generate route and README "Campaign structure". */
+export type KeywordGroupType = "tropes" | "comp-names" | "product-targeting";
 
 export interface KeywordCandidate {
   text: string;

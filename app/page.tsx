@@ -3,6 +3,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildCampaignName } from "@/lib/naming";
+import type { KeywordGroupType, KeywordSource } from "@/lib/types";
 
 type MatchType = "broad" | "phrase" | "exact";
 
@@ -11,6 +12,30 @@ const MATCH_TYPES: { value: MatchType; label: string }[] = [
   { value: "broad", label: "Broad" },
   { value: "phrase", label: "Phrase" },
   { value: "exact", label: "Exact" },
+];
+
+// Mirrors ALL_KEYWORD_SOURCES in app/api/generate/route.ts — "manual" isn't
+// here since search-bar additions are always guaranteed a slot, not toggled.
+const KEYWORD_SOURCES: { value: KeywordSource; label: string }[] = [
+  { value: "ads-api", label: "Amazon Ads API" },
+  { value: "autocomplete", label: "Amazon Autocomplete" },
+  { value: "google-autocomplete", label: "Google Autocomplete" },
+  { value: "comp-title", label: "Comp Title Categories" },
+  { value: "comp-name", label: "Comp Author/Title Crawl" },
+  { value: "genre-metadata", label: "Genre & Subject Metadata" },
+  { value: "buyer-intent", label: "Buyer-Intent Templates" },
+  { value: "book-content", label: "Google Books Content Terms" },
+  { value: "review-language", label: "Review Language Mining" },
+  { value: "book-description", label: "Book Description / Blurb" },
+  { value: "synonym", label: "Datamuse Synonyms" },
+  { value: "goodreads-tags", label: "Goodreads Tags" },
+  { value: "user-tag", label: "Your Reviewed Tags" },
+];
+
+const KEYWORD_TYPES: { value: KeywordGroupType; label: string; hint: string }[] = [
+  { value: "tropes", label: "Tropes & Themes", hint: "Genre/subject terms, buyer-intent phrasing, review-mined language" },
+  { value: "comp-names", label: "Comp Authors & Titles", hint: "Bare comparable author/title names, exact match only" },
+  { value: "product-targeting", label: "Product Targeting", hint: "Comparable ASINs, bid directly against their listings" },
 ];
 
 interface SourceStatus {
@@ -35,6 +60,15 @@ export default function Home() {
   const [dailyBudget, setDailyBudget] = useState("10");
   const [startDate, setStartDate] = useState(todayIso());
   const [matchTypes, setMatchTypes] = useState<MatchType[]>(["broad", "phrase", "exact"]);
+
+  const [selectedSources, setSelectedSources] = useState<KeywordSource[]>(
+    KEYWORD_SOURCES.map((s) => s.value)
+  );
+  const [selectedKeywordTypes, setSelectedKeywordTypes] = useState<KeywordGroupType[]>(
+    KEYWORD_TYPES.map((t) => t.value)
+  );
+  const [manualKeywords, setManualKeywords] = useState<string[]>([]);
+  const [manualKeywordInput, setManualKeywordInput] = useState("");
 
   const [useRrpBidding, setUseRrpBidding] = useState(true);
   const [rrp, setRrp] = useState("14.99");
@@ -64,6 +98,7 @@ export default function Home() {
   const [tropesKeywordCount, setTropesKeywordCount] = useState<number | null>(null);
   const [compNameKeywordCount, setCompNameKeywordCount] = useState<number | null>(null);
   const [productTargetCount, setProductTargetCount] = useState<number | null>(null);
+  const [manualKeywordCount, setManualKeywordCount] = useState<number | null>(null);
   const [recommendedRange, setRecommendedRange] = useState<string | null>(null);
   const [resultCampaignName, setResultCampaignName] = useState<string | null>(null);
   const [aiRankingUsed, setAiRankingUsed] = useState<boolean>(false);
@@ -86,6 +121,30 @@ export default function Home() {
     setMatchTypes((prev) =>
       prev.includes(value) ? prev.filter((m) => m !== value) : [...prev, value]
     );
+  }
+
+  function toggleSource(value: KeywordSource) {
+    setSelectedSources((prev) =>
+      prev.includes(value) ? prev.filter((s) => s !== value) : [...prev, value]
+    );
+  }
+
+  function toggleKeywordType(value: KeywordGroupType) {
+    setSelectedKeywordTypes((prev) =>
+      prev.includes(value) ? prev.filter((t) => t !== value) : [...prev, value]
+    );
+  }
+
+  function addManualKeyword() {
+    const trimmed = manualKeywordInput.trim().toLowerCase();
+    if (trimmed && !manualKeywords.includes(trimmed)) {
+      setManualKeywords((prev) => [...prev, trimmed]);
+    }
+    setManualKeywordInput("");
+  }
+
+  function removeManualKeyword(keyword: string) {
+    setManualKeywords((prev) => prev.filter((k) => k !== keyword));
   }
 
   async function handleAutofill() {
@@ -151,6 +210,7 @@ export default function Home() {
     setTropesKeywordCount(null);
     setCompNameKeywordCount(null);
     setProductTargetCount(null);
+    setManualKeywordCount(null);
     setRecommendedRange(null);
     setResultCampaignName(null);
 
@@ -167,6 +227,9 @@ export default function Home() {
         startDate,
         matchTypes,
         knownTags: profileTags,
+        sources: selectedSources,
+        keywordTypes: selectedKeywordTypes,
+        manualKeywords,
       };
       if (useRrpBidding) {
         body.bidEconomics = {
@@ -196,6 +259,7 @@ export default function Home() {
       const tropesHeader = res.headers.get("X-Tropes-Keyword-Count");
       const compNameHeader = res.headers.get("X-Comp-Name-Keyword-Count");
       const productTargetHeader = res.headers.get("X-Product-Target-Count");
+      const manualKeywordHeader = res.headers.get("X-Manual-Keyword-Count");
       const rangeHeader = res.headers.get("X-Recommended-Keyword-Range");
       const campaignNameHeader = res.headers.get("X-Campaign-Name");
       const aiRankingHeader = res.headers.get("X-Ai-Ranking-Used");
@@ -203,6 +267,7 @@ export default function Home() {
       if (tropesHeader) setTropesKeywordCount(Number(tropesHeader));
       if (compNameHeader) setCompNameKeywordCount(Number(compNameHeader));
       if (productTargetHeader) setProductTargetCount(Number(productTargetHeader));
+      if (manualKeywordHeader) setManualKeywordCount(Number(manualKeywordHeader));
       if (rangeHeader) setRecommendedRange(rangeHeader);
       if (campaignNameHeader) setResultCampaignName(decodeURIComponent(campaignNameHeader));
       setAiRankingUsed(aiRankingHeader === "true");
@@ -586,6 +651,57 @@ export default function Home() {
               </div>
 
               <div className="card">
+                <p className="card-title mb-4">Keyword Types</p>
+                <p className="field-hint mb-3" style={{ marginTop: 0 }}>
+                  Which ad groups to build into the Bulksheet. All three are selected by
+                  default; deselecting one skips it entirely rather than leaving it empty.
+                </p>
+                <div className="flex flex-col gap-2">
+                  {KEYWORD_TYPES.map(({ value, label, hint }) => (
+                    <label key={value} className="option-card">
+                      <input
+                        type="checkbox"
+                        className="mt-0.5"
+                        checked={selectedKeywordTypes.includes(value)}
+                        onChange={() => toggleKeywordType(value)}
+                      />
+                      <span>
+                        {label}
+                        <span className="block text-xs font-normal mt-0.5" style={{ color: "var(--muted)" }}>
+                          {hint}
+                        </span>
+                      </span>
+                    </label>
+                  ))}
+                </div>
+                {selectedKeywordTypes.length === 0 && (
+                  <p className="field-hint" style={{ color: "var(--accent-red)" }}>
+                    Select at least one keyword type.
+                  </p>
+                )}
+              </div>
+
+              <div className="card">
+                <p className="card-title mb-4">Keyword Sources</p>
+                <p className="field-hint mb-3" style={{ marginTop: 0 }}>
+                  Which free sources to fold into the candidate pool. All are on by default —
+                  deselect any you don&apos;t want contributing keywords this run.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {KEYWORD_SOURCES.map(({ value, label }) => (
+                    <label key={value} className="chip-toggle">
+                      <input
+                        type="checkbox"
+                        checked={selectedSources.includes(value)}
+                        onChange={() => toggleSource(value)}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card">
                 <p className="card-title mb-4">Match Types</p>
                 <p className="field-hint mb-3" style={{ marginTop: 0 }}>
                   Applies to the Tropes &amp; Themes ad group only. Comp Authors &amp; Titles
@@ -606,9 +722,48 @@ export default function Home() {
                 </div>
               </div>
 
+              <div className="card">
+                <p className="card-title mb-4">Add Keywords</p>
+                <p className="field-hint mb-3" style={{ marginTop: 0 }}>
+                  Search for and add keywords yourself — added terms are guaranteed a slot
+                  in Tropes &amp; Themes, ranked above generated candidates. Bare ASINs are
+                  routed to Product Targeting instead.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {manualKeywords.map((keyword) => (
+                    <button
+                      key={keyword}
+                      type="button"
+                      onClick={() => removeManualKeyword(keyword)}
+                      title="Remove keyword"
+                      className="chip-tag"
+                    >
+                      {keyword} ×
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={manualKeywordInput}
+                    onChange={(e) => setManualKeywordInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addManualKeyword();
+                      }
+                    }}
+                    placeholder="Search for a keyword to add"
+                    className="input"
+                  />
+                  <button type="button" onClick={addManualKeyword} className="btn-pill-outline shrink-0">
+                    Add
+                  </button>
+                </div>
+              </div>
+
               <button
                 type="submit"
-                disabled={isLoading || matchTypes.length === 0}
+                disabled={isLoading || matchTypes.length === 0 || selectedKeywordTypes.length === 0}
                 className="btn-pill-dark w-full py-3 text-sm"
               >
                 {isLoading ? "Generating…" : "Generate Manual Bulksheet"}
@@ -652,7 +807,7 @@ export default function Home() {
               </span>
             </div>
 
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <div className="stat-tile tone-purple">
                 <span className="stat-value">{tropesKeywordCount ?? 0}</span>
                 <span className="stat-label">Tropes &amp; Themes</span>
@@ -664,6 +819,10 @@ export default function Home() {
               <div className="stat-tile tone-yellow">
                 <span className="stat-value">{productTargetCount ?? 0}</span>
                 <span className="stat-label">Product Targets</span>
+              </div>
+              <div className="stat-tile tone-green">
+                <span className="stat-value">{manualKeywordCount ?? 0}</span>
+                <span className="stat-label">Added by You</span>
               </div>
               <div className="stat-tile tone-purple">
                 <span className="stat-value">{aiRankingUsed ? "AI" : "Heuristic"}</span>

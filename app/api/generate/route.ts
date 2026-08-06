@@ -15,6 +15,7 @@ import {
   buildDescriptionCandidates,
   buildGenreMetadataCandidates,
   buildKnownTagCandidates,
+  buildManualKeywordCandidates,
   collapseNearDuplicates,
   COMP_NAME_MAX_KEYWORDS,
   extractAsinCandidates,
@@ -40,7 +41,16 @@ import {
   scrapeProductPage,
   scrapeRelatedCompetitors,
 } from "@/lib/scrape";
-import { BidEconomics, GenerateRequest, KeywordCandidate, Marketplace, MatchType, SourceStatus } from "@/lib/types";
+import {
+  BidEconomics,
+  GenerateRequest,
+  KeywordCandidate,
+  KeywordGroupType,
+  KeywordSource,
+  Marketplace,
+  MatchType,
+  SourceStatus,
+} from "@/lib/types";
 
 export const runtime = "nodejs";
 // Give the autocomplete sweeps (dozens of small outbound requests) room to
@@ -50,6 +60,25 @@ export const maxDuration = 60;
 
 const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
 const MATCH_TYPES: MatchType[] = ["broad", "phrase", "exact"];
+
+// Every togglable keyword source — "manual" isn't here since user-typed
+// keywords are always guaranteed a slot regardless of source selection.
+const ALL_KEYWORD_SOURCES: KeywordSource[] = [
+  "ads-api",
+  "autocomplete",
+  "google-autocomplete",
+  "comp-title",
+  "comp-name",
+  "genre-metadata",
+  "buyer-intent",
+  "book-content",
+  "review-language",
+  "book-description",
+  "synonym",
+  "goodreads-tags",
+  "user-tag",
+];
+const ALL_KEYWORD_GROUP_TYPES: KeywordGroupType[] = ["tropes", "comp-names", "product-targeting"];
 
 function validate(body: unknown): { value: GenerateRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "Invalid request body." };
@@ -122,6 +151,33 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
       ? (b.knownTags as string[]).map((t) => t.trim()).filter(Boolean)
       : undefined;
 
+  // Omitted entirely = every source; present-but-empty = the user
+  // deliberately deselected all of them (rely on manual keywords alone).
+  const sources: KeywordSource[] = Array.isArray(b.sources)
+    ? (b.sources as unknown[]).filter(
+        (s): s is KeywordSource => typeof s === "string" && ALL_KEYWORD_SOURCES.includes(s as KeywordSource)
+      )
+    : ALL_KEYWORD_SOURCES;
+
+  const keywordTypesRaw = Array.isArray(b.keywordTypes) ? b.keywordTypes : ALL_KEYWORD_GROUP_TYPES;
+  if (
+    keywordTypesRaw.length === 0 ||
+    !keywordTypesRaw.every((t) => ALL_KEYWORD_GROUP_TYPES.includes(t as KeywordGroupType))
+  ) {
+    return {
+      error: "Select at least one keyword type (Tropes & Themes, Comp Authors & Titles, Product Targeting).",
+    };
+  }
+  const keywordTypes = keywordTypesRaw as KeywordGroupType[];
+
+  const manualKeywords = Array.isArray(b.manualKeywords)
+    ? (b.manualKeywords as unknown[])
+        .filter((k): k is string => typeof k === "string")
+        .map((k) => k.trim())
+        .filter(Boolean)
+        .slice(0, 100)
+    : [];
+
   return {
     value: {
       asin,
@@ -137,6 +193,9 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
       bidEconomics,
       defaultBid,
       knownTags,
+      sources,
+      keywordTypes,
+      manualKeywords,
     },
   };
 }
@@ -338,25 +397,52 @@ export async function POST(req: NextRequest) {
     count: goodreadsTagCandidates.length,
   });
 
+  // User-deselected sources still ran (they're entangled with data other
+  // sources depend on — see the comment on ALL_KEYWORD_SOURCES), but their
+  // candidates are excluded from the merge below, and their status entry
+  // here is overwritten so the UI doesn't imply they contributed keywords.
+  const enabledSources = new Set(request.sources);
+  const sourceCandidateGroups: Partial<Record<KeywordSource, KeywordCandidate[]>> = {
+    "ads-api": adsApiKeywords,
+    autocomplete: autocompleteKeywords,
+    "google-autocomplete": googleAutocompleteKeywords,
+    "comp-title": compTitleCandidates,
+    "comp-name": deepCompNameCandidates,
+    "user-tag": knownTagCandidates,
+    "genre-metadata": genreMetadataCandidates,
+    "book-content": bookContentCandidates,
+    "buyer-intent": buyerIntentCandidates,
+    "book-description": descriptionCandidates,
+    "review-language": reviewLanguageCandidates,
+    synonym: synonymCandidates,
+    "goodreads-tags": goodreadsTagCandidates,
+  };
+  for (const status of sourceStatuses) {
+    if (status.source in sourceCandidateGroups && !enabledSources.has(status.source as KeywordSource)) {
+      status.ok = false;
+      status.error = "Deselected — not used for this generation.";
+    }
+  }
+
+  // Free-typed additions from the search bar — guaranteed a slot further
+  // down, so kept out of this merge (which feeds the scored/capped
+  // shortlist) and handled separately after ranking.
+  const { keywords: manualKeywordCandidates, asins: manualAsins } = extractAsinCandidates(
+    buildManualKeywordCandidates(request.manualKeywords ?? [])
+  );
+  sourceStatuses.push({
+    source: "manual",
+    ok: manualKeywordCandidates.length + manualAsins.length > 0,
+    count: manualKeywordCandidates.length + manualAsins.length,
+  });
+
   // Merge + dedupe everything once, then split into the two Manual ad group
   // buckets the research blueprint recommends tracking separately (section
   // 5) and score/cap each independently — a strong comp-author name
   // shouldn't lose its ad group slot to a flood of tropes candidates sharing
   // one combined cap.
   const merged = mergeKeywordCandidates(
-    adsApiKeywords,
-    autocompleteKeywords,
-    googleAutocompleteKeywords,
-    compTitleCandidates,
-    deepCompNameCandidates,
-    knownTagCandidates,
-    genreMetadataCandidates,
-    bookContentCandidates,
-    buyerIntentCandidates,
-    descriptionCandidates,
-    reviewLanguageCandidates,
-    synonymCandidates,
-    goodreadsTagCandidates
+    ...ALL_KEYWORD_SOURCES.filter((s) => enabledSources.has(s)).map((s) => sourceCandidateGroups[s] ?? [])
   );
   const { tropes: tropesCandidates, compNames: compNameCandidates } = splitKeywordsByCategory(
     collapseNearDuplicates(merged)
@@ -414,48 +500,72 @@ export async function POST(req: NextRequest) {
     compNameKeywords = compNamesShortlist.slice(0, COMP_NAME_MAX_KEYWORDS);
   }
 
+  // Manually-added keywords bypass scoring/caps entirely — the user typed
+  // them on purpose, so neither the heuristic scorer nor the AI pass gets a
+  // vote on whether they survive. Prepended so they sort first in the
+  // Bulksheet (best-first ordering), at the ad group's full base bid rather
+  // than a source-agreement-discounted one.
+  const existingTropesText = new Set(tropesKeywords.map((k) => k.text.toLowerCase()));
+  const guaranteedManualKeywords = manualKeywordCandidates
+    .filter((k) => !existingTropesText.has(k.text.toLowerCase()))
+    .map((k) => ({ ...k, suggestedBid: tropesBid }));
+  tropesKeywords = [...guaranteedManualKeywords, ...tropesKeywords];
+
   // Product targeting isn't just the whole targeting story on its own either
   // — comp ASINs from the product page carousel, the deep crawl's first- and
-  // second-hop ASINs, plus any ASIN-shaped "keywords" pulled out above. See
+  // second-hop ASINs, plus any ASIN-shaped "keywords" pulled out above (now
+  // including any the user typed directly into the search bar). See
   // learnings doc, section 4.
   const productTargets = mergeProductTargetCandidates(
     buildProductTargetCandidates(productPage.compAsins, "comp-title"),
     buildProductTargetCandidates(relatedCompetitors.productTargetAsins, "comp-title"),
-    buildProductTargetCandidates([...adsApiAsins, ...autocompleteAsins, ...googleAsins], "autocomplete")
+    buildProductTargetCandidates([...adsApiAsins, ...autocompleteAsins, ...googleAsins], "autocomplete"),
+    buildProductTargetCandidates(manualAsins, "manual")
   ).slice(0, PRODUCT_TARGET_MAX);
 
-  if (tropesKeywords.length === 0 && compNameKeywords.length === 0 && productTargets.length === 0) {
-    return NextResponse.json(
-      {
-        error:
-          "No keyword or product-targeting candidates could be generated for this ASIN. All sources failed or returned nothing.",
-        sources: sourceStatuses,
-      },
-      { status: 502 }
-    );
-  }
-
-  const adGroups: SpmAdGroup[] = [
-    {
+  // Only the ad groups the user selected make it into the Bulksheet — an
+  // empty bucket for a deselected type isn't an error, it's the ask.
+  const keywordTypes = new Set(request.keywordTypes);
+  const adGroups: SpmAdGroup[] = [];
+  if (keywordTypes.has("tropes")) {
+    adGroups.push({
       name: buildAdGroupName("tropes"),
       defaultBid: tropesBid,
       keywords: tropesKeywords,
       matchTypes: request.matchTypes,
-    },
-    {
+    });
+  }
+  if (keywordTypes.has("comp-names")) {
+    adGroups.push({
       name: buildAdGroupName("comp-names"),
       defaultBid: compNamesBid,
       keywords: compNameKeywords,
       // Blueprint: Competitor Authors & Titles ad group is Exact Match only
       // — readers searching a name are ready to buy, don't dilute with Broad.
       matchTypes: ["exact"],
-    },
-    {
+    });
+  }
+  if (keywordTypes.has("product-targeting")) {
+    adGroups.push({
       name: buildAdGroupName("product-targeting"),
       defaultBid: productTargetingBid,
       productTargets,
-    },
-  ];
+    });
+  }
+
+  const hasAnyResult = adGroups.some(
+    (g) => (g.keywords?.length ?? 0) > 0 || (g.productTargets?.length ?? 0) > 0
+  );
+  if (!hasAnyResult) {
+    return NextResponse.json(
+      {
+        error:
+          "No keyword or product-targeting candidates could be generated for the selected keyword types and sources. All sources failed, returned nothing, or were deselected.",
+        sources: sourceStatuses,
+      },
+      { status: 502 }
+    );
+  }
 
   const buffer = await buildBulksheet({
     campaignName,
@@ -466,11 +576,18 @@ export async function POST(req: NextRequest) {
     adGroups,
   });
 
+  // Report counts for what's actually in the file — 0 for a deselected ad
+  // group, not the number that was computed but left out.
+  const finalTropesCount = keywordTypes.has("tropes") ? tropesKeywords.length : 0;
+  const finalCompNameCount = keywordTypes.has("comp-names") ? compNameKeywords.length : 0;
+  const finalProductTargetCount = keywordTypes.has("product-targeting") ? productTargets.length : 0;
+
   return fileResponse(buffer, campaignName, {
-    "X-Keyword-Count": String(tropesKeywords.length + compNameKeywords.length),
-    "X-Tropes-Keyword-Count": String(tropesKeywords.length),
-    "X-Comp-Name-Keyword-Count": String(compNameKeywords.length),
-    "X-Product-Target-Count": String(productTargets.length),
+    "X-Keyword-Count": String(finalTropesCount + finalCompNameCount),
+    "X-Tropes-Keyword-Count": String(finalTropesCount),
+    "X-Comp-Name-Keyword-Count": String(finalCompNameCount),
+    "X-Product-Target-Count": String(finalProductTargetCount),
+    "X-Manual-Keyword-Count": String(guaranteedManualKeywords.length + (manualAsins.length > 0 ? manualAsins.length : 0)),
     "X-Recommended-Keyword-Range": `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
     "X-Source-Status": encodeURIComponent(JSON.stringify(sourceStatuses)),
     "X-Ai-Ranking-Used": String(aiRankingUsed),
