@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { scrapeProductPage } from "@/lib/scrape";
 import { Marketplace } from "@/lib/types";
 
@@ -6,7 +7,6 @@ export const runtime = "nodejs";
 export const maxDuration = 20;
 
 const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
-const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
 /**
  * Lightweight lookup used by the "Autofill" button on the Generate/Harvest
@@ -15,11 +15,12 @@ const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
  * doesn't have to type them in by hand before they've even seen the book.
  */
 export async function GET(req: NextRequest) {
-  const asin = req.nextUrl.searchParams.get("asin")?.trim().toUpperCase() ?? "";
+  const rawAsin = req.nextUrl.searchParams.get("asin") ?? "";
+  const asin = normalizeAsinOrIsbn(rawAsin);
   const marketplace = req.nextUrl.searchParams.get("marketplace") as Marketplace | null;
 
-  if (!ASIN_PATTERN.test(asin)) {
-    return NextResponse.json({ error: "ASIN must be a 10-character alphanumeric code." }, { status: 400 });
+  if (!asin) {
+    return NextResponse.json({ error: "Enter a valid ASIN, ISBN-10, or ISBN-13." }, { status: 400 });
   }
   if (!marketplace || !MARKETPLACES.includes(marketplace)) {
     return NextResponse.json(
@@ -44,6 +45,7 @@ export async function GET(req: NextRequest) {
   }
 
   return NextResponse.json({
+    asin,
     title: productPage.title,
     author: productPage.author,
     seriesName: productPage.seriesName,

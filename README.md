@@ -112,6 +112,16 @@ string split, no lookup table needed (`lib/naming.ts`). The generator and
 harvester both compute it server-side from structured fields rather than
 accepting a free-text campaign name.
 
+### ASIN or ISBN
+
+Every ASIN/ISBN field (Generate, Harvest, Autofill) accepts an ISBN instead
+of an ASIN — for print books, Amazon assigns the ISBN-10 directly as the
+ASIN, so they're the same value. ISBN-13 (with or without hyphens) is
+converted to its ISBN-10 equivalent and used as the ASIN
+(`normalizeAsinOrIsbn` in `lib/isbn.ts`); 979-prefixed ISBN-13s have no
+ISBN-10 equivalent and are rejected. All three routes normalize
+server-side — the client never has to get this right on its own.
+
 ## Bid economics
 
 Bids are derived from RRP rather than a flat default, matching the

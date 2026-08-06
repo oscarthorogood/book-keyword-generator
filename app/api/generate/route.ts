@@ -18,6 +18,7 @@ import {
   scoreAndTierBids,
   splitKeywordsByCategory,
 } from "@/lib/keywordMerge";
+import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildAdGroupName, buildCampaignName } from "@/lib/naming";
 import {
   buildProductTargetCandidates,
@@ -51,14 +52,14 @@ export const maxDuration = 60;
 const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
 const MATCH_TYPES: MatchType[] = ["broad", "phrase", "exact"];
 const CAMPAIGN_TYPES: CampaignType[] = ["SPA", "SPM"];
-const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
 function validate(body: unknown): { value: GenerateRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "Invalid request body." };
   const b = body as Record<string, unknown>;
 
-  if (typeof b.asin !== "string" || !ASIN_PATTERN.test(b.asin.trim())) {
-    return { error: "ASIN must be a 10-character alphanumeric code." };
+  const asin = typeof b.asin === "string" ? normalizeAsinOrIsbn(b.asin) : null;
+  if (!asin) {
+    return { error: "Enter a valid ASIN, ISBN-10, or ISBN-13." };
   }
   if (typeof b.marketplace !== "string" || !MARKETPLACES.includes(b.marketplace as Marketplace)) {
     return { error: `Marketplace must be one of ${MARKETPLACES.join(", ")}.` };
@@ -127,7 +128,7 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
 
   return {
     value: {
-      asin: b.asin.trim().toUpperCase(),
+      asin,
       marketplace: b.marketplace as Marketplace,
       campaignType,
       creatorInitials: b.creatorInitials.trim(),

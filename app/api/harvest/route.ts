@@ -9,6 +9,7 @@ import {
   parseSearchTermReport,
   summarizeHarvest,
 } from "@/lib/harvest";
+import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildAdGroupName, buildCampaignName } from "@/lib/naming";
 import { BidEconomics, CampaignIdentity, Marketplace } from "@/lib/types";
 
@@ -16,7 +17,6 @@ export const runtime = "nodejs";
 export const maxDuration = 30;
 
 const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
-const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
 function readString(form: FormData, key: string): string | undefined {
   const value = form.get(key);
@@ -50,9 +50,10 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Attach a Search Term report (.xlsx or .csv)." }, { status: 400 });
   }
 
-  const asin = readString(form, "asin")?.toUpperCase();
-  if (!asin || !ASIN_PATTERN.test(asin)) {
-    return NextResponse.json({ error: "ASIN must be a 10-character alphanumeric code." }, { status: 400 });
+  const rawAsin = readString(form, "asin");
+  const asin = rawAsin ? normalizeAsinOrIsbn(rawAsin) : null;
+  if (!asin) {
+    return NextResponse.json({ error: "Enter a valid ASIN, ISBN-10, or ISBN-13." }, { status: 400 });
   }
 
   const marketplace = readString(form, "marketplace") as Marketplace | undefined;

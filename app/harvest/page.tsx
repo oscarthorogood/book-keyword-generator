@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { ChangeEvent, FormEvent, useMemo, useState } from "react";
+import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildCampaignName } from "@/lib/naming";
 
 const MARKETPLACES = ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const;
@@ -52,9 +53,10 @@ export default function Harvest() {
   const [resultCampaignName, setResultCampaignName] = useState<string | null>(null);
 
   const previewName = useMemo(() => {
-    if (!asin.trim() || !creatorInitials.trim() || !authorName.trim() || !bookTitle.trim()) return null;
+    const normalizedAsin = normalizeAsinOrIsbn(asin);
+    if (!normalizedAsin || !creatorInitials.trim() || !authorName.trim() || !bookTitle.trim()) return null;
     return buildCampaignName({
-      asin: asin.trim().toUpperCase(),
+      asin: normalizedAsin,
       marketplace,
       campaignType: "SPM",
       creatorInitials: creatorInitials.trim(),
@@ -70,9 +72,9 @@ export default function Harvest() {
   }
 
   async function handleAutofill() {
-    const trimmed = asin.trim().toUpperCase();
-    if (!/^[A-Z0-9]{10}$/.test(trimmed)) {
-      setAutofillError("Enter a valid 10-character ASIN first.");
+    const normalized = normalizeAsinOrIsbn(asin);
+    if (!normalized) {
+      setAutofillError("Enter a valid ASIN, ISBN-10, or ISBN-13 first.");
       setAutofillStatus("error");
       return;
     }
@@ -82,7 +84,7 @@ export default function Harvest() {
 
     try {
       const res = await fetch(
-        `/api/lookup?asin=${encodeURIComponent(trimmed)}&marketplace=${marketplace}`
+        `/api/lookup?asin=${encodeURIComponent(normalized)}&marketplace=${marketplace}`
       );
       const body = await res.json().catch(() => ({}));
 
@@ -92,6 +94,7 @@ export default function Harvest() {
         return;
       }
 
+      if (body.asin) setAsin(body.asin);
       if (body.title) setBookTitle(body.title);
       if (body.author) setAuthorName(body.author);
       if (body.seriesName) setSeriesName(body.seriesName);
@@ -204,14 +207,14 @@ export default function Harvest() {
             <input required type="file" accept=".xlsx,.csv" onChange={handleFileChange} className="input" />
           </Field>
 
-          <Field label="ASIN">
+          <Field label="ASIN or ISBN">
             <div className="flex gap-2">
               <input
                 required
                 value={asin}
                 onChange={(e) => setAsin(e.target.value)}
-                placeholder="B0XXXXXXXX"
-                maxLength={10}
+                placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
+                maxLength={17}
                 className="input"
               />
               <button
