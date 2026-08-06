@@ -22,10 +22,43 @@ const AUTOCOMPLETE_MARKET_ID: Record<Marketplace, string> = {
   ES: "44551",
 };
 
+const SCRAPER_PROXY_COUNTRY: Record<Marketplace, string> = {
+  US: "us",
+  CA: "ca",
+  UK: "gb",
+  DE: "de",
+  FR: "fr",
+  IT: "it",
+  ES: "es",
+};
+
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
 
+// Amazon blocks/CAPTCHAs product-page requests from datacenter IPs (Vercel,
+// AWS, etc.) at the network level — see lib/scrape.ts's looksLikeBotCheck.
+// When set, routes just the full product-page HTML fetch (scrapeProductPage)
+// through ScraperAPI's residential/rotating-IP proxy instead of hitting
+// Amazon directly. NOT applied to the autocomplete JSON endpoints below —
+// those run dozens of times per generate call, which would burn through a
+// proxy's free tier fast, and it's unconfirmed whether they're even blocked
+// the same way. Unset (local dev, usually a residential IP) falls back to a
+// direct fetch.
+const SCRAPER_PROXY_API_KEY = process.env.SCRAPER_PROXY_API_KEY;
+
+function resolveProductPageFetchUrl(targetUrl: string, marketplace: Marketplace): string {
+  if (!SCRAPER_PROXY_API_KEY) return targetUrl;
+  const params = new URLSearchParams({
+    api_key: SCRAPER_PROXY_API_KEY,
+    url: targetUrl,
+    country_code: SCRAPER_PROXY_COUNTRY[marketplace],
+  });
+  return `https://api.scraperapi.com/?${params.toString()}`;
+}
+
 const PAGE_TIMEOUT_MS = 8000;
+// Proxied requests add relay latency on top of Amazon's own response time.
+const PROXIED_PAGE_TIMEOUT_MS = 20000;
 const AUTOCOMPLETE_TIMEOUT_MS = 4000;
 
 async function fetchWithTimeout(
@@ -324,11 +357,12 @@ export async function scrapeProductPage(
 ): Promise<ProductPageData> {
   const domain = AMAZON_DOMAINS[marketplace];
   const url = `https://www.${domain}/dp/${encodeURIComponent(asin)}`;
+  const fetchUrl = resolveProductPageFetchUrl(url, marketplace);
   const logPrefix = `[scrapeProductPage] ${asin} (${marketplace})`;
 
   try {
     const res = await fetchWithTimeout(
-      url,
+      fetchUrl,
       {
         headers: {
           "User-Agent": USER_AGENT,
@@ -336,7 +370,7 @@ export async function scrapeProductPage(
           "Accept-Language": "en-US,en;q=0.9",
         },
       },
-      PAGE_TIMEOUT_MS
+      SCRAPER_PROXY_API_KEY ? PROXIED_PAGE_TIMEOUT_MS : PAGE_TIMEOUT_MS
     );
     if (!res.ok) {
       console.error(`${logPrefix} -> HTTP ${res.status}`);

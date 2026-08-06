@@ -266,11 +266,44 @@ the app still generates a file from autocomplete + comp-title + genre-metadata
 + buyer-intent keywords alone (at a discounted bid, since none of those
 sources carry real bid data).
 
+Optional:
+
+- `SCRAPER_PROXY_API_KEY` — see "Scraping from a cloud deployment" below.
+  Needed on Vercel/most cloud hosts; not needed for local dev.
+
 ### Deploy
 
 Push this repo to GitHub, then import it in Vercel and set the environment
 variables above in the Vercel project settings. Every push to the connected
 branch auto-deploys.
+
+### Scraping from a cloud deployment (Vercel, etc.)
+
+Amazon blocks/CAPTCHAs product-page requests from datacenter IP ranges at the
+network level — this is routine for Vercel, AWS, and similar cloud hosts, and
+much rarer from a home IP. When it happens, Autofill and the Manual (SPM)
+generator's comp-title/comp-name crawl, product targeting, and
+review-language mining all degrade to "no results" (never a hard failure —
+see `scrapeProductPage` in `lib/scrape.ts`), and `/api/lookup` returns a
+"blocked" error you can see in the UI.
+
+The fix: set `SCRAPER_PROXY_API_KEY` to a [ScraperAPI](https://www.scraperapi.com)
+key (free tier is ~1,000 requests/month, plenty for single-user use). When
+set, `scrapeProductPage`'s fetch routes through ScraperAPI's residential/
+rotating-IP proxy (`resolveProductPageFetchUrl` in `lib/scrape.ts`) instead of
+hitting `amazon.com` directly; unset, it falls back to a direct fetch (fine
+for local dev). This is scoped to the full product-page HTML fetch only —
+**not** the autocomplete JSON endpoints (`getAutocompleteSuggestions`), which
+run dozens of times per generate call and would burn through a proxy's free
+tier fast, and it's unconfirmed whether Amazon blocks those the same way. If
+you find autocomplete is *also* blocked on your deployment, the same
+`resolveProductPageFetchUrl` pattern can be applied there — check server logs
+first (`[scrapeProductPage] ... -> HTTP ...` / `... bot/CAPTCHA check`) to
+confirm before spending proxy credits on it.
+
+To swap in a different proxy provider (ScrapingBee, ZenRows, Bright Data,
+etc.), edit `resolveProductPageFetchUrl` — most use a similar
+`?api_key=...&url=...` query-param shape.
 
 ## Known open items
 
