@@ -18,6 +18,13 @@ export const metadata: Metadata = {
     "Enter a book ASIN/ISBN, gather metadata, scrape keyword candidates from every source, and get an AI-reviewed shortlist for a Manual Sponsored Products campaign.",
 };
 
+export const viewport = {
+  themeColor: [
+    { media: "(prefers-color-scheme: light)", color: "#f1eef7" },
+    { media: "(prefers-color-scheme: dark)", color: "#131218" },
+  ],
+};
+
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
     <html

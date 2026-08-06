@@ -230,353 +230,465 @@ export default function Home() {
 
   const isLoading = status === "loading";
 
+  const [recommendedMin] = recommendedRange?.split("-").map(Number) ?? [null];
+  const belowRecommendedMin =
+    tropesKeywordCount !== null && recommendedMin !== null && tropesKeywordCount < recommendedMin;
+
   return (
-    <main className="flex-1 flex justify-center px-4 py-12">
-      <div className="w-full max-w-xl">
-        <h1 className="text-2xl font-semibold mb-1">Amazon Book Ads Builder</h1>
-        <p className="text-sm text-neutral-500 mb-8">
-          Enter an ASIN or ISBN to gather book metadata, scrape keyword candidates from
-          every available source, and get an AI-reviewed shortlist ready for a Manual
-          Sponsored Products campaign. Every campaign follows the <code>PB_...</code>{" "}
-          naming convention so downstream tooling can parse ASIN/Author back out of the
-          name alone.
-        </p>
-
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <Field label="ASIN or ISBN">
-            <div className="flex gap-2">
-              <input
-                required
-                value={asin}
-                onChange={(e) => setAsin(e.target.value)}
-                placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
-                maxLength={17}
-                className="input"
-              />
-              <button
-                type="button"
-                onClick={handleAutofill}
-                disabled={autofillStatus === "loading"}
-                className="shrink-0 rounded-md border border-neutral-300 dark:border-neutral-700 px-3 text-sm disabled:opacity-50"
-              >
-                {autofillStatus === "loading" ? "Looking up…" : "Autofill"}
-              </button>
+    <main className="flex-1 flex justify-center px-3 py-6 md:px-6 md:py-10">
+      <div className="w-full max-w-6xl shell p-4 md:p-8">
+        {/* Topbar */}
+        <div className="flex items-center justify-between gap-4 mb-8">
+          <div className="flex items-center gap-3">
+            <div className="logo-mark">PB</div>
+            <div>
+              <p className="brand-title text-base md:text-lg">Amazon Book Ads Builder</p>
+              <p className="eyebrow">Manual campaign generator</p>
             </div>
-            <span className="block text-xs text-neutral-500 mt-1">
-              Scrapes the product page to fill in Author, Title, Series, and RRP below.
-            </span>
-            {autofillStatus === "error" && autofillError && (
-              <span className="block text-xs text-red-600 dark:text-red-400 mt-1">{autofillError}</span>
-            )}
-          </Field>
-
-          <Field label="Marketplace">
-            <select
-              value={marketplace}
-              onChange={(e) => setMarketplace(e.target.value as typeof marketplace)}
-              className="input"
-            >
-              {MARKETPLACES.map((m) => (
-                <option key={m} value={m}>
-                  {m}
-                </option>
-              ))}
-            </select>
-          </Field>
-
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Creator Initials">
-              <input
-                required
-                value={creatorInitials}
-                onChange={(e) => setCreatorInitials(e.target.value)}
-                placeholder="MO"
-                className="input"
-              />
-            </Field>
-            <Field label="Variant / Copy #">
-              <input
-                required
-                type="number"
-                min="1"
-                step="1"
-                value={variant}
-                onChange={(e) => setVariant(e.target.value)}
-                className="input"
-              />
-            </Field>
           </div>
+          <span className="btn-pill-outline hidden sm:inline-flex" style={{ cursor: "default" }}>
+            Sponsored Products · Manual
+          </span>
+        </div>
 
-          <Field label="Author Name">
-            <input
-              required
-              value={authorName}
-              onChange={(e) => setAuthorName(e.target.value)}
-              placeholder="Andrew Raymond"
-              className="input"
-            />
-          </Field>
+        {/* Page heading */}
+        <div className="mb-6 md:mb-8">
+          <h1 className="page-heading text-2xl md:text-4xl">Build Campaign</h1>
+          <p className="text-sm mt-3 max-w-2xl leading-relaxed" style={{ color: "var(--muted)" }}>
+            Enter an ASIN or ISBN to gather book metadata, scrape keyword candidates from
+            every available source, and get an AI-reviewed shortlist ready for a Manual
+            Sponsored Products campaign. Every campaign follows the{" "}
+            <code className="font-mono text-xs" style={{ color: "var(--ink)" }}>PB_...</code> naming
+            convention so downstream tooling can parse ASIN/Author back out of the name alone.
+          </p>
+        </div>
 
-          <Field label="Book Title">
-            <input
-              required
-              value={bookTitle}
-              onChange={(e) => setBookTitle(e.target.value)}
-              placeholder="The Long Isle"
-              className="input"
-            />
-          </Field>
+        <form onSubmit={handleSubmit}>
+          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 md:gap-6 items-start">
+            {/* Left column */}
+            <div className="flex flex-col gap-5 md:gap-6">
+              <div className="card">
+                <p className="card-title mb-4">Book Lookup</p>
 
-          <Field label="Series Name (optional)">
-            <input
-              value={seriesName}
-              onChange={(e) => setSeriesName(e.target.value)}
-              placeholder="A DC Mairead Maclean Mystery"
-              className="input"
-            />
-          </Field>
+                <Field label="ASIN or ISBN">
+                  <div className="flex gap-2">
+                    <input
+                      required
+                      value={asin}
+                      onChange={(e) => setAsin(e.target.value)}
+                      placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
+                      maxLength={17}
+                      className="input"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAutofill}
+                      disabled={autofillStatus === "loading"}
+                      className="btn-pill-outline shrink-0"
+                    >
+                      {autofillStatus === "loading" ? "Looking up…" : "Autofill"}
+                    </button>
+                  </div>
+                  <span className="field-hint">
+                    Scrapes the product page to fill in Author, Title, Series, and RRP.
+                  </span>
+                  {autofillStatus === "error" && autofillError && (
+                    <span className="field-hint" style={{ color: "var(--accent-red)" }}>
+                      {autofillError}
+                    </span>
+                  )}
+                </Field>
 
-          {previewName && (
-            <p className="text-xs text-neutral-500 -mt-3">
-              Campaign name: <code className="text-neutral-700 dark:text-neutral-300">{previewName}</code>
-            </p>
-          )}
+                <Field label="Marketplace">
+                  <select
+                    value={marketplace}
+                    onChange={(e) => setMarketplace(e.target.value as typeof marketplace)}
+                    className="input"
+                  >
+                    {MARKETPLACES.map((m) => (
+                      <option key={m} value={m}>
+                        {m}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
 
-          {(profileCategoryPath.length > 0 ||
-            profileBestSellerRanks.length > 0 ||
-            profileDescription ||
-            profileTags.length > 0) && (
-            <div className="rounded-md border border-neutral-200 dark:border-neutral-800 p-4 space-y-3">
-              <p className="text-sm font-medium">Book Profile (from Autofill)</p>
+              {(profileCategoryPath.length > 0 ||
+                profileBestSellerRanks.length > 0 ||
+                profileDescription ||
+                profileTags.length > 0) && (
+                <div className="card">
+                  <p className="card-title mb-4">Book Profile</p>
 
-              {profileCategoryPath.length > 0 && (
-                <p className="text-xs text-neutral-500">
-                  <span className="font-medium text-neutral-600 dark:text-neutral-400">Category: </span>
-                  {profileCategoryPath.join(" › ")}
-                </p>
-              )}
+                  <div className="space-y-3">
+                    {profileCategoryPath.length > 0 && (
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Category: </span>
+                        {profileCategoryPath.join(" › ")}
+                      </p>
+                    )}
 
-              {profileBestSellerRanks.length > 0 && (
-                <div className="text-xs text-neutral-500">
-                  <span className="font-medium text-neutral-600 dark:text-neutral-400">Best Sellers Rank: </span>
-                  {profileBestSellerRanks
-                    .map((r) => `#${r.rank.toLocaleString()} in ${r.category}`)
-                    .join(", ")}
+                    {profileBestSellerRanks.length > 0 && (
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Best Sellers Rank: </span>
+                        {profileBestSellerRanks
+                          .map((r) => `#${r.rank.toLocaleString()} in ${r.category}`)
+                          .join(", ")}
+                      </p>
+                    )}
+
+                    {profileDescription && (
+                      <p className="text-xs leading-relaxed line-clamp-3" style={{ color: "var(--muted)" }}>
+                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Description: </span>
+                        {profileDescription}
+                      </p>
+                    )}
+
+                    <div>
+                      <p className="field-hint mb-2" style={{ marginTop: 0 }}>
+                        Tags ({profileTags.length}) — reviewed here feed keyword generation
+                        directly. Remove any that don&apos;t fit.
+                      </p>
+                      <div className="flex flex-wrap gap-1.5 mb-3">
+                        {profileTags.map((tag) => (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => removeTag(tag)}
+                            title="Remove tag"
+                            className="chip-tag"
+                          >
+                            {tag} ×
+                          </button>
+                        ))}
+                      </div>
+                      <div className="flex gap-2">
+                        <input
+                          value={newTagInput}
+                          onChange={(e) => setNewTagInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              addTag();
+                            }
+                          }}
+                          placeholder="Add a tag"
+                          className="input text-xs"
+                        />
+                        <button type="button" onClick={addTag} className="btn-pill-outline shrink-0 text-xs">
+                          Add
+                        </button>
+                      </div>
+                    </div>
+                  </div>
                 </div>
               )}
+            </div>
 
-              {profileDescription && (
-                <p className="text-xs text-neutral-500 line-clamp-3">
-                  <span className="font-medium text-neutral-600 dark:text-neutral-400">Description: </span>
-                  {profileDescription}
-                </p>
-              )}
+            {/* Right column */}
+            <div className="flex flex-col gap-5 md:gap-6">
+              <div className="card">
+                <p className="card-title mb-4">Campaign Details</p>
+                <div className="space-y-5">
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Creator Initials">
+                      <input
+                        required
+                        value={creatorInitials}
+                        onChange={(e) => setCreatorInitials(e.target.value)}
+                        placeholder="MO"
+                        className="input"
+                      />
+                    </Field>
+                    <Field label="Variant / Copy #">
+                      <input
+                        required
+                        type="number"
+                        min="1"
+                        step="1"
+                        value={variant}
+                        onChange={(e) => setVariant(e.target.value)}
+                        className="input"
+                      />
+                    </Field>
+                  </div>
 
-              <div>
-                <p className="text-xs font-medium text-neutral-600 dark:text-neutral-400 mb-1.5">
-                  Tags ({profileTags.length}) — reviewed here feed keyword generation directly. Remove
-                  any that don&apos;t fit.
+                  <Field label="Author Name">
+                    <input
+                      required
+                      value={authorName}
+                      onChange={(e) => setAuthorName(e.target.value)}
+                      placeholder="Andrew Raymond"
+                      className="input"
+                    />
+                  </Field>
+
+                  <Field label="Book Title">
+                    <input
+                      required
+                      value={bookTitle}
+                      onChange={(e) => setBookTitle(e.target.value)}
+                      placeholder="The Long Isle"
+                      className="input"
+                    />
+                  </Field>
+
+                  <Field label="Series Name (optional)">
+                    <input
+                      value={seriesName}
+                      onChange={(e) => setSeriesName(e.target.value)}
+                      placeholder="A DC Mairead Maclean Mystery"
+                      className="input"
+                    />
+                  </Field>
+
+                  {previewName && (
+                    <p className="text-xs" style={{ color: "var(--muted)" }}>
+                      Campaign name:{" "}
+                      <code className="chip-tag" style={{ cursor: "default" }}>{previewName}</code>
+                    </p>
+                  )}
+                </div>
+              </div>
+
+              <div className="card">
+                <p className="card-title mb-4">Budget &amp; Bid</p>
+                <div className="space-y-5">
+                  <div className="grid grid-cols-2 gap-4">
+                    <Field label="Daily Budget ($)">
+                      <input
+                        required
+                        type="number"
+                        min="1"
+                        step="0.01"
+                        value={dailyBudget}
+                        onChange={(e) => setDailyBudget(e.target.value)}
+                        className="input"
+                      />
+                    </Field>
+                    <Field label="Start Date">
+                      <input
+                        required
+                        type="date"
+                        value={startDate}
+                        onChange={(e) => setStartDate(e.target.value)}
+                        className="input"
+                      />
+                    </Field>
+                  </div>
+
+                  <Field label="Bid economics">
+                    <div className="space-y-4">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="option-card">
+                          <input
+                            type="radio"
+                            className="mt-0.5"
+                            checked={useRrpBidding}
+                            onChange={() => setUseRrpBidding(true)}
+                          />
+                          <span>
+                            Derive from RRP
+                            <span
+                              className="block text-xs font-normal mt-0.5"
+                              style={{ color: "var(--muted)" }}
+                            >
+                              Max CPC computed from RRP × ACOS × conv. rate
+                            </span>
+                          </span>
+                        </label>
+                        <label className="option-card">
+                          <input
+                            type="radio"
+                            className="mt-0.5"
+                            checked={!useRrpBidding}
+                            onChange={() => setUseRrpBidding(false)}
+                          />
+                          <span>
+                            Manual default bid
+                            <span
+                              className="block text-xs font-normal mt-0.5"
+                              style={{ color: "var(--muted)" }}
+                            >
+                              Set a flat starting bid yourself
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+
+                      {useRrpBidding ? (
+                        <div className="grid grid-cols-3 gap-3">
+                          <label className="block">
+                            <span className="field-hint" style={{ marginTop: 0, marginBottom: "0.35rem" }}>
+                              RRP ($)
+                            </span>
+                            <input
+                              required
+                              type="number"
+                              min="0.01"
+                              step="0.01"
+                              value={rrp}
+                              onChange={(e) => setRrp(e.target.value)}
+                              className="input"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="field-hint" style={{ marginTop: 0, marginBottom: "0.35rem" }}>
+                              Target ACOS (%)
+                            </span>
+                            <input
+                              required
+                              type="number"
+                              min="1"
+                              max="100"
+                              step="1"
+                              value={targetAcosPct}
+                              onChange={(e) => setTargetAcosPct(e.target.value)}
+                              className="input"
+                            />
+                          </label>
+                          <label className="block">
+                            <span className="field-hint" style={{ marginTop: 0, marginBottom: "0.35rem" }}>
+                              Est. conv. rate (%)
+                            </span>
+                            <input
+                              required
+                              type="number"
+                              min="0.1"
+                              max="100"
+                              step="0.1"
+                              value={estConversionRatePct}
+                              onChange={(e) => setEstConversionRatePct(e.target.value)}
+                              className="input"
+                            />
+                          </label>
+                        </div>
+                      ) : (
+                        <label className="block max-w-[220px]">
+                          <span className="field-hint" style={{ marginTop: 0, marginBottom: "0.35rem" }}>
+                            Default Bid ($)
+                          </span>
+                          <input
+                            required
+                            type="number"
+                            min="0.02"
+                            step="0.01"
+                            value={defaultBid}
+                            onChange={(e) => setDefaultBid(e.target.value)}
+                            className="input"
+                          />
+                        </label>
+                      )}
+                    </div>
+                  </Field>
+                </div>
+              </div>
+
+              <div className="card">
+                <p className="card-title mb-4">Match Types</p>
+                <p className="field-hint mb-3" style={{ marginTop: 0 }}>
+                  Applies to the Tropes &amp; Themes ad group only. Comp Authors &amp; Titles
+                  is always Exact Match — readers searching a name are ready to buy, so it
+                  isn&apos;t diluted with Broad/Phrase.
                 </p>
-                <div className="flex flex-wrap gap-1.5 mb-2">
-                  {profileTags.map((tag) => (
-                    <button
-                      key={tag}
-                      type="button"
-                      onClick={() => removeTag(tag)}
-                      title="Remove tag"
-                      className="text-xs rounded-full border border-neutral-300 dark:border-neutral-700 px-2.5 py-0.5 hover:bg-neutral-100 dark:hover:bg-neutral-800"
-                    >
-                      {tag} ×
-                    </button>
+                <div className="flex flex-wrap gap-2">
+                  {MATCH_TYPES.map(({ value, label }) => (
+                    <label key={value} className="chip-toggle">
+                      <input
+                        type="checkbox"
+                        checked={matchTypes.includes(value)}
+                        onChange={() => toggleMatchType(value)}
+                      />
+                      {label}
+                    </label>
                   ))}
                 </div>
-                <div className="flex gap-2">
-                  <input
-                    value={newTagInput}
-                    onChange={(e) => setNewTagInput(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") {
-                        e.preventDefault();
-                        addTag();
-                      }
-                    }}
-                    placeholder="Add a tag"
-                    className="input text-xs"
-                  />
-                  <button
-                    type="button"
-                    onClick={addTag}
-                    className="shrink-0 rounded-md border border-neutral-300 dark:border-neutral-700 px-3 text-xs"
-                  >
-                    Add
-                  </button>
-                </div>
               </div>
-            </div>
-          )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <Field label="Daily Budget ($)">
-              <input
-                required
-                type="number"
-                min="1"
-                step="0.01"
-                value={dailyBudget}
-                onChange={(e) => setDailyBudget(e.target.value)}
-                className="input"
-              />
-            </Field>
-            <Field label="Start Date">
-              <input
-                required
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="input"
-              />
-            </Field>
+              <button
+                type="submit"
+                disabled={isLoading || matchTypes.length === 0}
+                className="btn-pill-dark w-full py-3 text-sm"
+              >
+                {isLoading ? "Generating…" : "Generate Manual Bulksheet"}
+              </button>
+            </div>
           </div>
-
-          <Field label="Bid economics">
-            <div className="space-y-3">
-              <div className="flex gap-4 text-sm">
-                <label className="flex items-center gap-2">
-                  <input type="radio" checked={useRrpBidding} onChange={() => setUseRrpBidding(true)} />
-                  Derive from RRP
-                </label>
-                <label className="flex items-center gap-2">
-                  <input type="radio" checked={!useRrpBidding} onChange={() => setUseRrpBidding(false)} />
-                  Manual default bid
-                </label>
-              </div>
-
-              {useRrpBidding ? (
-                <div className="grid grid-cols-3 gap-3">
-                  <label className="block">
-                    <span className="block text-xs text-neutral-500 mb-1">RRP ($)</span>
-                    <input
-                      required
-                      type="number"
-                      min="0.01"
-                      step="0.01"
-                      value={rrp}
-                      onChange={(e) => setRrp(e.target.value)}
-                      className="input"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="block text-xs text-neutral-500 mb-1">Target ACOS (%)</span>
-                    <input
-                      required
-                      type="number"
-                      min="1"
-                      max="100"
-                      step="1"
-                      value={targetAcosPct}
-                      onChange={(e) => setTargetAcosPct(e.target.value)}
-                      className="input"
-                    />
-                  </label>
-                  <label className="block">
-                    <span className="block text-xs text-neutral-500 mb-1">Est. conv. rate (%)</span>
-                    <input
-                      required
-                      type="number"
-                      min="0.1"
-                      max="100"
-                      step="0.1"
-                      value={estConversionRatePct}
-                      onChange={(e) => setEstConversionRatePct(e.target.value)}
-                      className="input"
-                    />
-                  </label>
-                </div>
-              ) : (
-                <label className="block">
-                  <span className="block text-xs text-neutral-500 mb-1">Default Bid ($)</span>
-                  <input
-                    required
-                    type="number"
-                    min="0.02"
-                    step="0.01"
-                    value={defaultBid}
-                    onChange={(e) => setDefaultBid(e.target.value)}
-                    className="input"
-                  />
-                </label>
-              )}
-            </div>
-          </Field>
-
-          <Field label="Match Types (Tropes & Themes ad group)">
-            <div className="flex gap-4">
-              {MATCH_TYPES.map(({ value, label }) => (
-                <label key={value} className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={matchTypes.includes(value)}
-                    onChange={() => toggleMatchType(value)}
-                  />
-                  {label}
-                </label>
-              ))}
-            </div>
-            <span className="block text-xs text-neutral-500 mt-1">
-              Applies to the Tropes &amp; Themes ad group only. Comp Authors &amp;
-              Titles is always Exact Match — readers searching a name are ready to
-              buy, so it isn&apos;t diluted with Broad/Phrase.
-            </span>
-          </Field>
-
-          <button
-            type="submit"
-            disabled={isLoading || matchTypes.length === 0}
-            className="w-full rounded-md bg-neutral-900 text-white dark:bg-white dark:text-neutral-900 py-2.5 text-sm font-medium disabled:opacity-50"
-          >
-            {isLoading ? "Generating..." : "Generate Manual Bulksheet"}
-          </button>
         </form>
 
         {status === "error" && errorMessage && (
-          <div className="mt-6 rounded-md border border-red-300 bg-red-50 dark:bg-red-950/30 dark:border-red-900 p-4 text-sm text-red-800 dark:text-red-300">
-            {errorMessage}
+          <div
+            className="status-banner mt-6"
+            style={{ background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }}
+          >
+            <span className="status-dot" style={{ background: "var(--accent-red)" }} />
+            <span style={{ color: "var(--accent-red)" }}>{errorMessage}</span>
           </div>
         )}
 
-        {status === "success" && (() => {
-          const [recommendedMin] = recommendedRange?.split("-").map(Number) ?? [null];
-          const belowRecommendedMin =
-            tropesKeywordCount !== null && recommendedMin !== null && tropesKeywordCount < recommendedMin;
-          return (
+        {status === "success" && (
+          <div className="mt-8 space-y-5">
             <div
-              className={`mt-6 rounded-md border p-4 text-sm ${
-                belowRecommendedMin
-                  ? "border-amber-300 bg-amber-50 text-amber-800 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-300"
-                  : "border-green-300 bg-green-50 text-green-800 dark:bg-green-950/30 dark:border-green-900 dark:text-green-300"
-              }`}
+              className="status-banner"
+              style={{
+                background: belowRecommendedMin ? "var(--accent-yellow-soft)" : "var(--accent-green-soft)",
+                borderColor: belowRecommendedMin ? "var(--accent-yellow)" : "var(--accent-green)",
+              }}
             >
-              Download started
-              {resultCampaignName ? ` — ${resultCampaignName}` : ""}.{" "}
-              {tropesKeywordCount ?? 0} Tropes &amp; Themes keywords, {compNameKeywordCount ?? 0} Comp
-              Authors &amp; Titles keywords, {productTargetCount ?? 0} product targets
-              {recommendedRange ? ` (Amazon recommends ${recommendedRange} per ad group)` : ""}.{" "}
-              {aiRankingUsed
-                ? "AI-ranked (Gemini)."
-                : "Heuristic-ranked (set GEMINI_API_KEY to enable AI ranking)."}
-              {belowRecommendedMin &&
-                " Tropes & Themes is below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
+              <span
+                className="status-dot"
+                style={{ background: belowRecommendedMin ? "var(--accent-yellow)" : "var(--accent-green)" }}
+              />
+              <span style={{ color: belowRecommendedMin ? "var(--accent-yellow)" : "var(--accent-green)" }}>
+                Download started
+                {resultCampaignName ? ` — ${resultCampaignName}` : ""}.{" "}
+                {recommendedRange ? `Amazon recommends ${recommendedRange} keywords per ad group. ` : ""}
+                {aiRankingUsed
+                  ? "AI-ranked (Gemini)."
+                  : "Heuristic-ranked (set GEMINI_API_KEY to enable AI ranking)."}
+                {belowRecommendedMin &&
+                  " Tropes & Themes is below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
+              </span>
             </div>
-          );
-        })()}
+
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+              <div className="stat-tile tone-purple">
+                <span className="stat-value">{tropesKeywordCount ?? 0}</span>
+                <span className="stat-label">Tropes &amp; Themes</span>
+              </div>
+              <div className="stat-tile tone-green">
+                <span className="stat-value">{compNameKeywordCount ?? 0}</span>
+                <span className="stat-label">Comp Authors &amp; Titles</span>
+              </div>
+              <div className="stat-tile tone-yellow">
+                <span className="stat-value">{productTargetCount ?? 0}</span>
+                <span className="stat-label">Product Targets</span>
+              </div>
+              <div className="stat-tile tone-purple">
+                <span className="stat-value">{aiRankingUsed ? "AI" : "Heuristic"}</span>
+                <span className="stat-label">Ranking Method</span>
+              </div>
+            </div>
+          </div>
+        )}
 
         {sources && (
-          <div className="mt-4 text-xs text-neutral-500 space-y-1">
-            <p className="font-medium text-neutral-600 dark:text-neutral-400">Sources</p>
+          <div className="card mt-5">
+            <p className="card-title mb-3">Sources</p>
             {sources.map((s) => (
-              <div key={s.source} className="flex justify-between gap-2">
-                <span>{s.source}</span>
-                <span className={s.ok ? "text-green-600 dark:text-green-400" : "text-neutral-400"}>
+              <div key={s.source} className="source-row">
+                <span className="flex items-center gap-2">
+                  <span
+                    className="status-dot"
+                    style={{
+                      marginTop: 0,
+                      background: s.ok ? "var(--accent-green)" : "var(--line)",
+                    }}
+                  />
+                  {s.source}
+                </span>
+                <span style={{ color: s.ok ? "var(--accent-green)" : "var(--muted)" }}>
                   {s.ok ? `${s.count ?? ""} found` : s.error ?? "no results"}
                 </span>
               </div>
@@ -584,22 +696,6 @@ export default function Home() {
           </div>
         )}
       </div>
-
-      <style jsx global>{`
-        .input {
-          width: 100%;
-          border-radius: 0.375rem;
-          border: 1px solid var(--input-border, #d4d4d4);
-          background: transparent;
-          padding: 0.5rem 0.75rem;
-          font-size: 0.875rem;
-        }
-        @media (prefers-color-scheme: dark) {
-          .input {
-            border-color: #404040;
-          }
-        }
-      `}</style>
     </main>
   );
 }
@@ -607,7 +703,7 @@ export default function Home() {
 function Field({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="block text-sm font-medium mb-1.5">{label}</span>
+      <span className="field-label">{label}</span>
       {children}
     </label>
   );
