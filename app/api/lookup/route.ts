@@ -30,10 +30,17 @@ export async function GET(req: NextRequest) {
 
   const productPage = await scrapeProductPage(asin, marketplace);
   if (!productPage.title) {
+    const statusNote =
+      productPage.fetchStatus !== undefined
+        ? ` (upstream HTTP ${productPage.fetchStatus})`
+        : " (no response — network error or timeout)";
     const error = productPage.blocked
-      ? "Amazon blocked this request (bot/CAPTCHA check) instead of serving the real page — common when scraping from a cloud-hosted deployment (Vercel, etc.), much rarer from a home IP. Fill in the fields manually for now; see the README's 'Known open items' for mitigation options."
-      : "Couldn't load or parse that product page. Double check the ASIN and marketplace, or fill in the fields manually.";
-    return NextResponse.json({ error, blocked: productPage.blocked ?? false }, { status: 502 });
+      ? `Amazon blocked this request (bot/CAPTCHA check)${statusNote} instead of serving the real page — common when scraping from a cloud-hosted deployment (Vercel, etc.), much rarer from a home IP. Fill in the fields manually for now; see the README's 'Known open items' for mitigation options.`
+      : `Couldn't load or parse that product page${statusNote}. Double check the ASIN and marketplace, or fill in the fields manually.`;
+    return NextResponse.json(
+      { error, blocked: productPage.blocked ?? false, fetchStatus: productPage.fetchStatus },
+      { status: 502 }
+    );
   }
 
   return NextResponse.json({
