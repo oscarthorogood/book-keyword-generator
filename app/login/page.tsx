@@ -10,7 +10,7 @@ function LoginPageContent() {
             <div className="logo-mark mx-auto mb-4">PB</div>
             <h1 className="page-heading text-2xl md:text-3xl">Amazon Book Ads Builder</h1>
             <p className="text-sm mt-2" style={{ color: "var(--muted)" }}>
-              Enter your password to continue
+              Enter your email and we&apos;ll send you a sign-in link
             </p>
           </div>
 
@@ -19,7 +19,7 @@ function LoginPageContent() {
           </Suspense>
 
           <p className="text-xs text-center mt-6" style={{ color: "var(--muted)" }}>
-            This is a private application. Please contact the administrator if you don&apos;t have access.
+            This is a private application. New email addresses are reviewed by the administrator before access is granted.
           </p>
         </div>
       </div>

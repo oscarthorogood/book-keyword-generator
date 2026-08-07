@@ -21,10 +21,12 @@ cp .env.example .env.local
 
 See `.env.example` for all available configuration options. Key variables:
 
-- `APP_PASSWORD` - Password for login (required)
-- `AUTH_SECRET` - Secret for JWT signing (auto-generated if not set, but recommend setting in production)
+- `NEXT_PUBLIC_SUPABASE_*` / `SUPABASE_SERVICE_ROLE_KEY` - auth + storage (required)
+- `RESEND_API_KEY` / `EMAIL_FROM` / `ADMIN_EMAIL` - sign-in and approval emails (required)
+- `AUTH_SECRET` - Signs the approve/deny links (required in production)
 - `AMAZON_ADS_*` - Amazon Ads API credentials (optional, for keyword recommendations)
 - `GEMINI_API_KEY` - Google Gemini API key for AI ranking (optional)
+
 
 ## Development Workflow
 
@@ -183,10 +185,12 @@ docker run -p 3000:3000 amazon-ads-assistant
 
 ### Environment Setup for Deployment
 Ensure these are set in your deployment platform:
-- `APP_PASSWORD` (required)
-- `AUTH_SECRET` (recommended, will auto-generate if not set)
+- `NEXT_PUBLIC_SUPABASE_*` / `SUPABASE_SERVICE_ROLE_KEY` (required)
+- `RESEND_API_KEY` / `EMAIL_FROM` / `ADMIN_EMAIL` (required)
+- `AUTH_SECRET` (required in production)
 - `AMAZON_ADS_*` (optional, for API features)
 - `GEMINI_API_KEY` (optional, for AI ranking)
+
 
 ## Getting Help
 

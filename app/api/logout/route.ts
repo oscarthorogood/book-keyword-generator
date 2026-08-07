@@ -1,7 +1,9 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
+import { supabaseServer } from "@/lib/supabaseServer";
 
-export async function POST(request: NextRequest) {
-  const response = NextResponse.json({ success: true });
-  response.cookies.delete("auth_token");
-  return response;
+export async function POST() {
+  // signOut clears the Supabase session cookies through the SSR client.
+  const supabase = await supabaseServer();
+  await supabase.auth.signOut();
+  return NextResponse.json({ success: true });
 }

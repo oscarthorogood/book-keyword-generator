@@ -5,6 +5,7 @@ import { getGoodreadsTags } from "@/lib/goodreads";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { getProductPageUrl, scrapeProductPage } from "@/lib/scrape";
 import { Marketplace } from "@/lib/types";
+import { currentUserEmail } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 // Longer than the plain page scrape alone (20s) to give the parallel Google
@@ -28,6 +29,12 @@ const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
  * GenerateRequest and buildKnownTagCandidates in lib/keywordMerge.ts).
  */
 export async function GET(req: NextRequest) {
+  // The Next 16 docs warn that a proxy matcher change can silently drop
+  // coverage, so authorize here too rather than trusting proxy.ts alone.
+  if (!(await currentUserEmail())) {
+    return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  }
+
   const rawAsin = req.nextUrl.searchParams.get("asin") ?? "";
   const asin = normalizeAsinOrIsbn(rawAsin);
   const marketplace = req.nextUrl.searchParams.get("marketplace") as Marketplace | null;

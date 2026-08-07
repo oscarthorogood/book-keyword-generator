@@ -4,7 +4,6 @@ import { FormEvent, useMemo, useState } from "react";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildCampaignName } from "@/lib/naming";
 import { KEYWORD_CATEGORY_META } from "@/lib/keywordCategories";
-import { Header } from "@/components/Header";
 import type { KeywordCategory, KeywordGroupType, KeywordSource } from "@/lib/types";
 
 type FormPage = 1 | 2 | 3 | 4 | 5 | 6;
@@ -160,6 +159,9 @@ export default function Home() {
   const [recommendedRange, setRecommendedRange] = useState<string | null>(null);
   const [resultCampaignName, setResultCampaignName] = useState<string | null>(null);
   const [aiRankingUsed, setAiRankingUsed] = useState<boolean>(false);
+  // Signed link to the copy saved in Supabase Storage; null when archiving is
+  // not configured or the upload failed (the direct download still happened).
+  const [archiveUrl, setArchiveUrl] = useState<string | null>(null);
 
   const previewName = useMemo(() => {
     const normalizedAsin = normalizeAsinOrIsbn(asin);
@@ -321,6 +323,7 @@ export default function Home() {
     setProductTargetCount(null);
     setManualKeywordCount(null);
     setRecommendedRange(null);
+    setArchiveUrl(null);
     setResultCampaignName(null);
 
     try {
@@ -366,36 +369,17 @@ export default function Home() {
         return;
       }
 
-      const sourceHeader = res.headers.get("X-Source-Status");
-      const tropesHeader = res.headers.get("X-Tropes-Keyword-Count");
-      const compNameHeader = res.headers.get("X-Comp-Name-Keyword-Count");
-      const productTargetHeader = res.headers.get("X-Product-Target-Count");
-      const manualKeywordHeader = res.headers.get("X-Manual-Keyword-Count");
-      const rangeHeader = res.headers.get("X-Recommended-Keyword-Range");
-      const campaignNameHeader = res.headers.get("X-Campaign-Name");
-      const aiRankingHeader = res.headers.get("X-Ai-Ranking-Used");
-      if (sourceHeader) setSources(JSON.parse(decodeURIComponent(sourceHeader)));
-      if (tropesHeader) setTropesKeywordCount(Number(tropesHeader));
-      if (compNameHeader) setCompNameKeywordCount(Number(compNameHeader));
-      if (productTargetHeader) setProductTargetCount(Number(productTargetHeader));
-      if (manualKeywordHeader) setManualKeywordCount(Number(manualKeywordHeader));
-      if (rangeHeader) setRecommendedRange(rangeHeader);
-      if (campaignNameHeader) setResultCampaignName(decodeURIComponent(campaignNameHeader));
-      setAiRankingUsed(aiRankingHeader === "true");
+      const data = await res.json();
 
-      const disposition = res.headers.get("Content-Disposition") ?? "";
-      const filenameMatch = disposition.match(/filename="([^"]+)"/);
-      const filename = filenameMatch?.[1] ?? "bulksheet.xlsx";
-
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
+      setSources(data.sourceStatuses ?? null);
+      setTropesKeywordCount(data.tropesKeywordCount ?? 0);
+      setCompNameKeywordCount(data.compNameKeywordCount ?? 0);
+      setProductTargetCount(data.productTargetCount ?? 0);
+      setManualKeywordCount(data.manualKeywordCount ?? 0);
+      setRecommendedRange(data.recommendedRange ?? null);
+      setResultCampaignName(data.campaignName ?? null);
+      setAiRankingUsed(data.aiRankingUsed ?? false);
+      setArchiveUrl(data.archiveUrl ?? null);
 
       setStatus("success");
     } catch (err) {
@@ -412,7 +396,6 @@ export default function Home() {
 
   return (
     <>
-      <Header />
       <main className="flex-1 flex justify-center px-3 py-6 md:px-6 md:py-10">
         <div className="w-full max-w-6xl shell p-4 md:p-8">
         {/* Topbar */}
@@ -1520,7 +1503,7 @@ export default function Home() {
                 style={{ background: belowRecommendedMin ? "var(--accent-yellow)" : "var(--accent-green)" }}
               />
               <span style={{ color: belowRecommendedMin ? "var(--accent-yellow)" : "var(--accent-green)" }}>
-                Download started
+                Bulksheet sent to your email
                 {resultCampaignName ? ` — ${resultCampaignName}` : ""}.{" "}
                 {recommendedRange ? `Amazon recommends ${recommendedRange} keywords per ad group. ` : ""}
                 {aiRankingUsed
@@ -1530,6 +1513,21 @@ export default function Home() {
                   " Tropes & Themes is below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
               </span>
             </div>
+
+            {archiveUrl && (
+              <p className="text-sm" style={{ color: "var(--muted)" }}>
+                A copy was saved to cloud storage.{" "}
+                <a
+                  href={archiveUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "var(--accent-green)", textDecoration: "underline" }}
+                >
+                  Download now
+                </a>{" "}
+                — link expires in 1 hour.
+              </p>
+            )}
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <div className="stat-tile tone-purple">

@@ -10,6 +10,8 @@ import {
   lookupWikipediaCategories,
 } from "@/lib/bookMetadata";
 import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
+import { archiveBulksheet } from "@/lib/supabaseStorage";
+import { currentUser } from "@/lib/supabaseServer";
 import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
 import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
@@ -249,6 +251,12 @@ function fileResponse(buffer: Buffer, campaignName: string, extraHeaders: Record
 }
 
 export async function POST(req: NextRequest) {
+  // Defence in depth alongside proxy.ts — see the note in app/api/lookup/route.ts.
+  const user = await currentUser();
+  if (!user) {
+    return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();
@@ -824,15 +832,41 @@ export async function POST(req: NextRequest) {
   const finalCompNameCount = keywordTypes.has("comp-names") ? compNameKeywords.length : 0;
   const finalProductTargetCount = keywordTypes.has("product-targeting") ? productTargets.length : 0;
 
-  return fileResponse(buffer, campaignName, {
-    "X-Keyword-Count": String(finalTropesCount + finalCompNameCount),
-    "X-Tropes-Keyword-Count": String(finalTropesCount),
-    "X-Comp-Name-Keyword-Count": String(finalCompNameCount),
-    "X-Product-Target-Count": String(finalProductTargetCount),
-    "X-Manual-Keyword-Count": String(guaranteedManualKeywords.length + (manualAsins.length > 0 ? manualAsins.length : 0)),
-    "X-Recommended-Keyword-Range": `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
-    "X-Source-Status": encodeURIComponent(JSON.stringify(sourceStatuses)),
-    "X-Ai-Ranking-Used": String(aiRankingUsed),
-    "X-Firecrawl-Used": String(!!firecrawlMarkdown),
+  // Best-effort copy to Supabase Storage. Returns null when Storage isn't
+  // configured or the upload fails — the email is still sent either way.
+  const archived = await archiveBulksheet(buffer, campaignName, user.id);
+
+  // Email the bulksheet instead of streaming to browser
+  const { sendBulksheetEmail } = await import("@/lib/email");
+  const emailSent = await sendBulksheetEmail({
+    to: user.email,
+    campaignName,
+    fileBuffer: buffer,
   });
+
+  if (!emailSent) {
+    return new Response(
+      JSON.stringify({
+        error: "Bulksheet generated but email delivery failed. Check your email configuration.",
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      archiveUrl: archived?.signedUrl ?? null,
+      tropesKeywordCount: finalTropesCount,
+      compNameKeywordCount: finalCompNameCount,
+      productTargetCount: finalProductTargetCount,
+      manualKeywordCount: guaranteedManualKeywords.length + (manualAsins.length > 0 ? manualAsins.length : 0),
+      recommendedRange: `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
+      sourceStatuses,
+      aiRankingUsed,
+      firecrawlUsed: !!firecrawlMarkdown,
+      campaignName,
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 }
