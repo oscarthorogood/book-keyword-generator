@@ -341,6 +341,7 @@ function extractIsbns($: cheerio.CheerioAPI): { isbn10?: string; isbn13?: string
 
 const EMPTY_PRODUCT_PAGE: ProductPageData = {
   compTitles: [],
+  compDetails: [],
   categories: [],
   categoryPath: [],
   bestSellerRanks: [],
@@ -512,6 +513,70 @@ function extractPrice($: cheerio.CheerioAPI): number | undefined {
   return undefined;
 }
 
+/** Book cover image URL — tries multiple selectors for different Amazon templates. */
+function extractCoverImageUrl($: cheerio.CheerioAPI): string | undefined {
+  const selectors = [
+    "#landingImage",
+    "#ebooksImageContainer img",
+    ".a-dynamic-image",
+    '[data-a-dynamic-image]',
+  ];
+
+  for (const selector of selectors) {
+    const el = $(selector).first();
+    let src = el.attr("src");
+    if (!src) src = el.attr("data-src");
+    if (!src) {
+      const dynamicAttr = el.attr("data-a-dynamic-image");
+      if (dynamicAttr) {
+        try {
+          const parsed = JSON.parse(dynamicAttr) as Record<string, unknown>;
+          const firstUrl = Object.keys(parsed)[0];
+          if (firstUrl) src = firstUrl;
+        } catch {
+          // ignore JSON parse errors
+        }
+      }
+    }
+    if (src) return src;
+  }
+  return undefined;
+}
+
+/** Q&A count from the product page — appears in the Q&A section header. */
+function extractQaCount($: cheerio.CheerioAPI): number | undefined {
+  const selectors = [
+    '[data-hook="ask-header-count"]',
+    '#ask-section [data-a-count]',
+    '.a-section.a-spacing-medium:contains("Customer Questions")',
+  ];
+
+  for (const selector of selectors) {
+    const text = $(selector).first().text().trim();
+    const match = text.match(/([\d,]+)/);
+    if (match) {
+      const value = parseInt(match[1].replace(/,/g, ''), 10);
+      if (Number.isFinite(value)) return value;
+    }
+  }
+  return undefined;
+}
+
+/** Availability status text (e.g., "In Stock", "Usually ships within 1-2 weeks"). */
+function extractAvailability($: cheerio.CheerioAPI): string | undefined {
+  const selectors = [
+    '#availability span',
+    '[data-feature-name="availability"] span',
+    '.availability',
+  ];
+
+  for (const selector of selectors) {
+    const text = $(selector).first().text().replace(/\s+/g, ' ').trim();
+    if (text) return text;
+  }
+  return undefined;
+}
+
 // Amazon serves a "Robot Check"/CAPTCHA interstitial instead of the real
 // page when it flags the request as automated — routine for cloud/datacenter
 // IPs (Vercel, AWS, etc.), much rarer from a residential IP. Detecting it
@@ -587,17 +652,24 @@ export async function scrapeProductPage(
 
     const compTitles = new Set<string>();
     const compAsins = new Set<string>();
+    const compDetails: Array<{ asin: string; title: string; author?: string; rating?: number; reviewCount?: number }> = [];
+
     $(
       '[data-a-carousel-options*="also-bought"] a[href*="/dp/"], [id*="similarities"] a[href*="/dp/"], .a-carousel-card a[href*="/dp/"]'
     ).each((_, el) => {
       const href = $(el).attr("href") ?? "";
       const asinMatch = href.match(/\/dp\/([A-Z0-9]{10})/i);
       if (asinMatch && asinMatch[1].toUpperCase() !== asin.toUpperCase()) {
-        compAsins.add(asinMatch[1].toUpperCase());
+        const compAsin = asinMatch[1].toUpperCase();
+        compAsins.add(compAsin);
+
+        const alt = $(el).find("img").attr("alt")?.trim();
+        const title = alt || $(el).text().trim();
+        if (title && title.length > 3) {
+          compTitles.add(title);
+          compDetails.push({ asin: compAsin, title });
+        }
       }
-      const alt = $(el).find("img").attr("alt")?.trim();
-      const text = alt || $(el).text().trim();
-      if (text && text.length > 3) compTitles.add(text);
     });
 
     const categories = new Set<string>();
@@ -646,7 +718,9 @@ export async function scrapeProductPage(
       isbn13,
       seriesName: extractSeriesName($),
       price: extractPrice($),
+      coverImageUrl: extractCoverImageUrl($),
       compTitles: Array.from(compTitles).slice(0, 15),
+      compDetails: compDetails.slice(0, 15),
       categories: Array.from(categories).slice(0, 15),
       categoryPath,
       bestSellerRanks: bestSellerRanks.slice(0, 10),
@@ -656,6 +730,8 @@ export async function scrapeProductPage(
       bulletPoints: extractBulletPoints($),
       rating: extractRating($),
       reviewCount: extractReviewCount($),
+      qaCount: extractQaCount($),
+      availability: extractAvailability($),
       pageCount: details.pageCount,
       publisher: details.publisher,
       publicationDate: details.publicationDate,
