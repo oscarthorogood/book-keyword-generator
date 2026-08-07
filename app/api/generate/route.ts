@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
 import { isAiRankingConfigured, mergeAiRanking, rankKeywordsWithAi } from "@/lib/aiRanker";
 import { AD_GROUP_BID_MULTIPLIER, computeMaxCpc, round2 } from "@/lib/bidding";
+import { KEYWORD_CONFIG } from "@/lib/config";
 import {
   enrichBookMetadata,
   lookupLocSubjects,
@@ -84,34 +85,15 @@ export const runtime = "nodejs";
 // AUTOCOMPLETE_CONCURRENCY / MAX_AUTOCOMPLETE_SEEDS in lib/scrape.ts instead.
 export const maxDuration = 60;
 
-const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
-const MATCH_TYPES: MatchType[] = ["broad", "phrase", "exact"];
+// Import configuration from centralized config file
+const MARKETPLACES: Marketplace[] = [...KEYWORD_CONFIG.MARKETPLACES];
+const MATCH_TYPES: MatchType[] = [...KEYWORD_CONFIG.MATCH_TYPES];
+const ALL_KEYWORD_SOURCES: KeywordSource[] = [...KEYWORD_CONFIG.ALL_KEYWORD_SOURCES];
+const ALL_KEYWORD_GROUP_TYPES: KeywordGroupType[] = [...KEYWORD_CONFIG.ALL_KEYWORD_GROUP_TYPES];
 
-// Every togglable keyword source — "manual" isn't here since user-typed
-// keywords are always guaranteed a slot regardless of source selection.
-const ALL_KEYWORD_SOURCES: KeywordSource[] = [
-  "ads-api",
-  "autocomplete",
-  "google-autocomplete",
-  "youtube-autocomplete",
-  "duckduckgo-autocomplete",
-  "comp-title",
-  "comp-name",
-  "genre-metadata",
-  "buyer-intent",
-  "book-content",
-  "review-language",
-  "book-description",
-  "customer-qna",
-  "synonym",
-  "wikipedia",
-  "wikidata",
-  "loc-subjects",
-  "author-catalog",
-  "goodreads-tags",
-  "user-tag",
-];
-const ALL_KEYWORD_GROUP_TYPES: KeywordGroupType[] = ["tropes", "comp-names", "product-targeting"];
+// Note: "manual" isn't in ALL_KEYWORD_SOURCES since user-typed keywords are
+// always guaranteed a slot regardless of source selection. "key-trope" is
+// included and user-togglable like other sources.
 
 function validate(body: unknown): { value: GenerateRequest } | { error: string } {
   if (typeof body !== "object" || body === null) return { error: "Invalid request body." };
@@ -553,6 +535,14 @@ export async function POST(req: NextRequest) {
     enabledCategories: new Set(request.keywordCategories ?? ALL_KEYWORD_CATEGORIES),
   });
 
+  // Track key-trope source status (generated from user-provided tropes)
+  const keyTropeCandidates = categorizedCandidates.filter((c) => c.sources.includes("key-trope"));
+  sourceStatuses.push({
+    source: "key-trope",
+    ok: keyTropeCandidates.length > 0,
+    count: keyTropeCandidates.length,
+  });
+
   // User-deselected sources still ran (they're entangled with data other
   // sources depend on — see the comment on ALL_KEYWORD_SOURCES), but their
   // candidates are excluded from the merge below, and their status entry
@@ -603,10 +593,14 @@ export async function POST(req: NextRequest) {
   // buckets the research blueprint recommends tracking separately (section
   // 5) and score/cap each independently — a strong comp-author name
   // shouldn't lose its ad group slot to a flood of tropes candidates sharing
-  // one combined cap. Include categorized candidates alongside structured sources.
+  // one combined cap. Include categorized candidates alongside structured sources,
+  // but filter them to only include enabled sources.
+  const filteredCategorizedCandidates = categorizedCandidates.filter((c) =>
+    c.sources.some((source) => enabledSources.has(source))
+  );
   const merged = mergeKeywordCandidates(
     ...ALL_KEYWORD_SOURCES.filter((s) => enabledSources.has(s)).map((s) => sourceCandidateGroups[s] ?? []),
-    categorizedCandidates
+    filteredCategorizedCandidates
   );
   const { tropes: tropesCandidates, compNames: compNameCandidates } = splitKeywordsByCategory(
     collapseNearDuplicates(merged)

@@ -1,15 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 import { jwtVerify } from "jose";
+import { AUTH_CONFIG } from "@/lib/config";
 
-const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "your-secret-key-change-this-in-production");
-
-const publicPaths = ["/login", "/api/login", "/api/logout"];
+const SECRET = AUTH_CONFIG.SECRET_KEY;
 
 export async function middleware(request: NextRequest) {
   const pathname = request.nextUrl.pathname;
 
   // Allow public paths without authentication
-  if (publicPaths.includes(pathname)) {
+  if (AUTH_CONFIG.PUBLIC_PATHS.includes(pathname)) {
     return NextResponse.next();
   }
 

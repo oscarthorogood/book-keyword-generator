@@ -1,7 +1,8 @@
 import { cookies } from "next/headers";
 import { jwtVerify, SignJWT } from "jose";
+import { AUTH_CONFIG } from "./config";
 
-const SECRET = new TextEncoder().encode(process.env.AUTH_SECRET || "your-secret-key-change-this-in-production");
+const SECRET = AUTH_CONFIG.SECRET_KEY;
 
 interface Session {
   authenticated: true;
@@ -13,7 +14,7 @@ export async function createSession(): Promise<string> {
   const token = await new SignJWT({ authenticated: true, createdAt: now })
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
-    .setExpirationTime("7d")
+    .setExpirationTime(AUTH_CONFIG.TOKEN_EXPIRY)
     .sign(SECRET);
 
   return token;
@@ -45,13 +46,7 @@ export async function getSession(): Promise<Session | null> {
 
 export async function setSessionCookie(token: string): Promise<void> {
   const cookieStore = await cookies();
-  cookieStore.set("auth_token", token, {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 7, // 7 days
-    path: "/",
-  });
+  cookieStore.set("auth_token", token, AUTH_CONFIG.COOKIE_CONFIG);
 }
 
 export async function clearSessionCookie(): Promise<void> {
