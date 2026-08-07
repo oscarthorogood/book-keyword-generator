@@ -508,16 +508,6 @@ export async function scrapeProductPage(
 
     const { isbn10, isbn13 } = extractIsbns($);
 
-    const descriptionText =
-      [
-        $("#bookDescription_feature_div").text(),
-        $("#productDescription").text(),
-        $("#editorialReviews_feature_div").text(),
-      ]
-        .map((t) => t.replace(/\s+/g, " ").trim())
-        .filter(Boolean)
-        .join(" ") || undefined;
-
     const compTitles = new Set<string>();
     const compAsins = new Set<string>();
     $(
