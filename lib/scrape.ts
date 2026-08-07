@@ -134,6 +134,9 @@ const AUTOCOMPLETE_CONCURRENCY = 15;
  * catches modifier words that appear before the phrase instead of after it
  * (e.g. "dark sci fi romance") — a query shape the suffix sweep alone can't
  * reach. See the manual keyword research blueprint, section 2.
+ *
+ * Enhanced to also generate seeds from title fragments and author names
+ * to improve coverage for books with long or compound titles.
  */
 export function buildAutocompleteSeeds(title: string, author?: string): string[] {
   const cleanTitle = title.trim();
@@ -141,10 +144,31 @@ export function buildAutocompleteSeeds(title: string, author?: string): string[]
 
   const seeds = new Set<string>();
   seeds.add(cleanTitle);
-  for (const modifier of AUTOCOMPLETE_MODIFIERS) seeds.add(`${cleanTitle} ${modifier}`);
-  if (author) seeds.add(`${cleanTitle} ${author}`);
-  for (const letter of ALPHABET) seeds.add(`${cleanTitle} ${letter}`);
-  for (const letter of ALPHABET) seeds.add(`${letter} ${cleanTitle}`);
+
+  // Add seeds from title fragments (first/last few words)
+  const titleWords = cleanTitle.split(/\s+/).filter(w => w.length > 2);
+  if (titleWords.length > 1) {
+    seeds.add(titleWords.slice(0, Math.min(3, titleWords.length)).join(" "));
+    seeds.add(titleWords.slice(-Math.min(3, titleWords.length)).join(" "));
+  }
+
+  // Add modifier combinations
+  for (const modifier of AUTOCOMPLETE_MODIFIERS) {
+    seeds.add(`${cleanTitle} ${modifier}`);
+  }
+
+  // Add author-based seeds for better targeting
+  if (author) {
+    seeds.add(`${cleanTitle} ${author}`);
+    seeds.add(author);
+    seeds.add(`${author} books`);
+  }
+
+  // Alphabet sweeps for exhaustive coverage
+  for (const letter of ALPHABET) {
+    seeds.add(`${cleanTitle} ${letter}`);
+    seeds.add(`${letter} ${cleanTitle}`);
+  }
 
   return Array.from(seeds).slice(0, MAX_AUTOCOMPLETE_SEEDS);
 }
