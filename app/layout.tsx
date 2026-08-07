@@ -1,6 +1,8 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
+import { Header } from "@/components/Header";
+import { isCurrentUserAdmin } from "@/lib/admin";
 import "./globals.css";
 
 type RootLayoutProps = {
@@ -30,13 +32,26 @@ export const viewport = {
   ],
 };
 
-export default function RootLayout({ children }: RootLayoutProps) {
+export default async function RootLayout({ children }: RootLayoutProps) {
+  // Resolved here so every page gets the same nav without a client round-trip.
+  // Never throw out of the layout: on /login there is no session yet, and a
+  // misconfigured deployment should still be able to render the login page.
+  let isAdmin = false;
+  try {
+    isAdmin = await isCurrentUserAdmin();
+  } catch {
+    isAdmin = false;
+  }
+
   return (
     <html
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">{children}</body>
+      <body className="min-h-full flex flex-col">
+        <Header isAdmin={isAdmin} />
+        {children}
+      </body>
     </html>
   );
 }

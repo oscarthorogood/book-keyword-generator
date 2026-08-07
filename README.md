@@ -391,10 +391,17 @@ values ('them@example.com', 'approved', now())
 on conflict (email) do update set status = 'approved', decided_at = now();
 ```
 
-**Access console:** sign in as `ADMIN_EMAIL` and visit **`/admin`** to approve,
-deny, revoke, or reinstate anyone. It's not linked from the nav — go there by
-URL. Non-admins get a 404 rather than a 403, so the page's existence isn't
-advertised.
+**Access console:** sign in as `ADMIN_EMAIL` and use the **Access** link in the
+header (shown only to the admin) to approve, deny, revoke, or reinstate anyone.
+Non-admins get a 404 rather than a 403, so the page's existence isn't
+advertised — and the link being hidden is cosmetic, not the control: `/admin`
+and its API authorize independently.
+
+The admin flag is resolved once in the root layout and passed to the header, so
+there's no client-side round-trip. The trade-off is that reading the session in
+the layout opts every route into dynamic rendering — including `/login`, which
+used to be static. That costs nothing in practice here, since every other route
+was already dynamic and behind auth.
 
 Revoking does two things: flips the row to `denied` (blocking new sign-in
 links) *and* deletes the Supabase auth user, which invalidates any session they

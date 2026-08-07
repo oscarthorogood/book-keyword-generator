@@ -4,7 +4,6 @@ import { FormEvent, useMemo, useState } from "react";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildCampaignName } from "@/lib/naming";
 import { KEYWORD_CATEGORY_META } from "@/lib/keywordCategories";
-import { Header } from "@/components/Header";
 import type { KeywordCategory, KeywordGroupType, KeywordSource } from "@/lib/types";
 
 type FormPage = 1 | 2 | 3 | 4 | 5 | 6;
@@ -419,7 +418,6 @@ export default function Home() {
 
   return (
     <>
-      <Header />
       <main className="flex-1 flex justify-center px-3 py-6 md:px-6 md:py-10">
         <div className="w-full max-w-6xl shell p-4 md:p-8">
         {/* Topbar */}
