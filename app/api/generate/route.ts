@@ -354,19 +354,9 @@ export async function POST(req: NextRequest) {
     count: duckDuckGoAutocompleteResult.length,
   });
   sourceStatuses.push({
-    source: "google-books",
-    ok: bookMetadata.categories.length > 0,
-    count: bookMetadata.categories.length,
-  });
-  sourceStatuses.push({
     source: "book-content",
     ok: bookMetadata.commonTerms.length > 0,
     count: bookMetadata.commonTerms.length,
-  });
-  sourceStatuses.push({
-    source: "open-library",
-    ok: bookMetadata.subjects.length > 0,
-    count: bookMetadata.subjects.length,
   });
 
   // Auto-targeting's complements/substitutes clauses match against other
