@@ -291,7 +291,9 @@ export function splitKeywordsByCategory(keywords: KeywordCandidate[]): {
   return { tropes, compNames };
 }
 
-const BUYER_INTENT_GENRE_LIMIT = 6;
+// Increased from 6 to 10 to use more genre terms for buyer-intent templating.
+// Most books have 5-8 genres, so 10 is safe without dilution.
+const BUYER_INTENT_GENRE_LIMIT = 10;
 const FORMAT_MODIFIERS = ["hardcover", "paperback", "hard back", "kindle books"];
 
 /**
@@ -373,10 +375,13 @@ export function extractAsinCandidates(candidates: KeywordCandidate[]): {
  * text and wraps the resulting phrases as candidates under `source`. Shared
  * by the content-mining sources below since they differ only in where the
  * raw text came from.
+ *
+ * Note: Increased phrase limit from 20 to 30 to capture more variety,
+ * especially important for rich description text.
  */
-function buildTextMiningCandidates(texts: string[], source: KeywordSource): KeywordCandidate[] {
+function buildTextMiningCandidates(texts: string[], source: KeywordSource, maxPhrases: number = 30): KeywordCandidate[] {
   const combined = texts.join(". ");
-  const phrases = extractKeyPhrases(combined, 20);
+  const phrases = extractKeyPhrases(combined, maxPhrases);
   const usable = new Set<string>();
   for (const phrase of phrases) {
     const normalized = normalize(phrase);
@@ -589,6 +594,22 @@ function categoryRelevanceScore(category: string | undefined): number {
   return 0;
 }
 
+// Source diversity quality score: rare but highly specific keywords
+// shouldn't be penalized just for coming from one source. A 4-word
+// phrase from review mining is worth more than a generic term that
+// appears in 3 sources.
+function sourceQualityScore(sourceCount: number, wordCount: number): number {
+  // Single-source keywords: check if they're specific enough to trust
+  if (sourceCount === 1) {
+    // Specific long phrases (4+ words) from one source are high quality
+    if (wordCount >= 4) return 1.5; // Good-quality rare phrase
+    if (wordCount === 3) return 0.5; // Decent quality
+  }
+  // Two sources: reliable but not confirmed-agreement yet
+  if (sourceCount === 2 && wordCount >= 3) return 1;
+  return 0;
+}
+
 /**
  * Scores each candidate by how much independent agreement backs it (more
  * sources = more confidence), keyword category relevance, phrase specificity,
@@ -601,6 +622,7 @@ function categoryRelevanceScore(category: string | undefined): number {
  * 3. User-provided sources (+2 for user-tag, +2.5 for key-trope)
  * 4. Category relevance (0-2 based on semantic value)
  * 5. Phrase length vs. breadth (ideal 3-5 word phrases)
+ * 6. Source quality (rare but specific phrases get bonus)
  */
 export function scoreAndTierBids(
   candidates: KeywordCandidate[],
@@ -625,6 +647,11 @@ export function scoreAndTierBids(
       const categoryScore = categoryRelevanceScore(candidate.category);
       score += categoryScore;
 
+      // Source quality bonus: rare but highly specific keywords deserve credit
+      // (e.g., a 4-word phrase from one high-quality source)
+      const qualityScore = sourceQualityScore(sourceCount, wordCount);
+      score += qualityScore;
+
       // Source diversity bonus: if keyword appears in manual + discovered,
       // it's strongly aligned with user intent (not just algorithmic).
       const hasManualSource = candidate.sources.includes("manual");
@@ -638,7 +665,11 @@ export function scoreAndTierBids(
       let suggestedBid = candidate.suggestedBid;
       if (suggestedBid === undefined) {
         // Bid multiplier: multi-source keywords are more confident, bid higher
-        const multiplier = sourceCount >= 3 ? 1 : sourceCount >= 2 ? 0.9 : 0.6;
+        // Single-source high-quality phrases still get decent bid (0.75)
+        let multiplier = 0.6;
+        if (sourceCount >= 3) multiplier = 1;
+        else if (sourceCount === 2) multiplier = 0.9;
+        else if (wordCount >= 4) multiplier = 0.75; // Boost specific rare phrases
         suggestedBid = Math.round(defaultBid * multiplier * 100) / 100;
       }
 

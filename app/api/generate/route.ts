@@ -38,6 +38,7 @@ import {
   scoreAndTierBids,
   splitKeywordsByCategory,
 } from "@/lib/keywordMerge";
+import { boostScoresByDescriptionQuality } from "@/lib/descriptionQuality";
 import {
   ALL_KEYWORD_CATEGORIES,
   buildCategorizedKeywordCandidates,
@@ -621,7 +622,20 @@ export async function POST(req: NextRequest) {
   // ranking isn't configured, so it has to be a complete, good-enough
   // ranking on its own, not just AI scaffolding.
   const AI_SHORTLIST_MULTIPLIER = 1.6;
-  const tropesShortlist = scoreAndTierBids(tropesCandidates, tropesBid).slice(
+  let tropesShortlist = scoreAndTierBids(tropesCandidates, tropesBid);
+
+  // Boost tropes keywords based on description quality (richer descriptions
+  // = better keyword signals from that marketing copy)
+  tropesShortlist = boostScoresByDescriptionQuality(
+    tropesShortlist,
+    {
+      description: productPage.description,
+      bulletPoints: productPage.bulletPoints,
+    },
+    "book-description"
+  ).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+
+  tropesShortlist = tropesShortlist.slice(
     0,
     Math.round(RECOMMENDED_MAX_KEYWORDS * AI_SHORTLIST_MULTIPLIER)
   );
