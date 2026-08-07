@@ -24,10 +24,11 @@ export const API_CONFIG = {
 export const KEYWORD_CONFIG = {
   MARKETPLACES: ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const,
   MATCH_TYPES: ["broad", "phrase", "exact"] as const,
-  RECOMMENDED_MIN_KEYWORDS: 100,
-  RECOMMENDED_MAX_KEYWORDS: 200,
-  COMP_NAME_MAX_KEYWORDS: 20,
-  PRODUCT_TARGET_MAX: 30,
+  // NOTE: keyword caps deliberately do NOT live here. The live values are
+  // RECOMMENDED_MIN/MAX_KEYWORDS + COMP_NAME_MAX_KEYWORDS in lib/keywordMerge.ts
+  // and PRODUCT_TARGET_MAX in lib/productTargets.ts, next to the scoring code
+  // that reads them. Duplicating them here previously left two contradicting
+  // sets of numbers, with the copies in this file silently unused.
   ALL_KEYWORD_SOURCES: [
     "ads-api",
     "autocomplete",
@@ -50,6 +51,8 @@ export const KEYWORD_CONFIG = {
     "goodreads-tags",
     "user-tag",
     "key-trope", // User-provided tropes/themes/settings from the form
+    "amazon-recs", // "Frequently bought together" / "Compare with similar items"
+    "firecrawl", // LLM-extracted categories/keywords/features from the product page
   ] as const,
   ALL_KEYWORD_GROUP_TYPES: ["tropes", "comp-names", "product-targeting"] as const,
 };

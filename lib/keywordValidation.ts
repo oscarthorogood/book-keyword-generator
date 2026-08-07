@@ -101,7 +101,7 @@ export function filterRedundantMatches(
   // For each keyword that appears multiple times with different match types,
   // keep only the highest-scoring version
   const result: KeywordCandidate[] = [];
-  for (const [keyword, variants] of byKeyword.entries()) {
+  for (const variants of byKeyword.values()) {
     if (variants.length === 1) {
       result.push(variants[0]);
     } else {
@@ -139,9 +139,10 @@ export function rebalanceKeywordBudget(
         // Reduce score and bid
         const newScore = Math.max(0, (candidate.score ?? 0) + qualityAdjust);
         const bidMultiplier = Math.max(0.3, 1 + qualityAdjust / 10);
-        const newBid = candidate.suggestedBid
-          ? Math.round(candidate.suggestedBid * bidMultiplier * 100) / 100
-          : undefined;
+        // Falls back to the ad group's base bid rather than leaving the bid
+        // unset — a penalized keyword still needs a bid to be exportable.
+        const baseBid = candidate.suggestedBid ?? defaultBid;
+        const newBid = Math.round(baseBid * bidMultiplier * 100) / 100;
         return { ...candidate, score: newScore, suggestedBid: newBid };
       }
 
@@ -155,14 +156,15 @@ export function rebalanceKeywordBudget(
  * Book titles as keywords rarely match real searches since searchers don't
  * type the full title when searching.
  */
-export function isLikelyFullTitle(text: string, maxWordCount: number = 10): boolean {
+export function isLikelyFullTitle(text: string, maxWordCount: number = 12): boolean {
   const words = text.split(/\s+/).length;
 
-  // 13+ words is almost certainly a full title/description scrape
-  if (words >= 13) return true;
+  // Past the cap is almost certainly a full title/description scrape
+  if (words > maxWordCount) return true;
 
-  // 11-12 words: probably a full title if it contains punctuation or articles
-  if (words >= 11) {
+  // Just under it: probably a full title if it carries subtitle punctuation
+  // ("The Silent Patient: The Record-Breaking ... Thriller").
+  if (words >= maxWordCount - 1) {
     if (/[:"';,]/.test(text)) return true;
   }
 
@@ -180,7 +182,13 @@ export function validateFinalKeywords(
   // First pass: quality adjustment (score/bid rebalancing)
   let result = rebalanceKeywordBudget(candidates, defaultBid);
 
-  // Second pass: sort by final score
+  // Second pass: drop over-extracted scrapes. Readers don't type a book's
+  // full title-plus-subtitle into search, so those never match and just
+  // dilute the ad group. Safe for the comparable-titles group too: a real
+  // comp title ("gone girl") is nowhere near the word-count threshold.
+  result = result.filter((candidate) => !isLikelyFullTitle(candidate.text));
+
+  // Third pass: sort by final score
   result = result.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
   // Return the validated list

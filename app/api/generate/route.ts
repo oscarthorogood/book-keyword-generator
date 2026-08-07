@@ -14,6 +14,7 @@ import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
 import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
 import {
+  buildAmazonRecommendationCandidates,
   buildAuthorCatalogCandidates,
   buildBookContentCandidates,
   buildBuyerIntentCandidates,
@@ -22,6 +23,7 @@ import {
   buildCuratedSynonymCandidates,
   buildDescriptionCandidates,
   buildDescriptionPhraseCandidates,
+  buildFirecrawlCandidates,
   buildGenreMetadataCandidates,
   buildKnownTagCandidates,
   buildLocCandidates,
@@ -277,7 +279,7 @@ export async function POST(req: NextRequest) {
 
   const [
     adsApiResult,
-    metadataSeeds,
+    firecrawlExtraction,
     autocompleteResult,
     googleAutocompleteResult,
     youtubeAutocompleteResult,
@@ -332,6 +334,7 @@ export async function POST(req: NextRequest) {
 
   // Run additional autocomplete queries using Firecrawl-extracted metadata seeds
   // to capture category-specific and feature-based search queries
+  const metadataSeeds = firecrawlExtraction.seeds;
   const metadataAwareAutocompleteResults = await Promise.all([
     metadataSeeds.length > 0 ? getAutocompleteKeywordSet(metadataSeeds, request.marketplace) : Promise.resolve([]),
     metadataSeeds.length > 0 ? getGoogleAutocompleteKeywordSet(metadataSeeds) : Promise.resolve([]),
@@ -398,6 +401,16 @@ export async function POST(req: NextRequest) {
   // internally for ad-group routing, tracked under its own "author-catalog"
   // toggle/status below.
   const authorCatalogCandidates = buildAuthorCatalogCandidates(authorCatalogTitles);
+  // Amazon's own "frequently bought together" (co-purchase) and "compare with
+  // similar items" (explicit substitutes) modules — stronger comparable-title
+  // signals than the "also bought" carousel, already scraped alongside it.
+  const amazonRecsCandidates = buildAmazonRecommendationCandidates([
+    productPage.frequentlyBoughtTogether,
+    productPage.compareWithSimilar,
+  ]);
+  // The LLM extraction that already ran to seed the metadata-aware
+  // autocomplete sweep above, mined for its own terms this time.
+  const firecrawlCandidates = buildFirecrawlCandidates(firecrawlExtraction.metadata);
   // Tags the user reviewed/kept on the Autofill book profile — high-trust,
   // human-vetted genre/subgenre/tag signal, folded into both the seed terms
   // below and the final candidate pool. See buildKnownTagCandidates.
@@ -515,6 +528,25 @@ export async function POST(req: NextRequest) {
     ok: goodreadsTagCandidates.length > 0,
     count: goodreadsTagCandidates.length,
   });
+  sourceStatuses.push({
+    source: "amazon-recs",
+    ok: amazonRecsCandidates.length > 0,
+    count: amazonRecsCandidates.length,
+    error:
+      amazonRecsCandidates.length > 0
+        ? undefined
+        : "No 'frequently bought together' or 'compare with similar' modules on this page.",
+  });
+  sourceStatuses.push({
+    source: "firecrawl",
+    ok: firecrawlCandidates.length > 0,
+    count: firecrawlCandidates.length,
+    error: isFirecrawlConfigured()
+      ? firecrawlCandidates.length > 0
+        ? undefined
+        : "Firecrawl returned no categories, keywords, or features."
+      : "FIRECRAWL_API_KEY not configured.",
+  });
 
   // ASINs can leak into the newer autocomplete corpora the same way they do
   // for Amazon/Google's — see the extractAsinCandidates call above.
@@ -577,6 +609,8 @@ export async function POST(req: NextRequest) {
     wikidata: wikidataCandidates,
     "loc-subjects": locCandidates,
     "goodreads-tags": goodreadsTagCandidates,
+    "amazon-recs": amazonRecsCandidates,
+    firecrawl: firecrawlCandidates,
   };
   for (const status of sourceStatuses) {
     if (status.source in sourceCandidateGroups && !enabledSources.has(status.source as KeywordSource)) {
@@ -625,7 +659,7 @@ export async function POST(req: NextRequest) {
   // ranking isn't configured, so it has to be a complete, good-enough
   // ranking on its own, not just AI scaffolding.
   const AI_SHORTLIST_MULTIPLIER = 1.6;
-  let tropesShortlist = scoreAndTierBids(tropesCandidates, tropesBid);
+  let tropesShortlist = scoreAndTierBids(tropesCandidates, tropesBid, request.knownTags);
 
   // Boost tropes keywords based on description quality (richer descriptions
   // = better keyword signals from that marketing copy)
@@ -646,7 +680,7 @@ export async function POST(req: NextRequest) {
   // Boost comp-name keywords based on competitor book quality (bestseller
   // status, ratings, review counts) — makes sure high-quality competitors
   // are prioritized over unknowns.
-  const scoredCompNames = scoreAndTierBids(compNameCandidates, compNamesBid);
+  const scoredCompNames = scoreAndTierBids(compNameCandidates, compNamesBid, request.knownTags);
   const qualityBoostedCompNames = boostScoresByCompetitorQuality(
     scoredCompNames,
     relatedCompetitors.competitors,
@@ -689,8 +723,8 @@ export async function POST(req: NextRequest) {
     compNameKeywords = compNamesShortlist.slice(0, COMP_NAME_MAX_KEYWORDS);
   }
 
-  // Final quality validation pass: removes ultra-generic keywords,
-  // penalizes format-only keywords, and filters suspicious full-title scrapes
+  // Final quality validation pass: removes ultra-generic keywords, penalizes
+  // format-only keywords, and drops over-extracted full-title scrapes.
   tropesKeywords = validateFinalKeywords(tropesKeywords, tropesBid);
   compNameKeywords = validateFinalKeywords(compNameKeywords, compNamesBid);
 
@@ -711,6 +745,17 @@ export async function POST(req: NextRequest) {
   // including any the user typed directly into the search bar). See
   // learnings doc, section 4.
   const productTargets = mergeProductTargetCandidates(
+    // First: merge order is preserved and the list is capped at
+    // PRODUCT_TARGET_MAX below, so the strongest signal has to lead. An ASIN
+    // Amazon itself bundles or offers as a substitute outranks a carousel
+    // impression for product targeting.
+    buildProductTargetCandidates(
+      [
+        ...(productPage.frequentlyBoughtTogether ?? []).map((item) => item.asin),
+        ...(productPage.compareWithSimilar ?? []).map((item) => item.asin),
+      ],
+      "amazon-recs"
+    ),
     buildProductTargetCandidates(productPage.compAsins, "comp-title"),
     buildProductTargetCandidates(relatedCompetitors.productTargetAsins, "comp-title"),
     buildProductTargetCandidates(

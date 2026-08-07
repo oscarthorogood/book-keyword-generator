@@ -29,6 +29,8 @@ const KEYWORD_SOURCES: { value: KeywordSource; label: string }[] = [
   { value: "duckduckgo-autocomplete", label: "DuckDuckGo Autocomplete" },
   { value: "comp-title", label: "Comp Title Categories" },
   { value: "comp-name", label: "Comp Author/Title Crawl" },
+  { value: "amazon-recs", label: "Bought Together / Compare Similar" },
+  { value: "firecrawl", label: "Firecrawl Page Extraction" },
   { value: "author-catalog", label: "Author's Other Books" },
   { value: "genre-metadata", label: "Genre & Subject Metadata" },
   { value: "buyer-intent", label: "Buyer-Intent Templates" },

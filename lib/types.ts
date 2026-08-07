@@ -72,7 +72,9 @@ export type KeywordSource =
   | "goodreads-tags"
   | "user-tag"
   | "manual"
-  | "key-trope";
+  | "key-trope"
+  | "amazon-recs"
+  | "firecrawl";
 
 /** The three ad-group buckets a Manual campaign splits into — see the generate route and README "Campaign structure". */
 export type KeywordGroupType = "tropes" | "comp-names" | "product-targeting";

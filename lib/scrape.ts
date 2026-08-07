@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import { extractAmazonMetadata, isFirecrawlConfigured } from "./firecrawl";
+import { extractAmazonMetadata, isFirecrawlConfigured, type AmazonPageMetadata } from "./firecrawl";
 import { KeywordCandidate, Marketplace, ProductPageData, RelatedCompetitor, RelatedCompetitorCrawl } from "./types";
 
 const AMAZON_DOMAINS: Record<Marketplace, string> = {
@@ -130,10 +130,17 @@ const AUTOCOMPLETE_CONCURRENCY = 15;
  * Generate additional keyword seeds from Firecrawl-extracted metadata
  * (categories, features, keywords) to improve autocomplete coverage.
  * These seeds target category-specific and feature-based searches.
- * Falls back to empty array if Firecrawl is not configured.
+ * Falls back to empty seeds/metadata if Firecrawl is not configured.
+ *
+ * Returns the raw extraction alongside the seeds so callers can also mine the
+ * terms directly (buildFirecrawlCandidates in lib/keywordMerge.ts) without
+ * paying for a second extraction call.
  */
-export async function buildMetadataSeeds(asin: string, marketplace: Marketplace): Promise<string[]> {
-  if (!isFirecrawlConfigured()) return [];
+export async function buildMetadataSeeds(
+  asin: string,
+  marketplace: Marketplace
+): Promise<{ seeds: string[]; metadata: AmazonPageMetadata }> {
+  if (!isFirecrawlConfigured()) return { seeds: [], metadata: {} };
 
   try {
     const url = getProductPageUrl(asin, marketplace);
@@ -176,9 +183,12 @@ export async function buildMetadataSeeds(asin: string, marketplace: Marketplace)
       seeds.add(`${metadata.title} ${metadata.language}`);
     }
 
-    return Array.from(seeds).filter(s => s.length > 2 && s.length < 100);
+    return {
+      seeds: Array.from(seeds).filter((s) => s.length > 2 && s.length < 100),
+      metadata,
+    };
   } catch {
-    return [];
+    return { seeds: [], metadata: {} };
   }
 }
 
