@@ -123,6 +123,12 @@ export default function Home() {
   const [profileTags, setProfileTags] = useState<string[]>([]);
   const [newTagInput, setNewTagInput] = useState("");
   const [expandedMetadata, setExpandedMetadata] = useState(false);
+  const [profileCoverImageUrl, setProfileCoverImageUrl] = useState<string | null>(null);
+  const [profileQaCount, setProfileQaCount] = useState<number | null>(null);
+  const [profileAvailability, setProfileAvailability] = useState<string | null>(null);
+  const [profileCompDetails, setProfileCompDetails] = useState<
+    Array<{ asin: string; title: string; author?: string; rating?: number; reviewCount?: number }>
+  >([]);
 
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -247,6 +253,10 @@ export default function Home() {
       setProfileOpenLibrarySubjects(Array.isArray(body.openLibrarySubjects) ? body.openLibrarySubjects : []);
       setProfileGoodreadsTags(Array.isArray(body.goodreadsTags) ? body.goodreadsTags : []);
       setProfileTags(Array.isArray(body.tags) ? body.tags : []);
+      setProfileCoverImageUrl(typeof body.coverImageUrl === "string" ? body.coverImageUrl : null);
+      setProfileQaCount(typeof body.qaCount === "number" ? body.qaCount : null);
+      setProfileAvailability(typeof body.availability === "string" ? body.availability : null);
+      setProfileCompDetails(Array.isArray(body.compDetails) ? body.compDetails : []);
 
       setAutofillStatus("idle");
     } catch (err) {
@@ -487,12 +497,14 @@ export default function Home() {
                     </Field>
                   </div>
 
-                  {(profileCategoryPath.length > 0 ||
+                  {(profileCoverImageUrl ||
+                    profileCategoryPath.length > 0 ||
                     profileBestSellerRanks.length > 0 ||
                     profileDescription ||
                     profileTags.length > 0 ||
                     profileBulletPoints.length > 0 ||
-                    profileCompTitles.length > 0) && (
+                    profileCompTitles.length > 0 ||
+                    profileCompDetails.length > 0) && (
                     <div className="card">
                       <div className="flex items-center justify-between mb-4">
                         <p className="card-title mb-0">Book Metadata</p>
@@ -505,6 +517,17 @@ export default function Home() {
                         {expandedMetadata ? "Collapse" : "Expand"}
                         </button>
                       </div>
+
+                      {profileCoverImageUrl && (
+                        <div className="mb-4 pb-4 border-b border-line">
+                          <img
+                            src={profileCoverImageUrl}
+                            alt="Book cover"
+                            className="w-full max-w-xs rounded-md"
+                            style={{ maxHeight: "200px", objectFit: "cover" }}
+                          />
+                        </div>
+                      )}
 
                       <div className="space-y-3">
                         {/* Core metadata always shown */}
@@ -548,6 +571,20 @@ export default function Home() {
                         <span className="font-semibold" style={{ color: "var(--ink)" }}>Rating: </span>
                         ⭐ {profileRating.toFixed(1)}/5
                         {profileReviewCount && ` (${profileReviewCount.toLocaleString()} reviews)`}
+                      </p>
+                    )}
+
+                    {profileQaCount && (
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Customer Q&A: </span>
+                        {profileQaCount.toLocaleString()} questions
+                      </p>
+                    )}
+
+                    {profileAvailability && (
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Availability: </span>
+                        {profileAvailability}
                       </p>
                     )}
 
@@ -602,7 +639,30 @@ export default function Home() {
                           </p>
                         )}
 
-                        {profileCompTitles.length > 0 && (
+                        {profileCompDetails.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Customers Also Bought (Detailed):</span>
+                            <div className="mt-2 space-y-2">
+                              {profileCompDetails.slice(0, 5).map((comp) => (
+                                <div key={comp.asin} className="p-2 rounded" style={{ background: "var(--surface-soft)" }}>
+                                  <p className="text-xs font-medium truncate">{comp.title}</p>
+                                  {comp.author && <p className="text-xs" style={{ color: "var(--muted)" }}>by {comp.author}</p>}
+                                  <div className="flex gap-2 mt-1 text-xs">
+                                    {comp.rating && <span>⭐ {comp.rating.toFixed(1)}</span>}
+                                    {comp.reviewCount && <span>{comp.reviewCount.toLocaleString()} reviews</span>}
+                                  </div>
+                                </div>
+                              ))}
+                              {profileCompDetails.length > 5 && (
+                                <p className="text-xs" style={{ color: "var(--accent-purple)" }}>
+                                  +{profileCompDetails.length - 5} more competitors
+                                </p>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileCompTitles.length > 0 && profileCompDetails.length === 0 && (
                           <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
                             <span className="font-semibold" style={{ color: "var(--ink)" }}>Customers Also Bought:</span>
                             <ul className="list-disc list-inside mt-1 ml-1 space-y-0.5">

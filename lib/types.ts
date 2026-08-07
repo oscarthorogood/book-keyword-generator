@@ -138,7 +138,15 @@ export interface ProductPageData {
   seriesName?: string;
   /** Best-effort list price scrape, for prefilling the RRP field — not guaranteed to be the print RRP specifically. */
   price?: number;
+  /** Book cover image URL */
+  coverImageUrl?: string;
   compTitles: string[]; // "customers also bought" style titles
+  /** Detailed competitor info for "customers also bought" with ratings */
+  compDetails?: Array<{ asin: string; title: string; author?: string; rating?: number; reviewCount?: number }>;
+  /** Q&A count for the book */
+  qaCount?: number;
+  /** Availability status (e.g., "In Stock", "Usually ships within 1-2 weeks") */
+  availability?: string;
   categories: string[]; // browse node / bestseller category text (flat, deduped)
   /** Ordered breadcrumb trail (e.g. ["Books", "Mystery, Thriller & Suspense", "Cozy", "Culinary"]) — genre/subgenre in Amazon's own hierarchy order. */
   categoryPath: string[];
