@@ -49,6 +49,7 @@ export const KEYWORD_CONFIG = {
     "author-catalog",
     "goodreads-tags",
     "user-tag",
+    "key-trope", // User-provided tropes/themes/settings from the form
   ] as const,
   ALL_KEYWORD_GROUP_TYPES: ["tropes", "comp-names", "product-targeting"] as const,
 };

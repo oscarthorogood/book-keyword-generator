@@ -12,7 +12,6 @@ const eslintConfig = defineConfig([
       "no-debugger": "error",
       "no-unused-vars": "off", // Handled by TypeScript
       "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
-      "@typescript-eslint/explicit-function-return-types": "warn",
       "@typescript-eslint/no-explicit-any": "warn",
       "prefer-const": "error",
       "no-var": "error",
