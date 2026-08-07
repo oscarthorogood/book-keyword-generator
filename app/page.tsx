@@ -130,6 +130,16 @@ export default function Home() {
     Array<{ asin: string; title: string; author?: string; rating?: number; reviewCount?: number }>
   >([]);
 
+  // Firecrawl-extracted metadata
+  const [profileFirecrawlCategories, setProfileFirecrawlCategories] = useState<string[]>([]);
+  const [profileFirecrawlFeatures, setProfileFirecrawlFeatures] = useState<string[]>([]);
+  const [profileFirecrawlKeywords, setProfileFirecrawlKeywords] = useState<string[]>([]);
+
+  // Metadata enrichment from various sources
+  const [profileWikipediaCategories, setProfileWikipediaCategories] = useState<string[]>([]);
+  const [profileWikidataGenres, setProfileWikidataGenres] = useState<string[]>([]);
+  const [profileLocSubjects, setProfileLocSubjects] = useState<string[]>([]);
+
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceStatus[] | null>(null);
@@ -257,6 +267,16 @@ export default function Home() {
       setProfileQaCount(typeof body.qaCount === "number" ? body.qaCount : null);
       setProfileAvailability(typeof body.availability === "string" ? body.availability : null);
       setProfileCompDetails(Array.isArray(body.compDetails) ? body.compDetails : []);
+
+      // Firecrawl metadata
+      setProfileFirecrawlCategories(Array.isArray(body.firecrawlCategories) ? body.firecrawlCategories : []);
+      setProfileFirecrawlFeatures(Array.isArray(body.firecrawlFeatures) ? body.firecrawlFeatures : []);
+      setProfileFirecrawlKeywords(Array.isArray(body.firecrawlKeywords) ? body.firecrawlKeywords : []);
+
+      // Enriched metadata from various sources
+      setProfileWikipediaCategories(Array.isArray(body.wikipediaCategories) ? body.wikipediaCategories : []);
+      setProfileWikidataGenres(Array.isArray(body.wikidataGenres) ? body.wikidataGenres : []);
+      setProfileLocSubjects(Array.isArray(body.locSubjects) ? body.locSubjects : []);
 
       setAutofillStatus("idle");
     } catch (err) {
@@ -759,6 +779,114 @@ export default function Home() {
                                   style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}
                                 >
                                   +{profileGoodreadsTags.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileFirecrawlCategories.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Firecrawl Categories:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileFirecrawlCategories.slice(0, 8).map((cat) => (
+                                <span key={cat} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {cat}
+                                </span>
+                              ))}
+                              {profileFirecrawlCategories.length > 8 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileFirecrawlCategories.length - 8}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileFirecrawlFeatures.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Firecrawl Features:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileFirecrawlFeatures.slice(0, 6).map((feat) => (
+                                <span key={feat} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {feat}
+                                </span>
+                              ))}
+                              {profileFirecrawlFeatures.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileFirecrawlFeatures.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileFirecrawlKeywords.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Firecrawl Keywords:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileFirecrawlKeywords.slice(0, 6).map((kw) => (
+                                <span key={kw} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {kw}
+                                </span>
+                              ))}
+                              {profileFirecrawlKeywords.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileFirecrawlKeywords.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileWikipediaCategories.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Wikipedia Categories:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileWikipediaCategories.slice(0, 6).map((cat) => (
+                                <span key={cat} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {cat}
+                                </span>
+                              ))}
+                              {profileWikipediaCategories.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileWikipediaCategories.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileWikidataGenres.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Wikidata Genres:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileWikidataGenres.slice(0, 6).map((genre) => (
+                                <span key={genre} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {genre}
+                                </span>
+                              ))}
+                              {profileWikidataGenres.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileWikidataGenres.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileLocSubjects.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Library of Congress Subjects:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileLocSubjects.slice(0, 6).map((subj) => (
+                                <span key={subj} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {subj}
+                                </span>
+                              ))}
+                              {profileLocSubjects.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileLocSubjects.length - 6}
                                 </span>
                               )}
                             </div>

@@ -1,8 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
-import { enrichBookMetadata } from "@/lib/bookMetadata";
+import { enrichBookMetadata, lookupWikipediaCategories, lookupWikidataGenres, lookupLocSubjects } from "@/lib/bookMetadata";
+import { extractAmazonMetadata, isFirecrawlConfigured, type AmazonPageMetadata } from "@/lib/firecrawl";
 import { getGoodreadsTags } from "@/lib/goodreads";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
-import { scrapeProductPage } from "@/lib/scrape";
+import { getProductPageUrl, scrapeProductPage } from "@/lib/scrape";
 import { Marketplace } from "@/lib/types";
 
 export const runtime = "nodejs";
@@ -56,7 +57,7 @@ export async function GET(req: NextRequest) {
     );
   }
 
-  const [bookMetadata, goodreadsTags] = await Promise.all([
+  const [bookMetadata, goodreadsTags, firecrawlMetadata, wikipediaCategories, wikidataGenres, locSubjects] = await Promise.all([
     enrichBookMetadata({
       isbn10: productPage.isbn10,
       isbn13: productPage.isbn13,
@@ -64,6 +65,10 @@ export async function GET(req: NextRequest) {
       author: productPage.author,
     }),
     getGoodreadsTags(productPage.isbn10, productPage.title, productPage.author),
+    isFirecrawlConfigured() ? extractAmazonMetadata(getProductPageUrl(asin, marketplace)) : Promise.resolve<AmazonPageMetadata>({}),
+    lookupWikipediaCategories(productPage.title),
+    lookupWikidataGenres(productPage.title),
+    lookupLocSubjects(productPage.title),
   ]);
 
   const tags = Array.from(
@@ -151,5 +156,15 @@ export async function GET(req: NextRequest) {
     openLibrarySubjects: bookMetadata.subjects,
     goodreadsTags,
     tags,
+
+    // Firecrawl structured extraction
+    firecrawlCategories: firecrawlMetadata.categories ?? [],
+    firecrawlFeatures: firecrawlMetadata.features ?? [],
+    firecrawlKeywords: firecrawlMetadata.keywords ?? [],
+
+    // Enriched metadata from various sources
+    wikipediaCategories,
+    wikidataGenres,
+    locSubjects,
   });
 }
