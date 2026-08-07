@@ -37,11 +37,19 @@ export function isStorageConfigured(): boolean {
 }
 
 /**
- * Date-partitioned, collision-proof object key. The random prefix keeps two
- * runs of the same campaign on the same day from overwriting each other, and
- * the date folders make manual cleanup / lifecycle rules straightforward.
+ * Per-user, date-partitioned, collision-proof object key:
+ * `<userId>/<YYYY>/<MM>/<DD>/<uuid>-<campaign>.xlsx`.
+ *
+ * The user prefix is what makes per-user history possible later — it's also
+ * the prefix any future Storage policy would key off, so signed URLs stay the
+ * only way across accounts. The uuid keeps two runs of the same campaign on
+ * the same day from colliding, and the date folders make lifecycle rules and
+ * manual cleanup straightforward.
+ *
+ * `userId` is optional so archiving still works for any caller without a
+ * session; those land under "shared/".
  */
-export function buildObjectPath(campaignName: string): string {
+export function buildObjectPath(campaignName: string, userId?: string): string {
   const now = new Date();
   const yyyy = now.getUTCFullYear();
   const mm = String(now.getUTCMonth() + 1).padStart(2, "0");
@@ -51,7 +59,10 @@ export function buildObjectPath(campaignName: string): string {
       .replace(/[^a-z0-9\-_]+/gi, "_")
       .replace(/^_+|_+$/g, "")
       .slice(0, 80) || "campaign";
-  return `${yyyy}/${mm}/${dd}/${crypto.randomUUID()}-${slug}.xlsx`;
+  // Only ever a Supabase user id (uuid) or the literal fallback — but sanitize
+  // anyway so nothing can ever climb out of its own prefix with "../".
+  const owner = userId?.replace(/[^a-z0-9-]/gi, "") || "shared";
+  return `${owner}/${yyyy}/${mm}/${dd}/${crypto.randomUUID()}-${slug}.xlsx`;
 }
 
 /**
@@ -62,13 +73,14 @@ export function buildObjectPath(campaignName: string): string {
  */
 export async function archiveBulksheet(
   buffer: Buffer,
-  campaignName: string
+  campaignName: string,
+  userId?: string
 ): Promise<ArchivedBulksheet | null> {
   if (!isStorageConfigured()) {
     return null;
   }
 
-  const path = buildObjectPath(campaignName);
+  const path = buildObjectPath(campaignName, userId);
 
   try {
     const storage = supabaseAdmin().storage.from(BUCKET);

@@ -126,6 +126,89 @@ export async function applyDecision(
   return (data as AccessRequest) ?? null;
 }
 
+/** Every request, newest first. Admin view. */
+export async function listAccessRequests(): Promise<AccessRequest[]> {
+  const { data, error } = await supabaseAdmin()
+    .from(TABLE)
+    .select("*")
+    .order("requested_at", { ascending: false });
+
+  if (error) {
+    throw new Error(`Could not list access requests: ${error.message}`);
+  }
+  return (data as AccessRequest[]) ?? [];
+}
+
+/**
+ * Set a status directly, bypassing the nonce check the email links use. This
+ * is the admin-console path, where authorization is the caller's session.
+ *
+ * Unlike `applyDecision` this works on an already-decided row, which is what
+ * makes revoking (approved -> denied) and reinstating possible.
+ */
+export async function setAccessStatus(
+  email: string,
+  status: Exclude<AccessStatus, "pending">
+): Promise<AccessRequest | null> {
+  const { data, error } = await supabaseAdmin()
+    .from(TABLE)
+    .update({
+      status,
+      decided_at: new Date().toISOString(),
+      // Burn any outstanding email link so it can't undo this later.
+      decision_token: null,
+    })
+    .eq("email", normalizeEmail(email))
+    .select("*")
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`Could not update access: ${error.message}`);
+  }
+  return (data as AccessRequest) ?? null;
+}
+
+/**
+ * Delete the Supabase auth user for an address, if one exists.
+ *
+ * This is what makes revocation take effect *now*. Marking the row 'denied'
+ * only stops new magic links being issued — an already-signed-in browser keeps
+ * working until its token expires, because proxy.ts validates the session
+ * against Supabase, not against this table. Removing the auth user invalidates
+ * those sessions immediately.
+ *
+ * Best-effort: a failure here is logged, not thrown, so the status change
+ * still lands.
+ */
+export async function destroyAuthUser(email: string): Promise<void> {
+  const target = normalizeEmail(email);
+  try {
+    const admin = supabaseAdmin();
+    // listUsers is paginated and has no email filter, so page until found.
+    for (let page = 1; page <= 20; page++) {
+      const { data, error } = await admin.auth.admin.listUsers({
+        page,
+        perPage: 200,
+      });
+      if (error) throw new Error(error.message);
+      if (!data.users.length) return;
+
+      const match = data.users.find((u) => u.email?.toLowerCase() === target);
+      if (match) {
+        const { error: deleteError } = await admin.auth.admin.deleteUser(match.id);
+        if (deleteError) throw new Error(deleteError.message);
+        return;
+      }
+      if (data.users.length < 200) return;
+    }
+  } catch (err) {
+    console.error(
+      `Could not remove auth user for ${target}:`,
+      err instanceof Error ? err.message : err
+    );
+  }
+}
+
 interface DecisionClaims {
   email: string;
   action: Exclude<AccessStatus, "pending">;

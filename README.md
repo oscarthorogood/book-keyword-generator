@@ -391,8 +391,17 @@ values ('them@example.com', 'approved', now())
 on conflict (email) do update set status = 'approved', decided_at = now();
 ```
 
-To revoke, set `status` to `'denied'` — they lose the ability to request new
-links, though an already-issued session survives until it expires.
+**Access console:** sign in as `ADMIN_EMAIL` and visit **`/admin`** to approve,
+deny, revoke, or reinstate anyone. It's not linked from the nav — go there by
+URL. Non-admins get a 404 rather than a 403, so the page's existence isn't
+advertised.
+
+Revoking does two things: flips the row to `denied` (blocking new sign-in
+links) *and* deletes the Supabase auth user, which invalidates any session they
+currently hold. Marking the row alone would not have — `proxy.ts` validates
+sessions against Supabase, not against this table, so a signed-in browser would
+have kept working until its token expired. Reinstating recreates the user and
+emails a fresh link. You can't revoke `ADMIN_EMAIL` from the console.
 
 **Approve/deny links carry no session** — they're clicked straight from a phone
 mail app. What makes that safe: each link is HMAC-signed with `AUTH_SECRET`, is
@@ -416,8 +425,9 @@ When both Supabase variables are set, `/api/generate` uploads a copy of each
 generated `.xlsx` to a **private** Storage bucket named `bulksheets` and
 returns a 1-hour signed link in the `X-Archive-Url` response header, which the
 UI renders under the success banner. Objects are keyed
-`YYYY/MM/DD/<uuid>-<campaign>.xlsx`, so re-runs never overwrite each other and
-date-based cleanup is easy.
+`<userId>/YYYY/MM/DD/<uuid>-<campaign>.xlsx` — per-user, so each person's
+history is separable and any future Storage policy has a prefix to key off.
+Generations without a session (there are none today) land under `shared/`.
 
 Create the bucket once (Storage > New bucket, private, MIME type
 `application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`).

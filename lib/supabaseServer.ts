@@ -35,13 +35,29 @@ export async function supabaseServer(): Promise<SupabaseClient> {
   );
 }
 
-/** Email of the signed-in user, or null. */
-export async function currentUserEmail(): Promise<string | null> {
+export interface CurrentUser {
+  id: string;
+  email: string;
+}
+
+/**
+ * The signed-in user, or null.
+ *
+ * Uses getUser(), which revalidates against Supabase — getSession() only
+ * decodes the cookie the browser sent, which a caller can forge.
+ */
+export async function currentUser(): Promise<CurrentUser | null> {
   const supabase = await supabaseServer();
   const {
     data: { user },
   } = await supabase.auth.getUser();
-  return user?.email ?? null;
+  if (!user?.email) return null;
+  return { id: user.id, email: user.email };
+}
+
+/** Email of the signed-in user, or null. */
+export async function currentUserEmail(): Promise<string | null> {
+  return (await currentUser())?.email ?? null;
 }
 
 function requiredEnv(name: string): string {

@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { applyDecision, verifyDecisionToken } from "@/lib/accessRequests";
+import { applyDecision, destroyAuthUser, verifyDecisionToken } from "@/lib/accessRequests";
 import { sendApprovedEmail } from "@/lib/email";
 import { createMagicLink, siteUrl } from "@/lib/magicLink";
 
@@ -47,6 +47,8 @@ export async function GET(req: NextRequest) {
     }
 
     if (claims.action === "denied") {
+      // Covers the case where they somehow already hold a session.
+      await destroyAuthUser(claims.email);
       return page(
         "Access denied",
         `${claims.email} will not be able to sign in. They were not notified.`,

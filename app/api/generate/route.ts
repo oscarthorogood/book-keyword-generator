@@ -11,7 +11,7 @@ import {
 } from "@/lib/bookMetadata";
 import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
 import { archiveBulksheet } from "@/lib/supabaseStorage";
-import { currentUserEmail } from "@/lib/supabaseServer";
+import { currentUser } from "@/lib/supabaseServer";
 import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
 import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
@@ -252,7 +252,8 @@ function fileResponse(buffer: Buffer, campaignName: string, extraHeaders: Record
 
 export async function POST(req: NextRequest) {
   // Defence in depth alongside proxy.ts — see the note in app/api/lookup/route.ts.
-  if (!(await currentUserEmail())) {
+  const user = await currentUser();
+  if (!user) {
     return NextResponse.json({ error: "Not signed in." }, { status: 401 });
   }
 
@@ -833,7 +834,7 @@ export async function POST(req: NextRequest) {
 
   // Best-effort copy to Supabase Storage. Returns null when Storage isn't
   // configured or the upload fails — the download below is unaffected either way.
-  const archived = await archiveBulksheet(buffer, campaignName);
+  const archived = await archiveBulksheet(buffer, campaignName, user.id);
 
   return fileResponse(buffer, campaignName, {
     ...(archived ? { "X-Archive-Path": encodeURIComponent(archived.path) } : {}),
