@@ -3,7 +3,8 @@
 import { FormEvent, useMemo, useState } from "react";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildCampaignName } from "@/lib/naming";
-import type { KeywordGroupType, KeywordSource } from "@/lib/types";
+import { KEYWORD_CATEGORY_META } from "@/lib/keywordCategories";
+import type { KeywordCategory, KeywordGroupType, KeywordSource } from "@/lib/types";
 
 type MatchType = "broad" | "phrase" | "exact";
 
@@ -74,6 +75,11 @@ export default function Home() {
   const [selectedKeywordTypes, setSelectedKeywordTypes] = useState<KeywordGroupType[]>(
     KEYWORD_TYPES.map((t) => t.value)
   );
+  const [selectedKeywordCategories, setSelectedKeywordCategories] = useState<KeywordCategory[]>(
+    KEYWORD_CATEGORY_META.map((c) => c.value)
+  );
+  const [keyTropes, setKeyTropes] = useState<string[]>([]);
+  const [keyTropesInput, setKeyTropesInput] = useState("");
   const [manualKeywords, setManualKeywords] = useState<string[]>([]);
   const [manualKeywordInput, setManualKeywordInput] = useState("");
 
@@ -86,18 +92,31 @@ export default function Home() {
   const [autofillStatus, setAutofillStatus] = useState<"idle" | "loading" | "error">("idle");
   const [autofillError, setAutofillError] = useState<string | null>(null);
 
-  // Book profile gathered by Autofill — genre/subgenre path, Best Sellers
-  // Rank standings, description, and a combined, prunable tag list from
-  // every free source (Amazon categories, Google Books, Open Library,
-  // Goodreads). The reviewed tag list feeds keyword generation as
-  // knownTags — see buildKnownTagCandidates in lib/keywordMerge.ts.
+  // Book profile gathered by Autofill — comprehensive metadata from the Amazon
+  // product page and enriched via Google Books / Open Library / Goodreads.
   const [profileCategoryPath, setProfileCategoryPath] = useState<string[]>([]);
   const [profileBestSellerRanks, setProfileBestSellerRanks] = useState<
     { rank: number; category: string }[]
   >([]);
   const [profileDescription, setProfileDescription] = useState<string | null>(null);
+  const [profileBulletPoints, setProfileBulletPoints] = useState<string[]>([]);
+  const [profileCompTitles, setProfileCompTitles] = useState<string[]>([]);
+  const [profileIsbn10, setProfileIsbn10] = useState<string | null>(null);
+  const [profileIsbn13, setProfileIsbn13] = useState<string | null>(null);
+  const [profilePrice, setProfilePrice] = useState<number | null>(null);
+  const [profileRating, setProfileRating] = useState<number | null>(null);
+  const [profileReviewCount, setProfileReviewCount] = useState<number | null>(null);
+  const [profilePageCount, setProfilePageCount] = useState<number | null>(null);
+  const [profilePublisher, setProfilePublisher] = useState<string | null>(null);
+  const [profilePublicationDate, setProfilePublicationDate] = useState<string | null>(null);
+  const [profileLanguage, setProfileLanguage] = useState<string | null>(null);
+  const [profileDimensions, setProfileDimensions] = useState<string | null>(null);
+  const [profileGoogleBooksCategories, setProfileGoogleBooksCategories] = useState<string[]>([]);
+  const [profileOpenLibrarySubjects, setProfileOpenLibrarySubjects] = useState<string[]>([]);
+  const [profileGoodreadsTags, setProfileGoodreadsTags] = useState<string[]>([]);
   const [profileTags, setProfileTags] = useState<string[]>([]);
   const [newTagInput, setNewTagInput] = useState("");
+  const [expandedMetadata, setExpandedMetadata] = useState(false);
 
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -140,6 +159,24 @@ export default function Home() {
     setSelectedKeywordTypes((prev) =>
       prev.includes(value) ? prev.filter((t) => t !== value) : [...prev, value]
     );
+  }
+
+  function toggleKeywordCategory(value: KeywordCategory) {
+    setSelectedKeywordCategories((prev) =>
+      prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]
+    );
+  }
+
+  function addKeyTrope() {
+    const trimmed = keyTropesInput.trim();
+    if (trimmed && !keyTropes.includes(trimmed)) {
+      setKeyTropes((prev) => [...prev, trimmed]);
+    }
+    setKeyTropesInput("");
+  }
+
+  function removeKeyTrope(trope: string) {
+    setKeyTropes((prev) => prev.filter((t) => t !== trope));
   }
 
   function addManualKeyword() {
@@ -188,6 +225,21 @@ export default function Home() {
       setProfileCategoryPath(Array.isArray(body.categoryPath) ? body.categoryPath : []);
       setProfileBestSellerRanks(Array.isArray(body.bestSellerRanks) ? body.bestSellerRanks : []);
       setProfileDescription(typeof body.description === "string" ? body.description : null);
+      setProfileBulletPoints(Array.isArray(body.bulletPoints) ? body.bulletPoints : []);
+      setProfileCompTitles(Array.isArray(body.compTitles) ? body.compTitles.slice(0, 5) : []);
+      setProfileIsbn10(typeof body.isbn10 === "string" ? body.isbn10 : null);
+      setProfileIsbn13(typeof body.isbn13 === "string" ? body.isbn13 : null);
+      setProfilePrice(typeof body.price === "number" ? body.price : null);
+      setProfileRating(typeof body.rating === "number" ? body.rating : null);
+      setProfileReviewCount(typeof body.reviewCount === "number" ? body.reviewCount : null);
+      setProfilePageCount(typeof body.pageCount === "number" ? body.pageCount : null);
+      setProfilePublisher(typeof body.publisher === "string" ? body.publisher : null);
+      setProfilePublicationDate(typeof body.publicationDate === "string" ? body.publicationDate : null);
+      setProfileLanguage(typeof body.language === "string" ? body.language : null);
+      setProfileDimensions(typeof body.dimensions === "string" ? body.dimensions : null);
+      setProfileGoogleBooksCategories(Array.isArray(body.googleBooksCategories) ? body.googleBooksCategories : []);
+      setProfileOpenLibrarySubjects(Array.isArray(body.openLibrarySubjects) ? body.openLibrarySubjects : []);
+      setProfileGoodreadsTags(Array.isArray(body.goodreadsTags) ? body.goodreadsTags : []);
       setProfileTags(Array.isArray(body.tags) ? body.tags : []);
 
       setAutofillStatus("idle");
@@ -236,6 +288,8 @@ export default function Home() {
         knownTags: profileTags,
         sources: selectedSources,
         keywordTypes: selectedKeywordTypes,
+        keywordCategories: selectedKeywordCategories,
+        keyTropes,
         manualKeywords,
       };
       if (useRrpBidding) {
@@ -389,32 +443,221 @@ export default function Home() {
               {(profileCategoryPath.length > 0 ||
                 profileBestSellerRanks.length > 0 ||
                 profileDescription ||
-                profileTags.length > 0) && (
+                profileTags.length > 0 ||
+                profileBulletPoints.length > 0 ||
+                profileCompTitles.length > 0) && (
                 <div className="card">
-                  <p className="card-title mb-4">Book Profile</p>
+                  <div className="flex items-center justify-between mb-4">
+                    <p className="card-title mb-0">Book Metadata</p>
+                    <button
+                      type="button"
+                      onClick={() => setExpandedMetadata(!expandedMetadata)}
+                      className="text-xs btn-pill-outline"
+                      style={{ padding: "0.35rem 0.75rem", fontSize: "0.75rem" }}
+                    >
+                      {expandedMetadata ? "Collapse" : "Expand"}
+                    </button>
+                  </div>
 
                   <div className="space-y-3">
+                    {/* Core metadata always shown */}
                     {profileCategoryPath.length > 0 && (
-                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
-                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Category: </span>
-                        {profileCategoryPath.join(" › ")}
-                      </p>
+                      <>
+                        {profileCategoryPath.length > 1 && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Genre: </span>
+                            {profileCategoryPath[1] || "—"}
+                          </p>
+                        )}
+                        {profileCategoryPath.length > 2 && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Subgenres: </span>
+                            {profileCategoryPath.slice(2).join(" › ")}
+                          </p>
+                        )}
+                      </>
                     )}
 
                     {profileBestSellerRanks.length > 0 && (
                       <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
                         <span className="font-semibold" style={{ color: "var(--ink)" }}>Best Sellers Rank: </span>
                         {profileBestSellerRanks
+                          .slice(0, 2)
                           .map((r) => `#${r.rank.toLocaleString()} in ${r.category}`)
                           .join(", ")}
+                        {profileBestSellerRanks.length > 2 && ` (+${profileBestSellerRanks.length - 2} more)`}
                       </p>
                     )}
 
-                    {profileDescription && (
-                      <p className="text-xs leading-relaxed line-clamp-3" style={{ color: "var(--muted)" }}>
-                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Description: </span>
-                        {profileDescription}
+                    {profilePrice && (
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                        <span className="font-semibold" style={{ color: "var(--ink)" }}>List Price: </span>
+                        ${profilePrice.toFixed(2)}
                       </p>
+                    )}
+
+                    {profileRating && (
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Rating: </span>
+                        ⭐ {profileRating.toFixed(1)}/5
+                        {profileReviewCount && ` (${profileReviewCount.toLocaleString()} reviews)`}
+                      </p>
+                    )}
+
+                    {/* Expanded metadata */}
+                    {expandedMetadata && (
+                      <>
+                        {profileIsbn10 && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>ISBN-10: </span>
+                            {profileIsbn10}
+                          </p>
+                        )}
+                        {profileIsbn13 && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>ISBN-13: </span>
+                            {profileIsbn13}
+                          </p>
+                        )}
+
+                        {profilePublisher && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Publisher: </span>
+                            {profilePublisher}
+                          </p>
+                        )}
+
+                        {profilePublicationDate && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Published: </span>
+                            {profilePublicationDate}
+                          </p>
+                        )}
+
+                        {profilePageCount && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Pages: </span>
+                            {profilePageCount.toLocaleString()}
+                          </p>
+                        )}
+
+                        {profileLanguage && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Language: </span>
+                            {profileLanguage}
+                          </p>
+                        )}
+
+                        {profileDimensions && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Dimensions: </span>
+                            {profileDimensions}
+                          </p>
+                        )}
+
+                        {profileCompTitles.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Customers Also Bought:</span>
+                            <ul className="list-disc list-inside mt-1 ml-1 space-y-0.5">
+                              {profileCompTitles.map((title) => (
+                                <li key={title} className="text-xs">
+                                  {title}
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+
+                        {profileBulletPoints.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Description Bullets:</span>
+                            <ul className="list-disc list-inside mt-1 ml-1 space-y-0.5">
+                              {profileBulletPoints.slice(0, 3).map((bullet) => (
+                                <li key={bullet} className="text-xs truncate" title={bullet}>
+                                  {bullet.length > 60 ? bullet.slice(0, 60) + "…" : bullet}
+                                </li>
+                              ))}
+                              {profileBulletPoints.length > 3 && (
+                                <li className="text-xs" style={{ color: "var(--accent-purple)" }}>
+                                  +{profileBulletPoints.length - 3} more
+                                </li>
+                              )}
+                            </ul>
+                          </div>
+                        )}
+
+                        {profileDescription && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Description:</span>
+                            <p className="mt-1 line-clamp-2" style={{ fontSize: "0.7rem", lineHeight: "1.4" }}>
+                              {profileDescription}
+                            </p>
+                          </div>
+                        )}
+
+                        {profileGoogleBooksCategories.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Google Books Categories:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileGoogleBooksCategories.slice(0, 4).map((cat) => (
+                                <span key={cat} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {cat}
+                                </span>
+                              ))}
+                              {profileGoogleBooksCategories.length > 4 && (
+                                <span
+                                  className="chip-tag"
+                                  style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}
+                                >
+                                  +{profileGoogleBooksCategories.length - 4}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileOpenLibrarySubjects.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Open Library Subjects:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileOpenLibrarySubjects.slice(0, 4).map((subj) => (
+                                <span key={subj} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {subj}
+                                </span>
+                              ))}
+                              {profileOpenLibrarySubjects.length > 4 && (
+                                <span
+                                  className="chip-tag"
+                                  style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}
+                                >
+                                  +{profileOpenLibrarySubjects.length - 4}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileGoodreadsTags.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Goodreads Tags:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileGoodreadsTags.slice(0, 6).map((tag) => (
+                                <span key={tag} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {tag}
+                                </span>
+                              ))}
+                              {profileGoodreadsTags.length > 6 && (
+                                <span
+                                  className="chip-tag"
+                                  style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}
+                                >
+                                  +{profileGoodreadsTags.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </>
                     )}
 
                     <div>
@@ -726,6 +969,67 @@ export default function Home() {
                       {label}
                     </label>
                   ))}
+                </div>
+              </div>
+
+              <div className="card">
+                <p className="card-title mb-4">Keyword Categories</p>
+                <p className="field-hint mb-3" style={{ marginTop: 0 }}>
+                  20-category semantic taxonomy describing what kind of keyword each is
+                  (genre, trope, mood, gift-intent, etc.). All are enabled by default;
+                  deselect categories you don&apos;t want generating candidates.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {KEYWORD_CATEGORY_META.map(({ value, label }) => (
+                    <label key={value} className="chip-toggle">
+                      <input
+                        type="checkbox"
+                        checked={selectedKeywordCategories.includes(value)}
+                        onChange={() => toggleKeywordCategory(value)}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card">
+                <p className="card-title mb-4">Key Tropes & Themes (optional)</p>
+                <p className="field-hint mb-3" style={{ marginTop: 0 }}>
+                  Main character archetypes, relationship dynamics, plot devices, or settings
+                  in your book (e.g., &quot;grumpy billionaire&quot;, &quot;enemies to lovers&quot;). These are high-trust
+                  signals the app can&apos;t reliably scrape, so you supply them directly to seed
+                  character/relationship/plot/setting category generation.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {keyTropes.map((trope) => (
+                    <button
+                      key={trope}
+                      type="button"
+                      onClick={() => removeKeyTrope(trope)}
+                      title="Remove trope"
+                      className="chip-tag"
+                    >
+                      {trope} ×
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={keyTropesInput}
+                    onChange={(e) => setKeyTropesInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addKeyTrope();
+                      }
+                    }}
+                    placeholder="e.g., grumpy billionaire, slow burn romance"
+                    className="input"
+                  />
+                  <button type="button" onClick={addKeyTrope} className="btn-pill-outline shrink-0">
+                    Add
+                  </button>
                 </div>
               </div>
 

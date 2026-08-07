@@ -389,6 +389,83 @@ function extractBulletPoints($: cheerio.CheerioAPI): string[] {
   return Array.from(bullets).slice(0, 15);
 }
 
+function extractRating($: cheerio.CheerioAPI): number | undefined {
+  const selectors = [
+    '.a-icon-star-small span, [data-a-icon-prime-external] .a-icon-star .a-icon-star-small span',
+    '.a-star-small span',
+    '[aria-label*="out of 5"]',
+  ];
+
+  for (const selector of selectors) {
+    const text = $(selector).first().text().trim();
+    const match = text.match(/(\d+\.?\d*)\s*out of|^(\d+\.?\d*)/);
+    if (match) {
+      const value = parseFloat(match[1] || match[2]);
+      if (Number.isFinite(value) && value > 0 && value <= 5) return value;
+    }
+  }
+  return undefined;
+}
+
+function extractReviewCount($: cheerio.CheerioAPI): number | undefined {
+  const selectors = [
+    '#acrCustomerReviewText',
+    '[aria-label*="customer ratings"]',
+    '[data-hook="total-review-count"]',
+  ];
+
+  for (const selector of selectors) {
+    const text = $(selector).first().text().trim();
+    const match = text.match(/([\d,]+)/);
+    if (match) {
+      const value = parseInt(match[1].replace(/,/g, ''), 10);
+      if (Number.isFinite(value)) return value;
+    }
+  }
+  return undefined;
+}
+
+function extractProductDetails($: cheerio.CheerioAPI): { pageCount?: number; publisher?: string; publicationDate?: string; language?: string; dimensions?: string } {
+  const result: { pageCount?: number; publisher?: string; publicationDate?: string; language?: string; dimensions?: string } = {};
+
+  // Try multiple detail table structures
+  $('#detailBulletsWrapper_feature_div li, #productDetails_detailBullets_sections1 tr, .a-keyvalue').each((_, el) => {
+    const text = $(el).text().replace(/\s+/g, ' ').trim();
+
+    // Pages
+    if (/^\s*(?:Number of pages|Pages)\s*:\s*/.test(text)) {
+      const match = text.match(/(\d+)\s*pages?/i);
+      if (match) result.pageCount = parseInt(match[1], 10);
+    }
+
+    // Publisher
+    if (/^\s*Publisher\s*/.test(text)) {
+      const match = text.match(/Publisher[^;]*;\s*([^;(]+)/i);
+      if (match) result.publisher = match[1].trim();
+    }
+
+    // Publication date
+    if (/^\s*(?:Publication[_ ]Date|Release[_ ]Date)\s*/.test(text)) {
+      const match = text.match(/(?:Publication|Release)\s*(?:Date)?\s*[;:]?\s*(.+?)(?:;|$)/i);
+      if (match) result.publicationDate = match[1].trim();
+    }
+
+    // Language
+    if (/^\s*Language\s*/.test(text)) {
+      const match = text.match(/Language[^;]*:\s*([^;]+)/i);
+      if (match) result.language = match[1].trim();
+    }
+
+    // Dimensions
+    if (/^\s*(?:Dimensions|Product Dimensions)\s*/.test(text)) {
+      const match = text.match(/Dimensions[^;]*:\s*(.+?)(?:Shipping Weight|$)/i);
+      if (match) result.dimensions = match[1].trim();
+    }
+  });
+
+  return result;
+}
+
 /**
  * Amazon's series widget shows text like "Book 3 of 12: Kill Squad" near the
  * byline — tries a few plausible selectors and strips the leading "Book N of
@@ -559,6 +636,8 @@ export async function scrapeProductPage(
       }
     );
 
+    const details = extractProductDetails($);
+
     return {
       title,
       author,
@@ -575,6 +654,13 @@ export async function scrapeProductPage(
       reviewSnippets: extractReviewSnippets($),
       description: extractDescription($),
       bulletPoints: extractBulletPoints($),
+      rating: extractRating($),
+      reviewCount: extractReviewCount($),
+      pageCount: details.pageCount,
+      publisher: details.publisher,
+      publicationDate: details.publicationDate,
+      language: details.language,
+      dimensions: details.dimensions,
       fetchStatus: res.status,
     };
   } catch (err) {

@@ -3,7 +3,7 @@ import { expandSynonyms } from "./synonyms";
 import { extractKeyPhrases } from "./textExtract";
 import { BookMetadata, KeywordCandidate, KeywordSource, ProductPageData, RelatedCompetitor } from "./types";
 
-function normalize(text: string): string {
+export function normalize(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
@@ -69,7 +69,7 @@ export function isGarbledText(text: string): boolean {
   return false;
 }
 
-function isUsableKeyword(text: string): boolean {
+export function isUsableKeyword(text: string): boolean {
   if (text.length < 3 || text.length > 80) return false;
   // Drop noisy Open Library / Google Books subjects (URLs, ID-like tags, etc.)
   if (/https?:\/\//.test(text)) return false;
