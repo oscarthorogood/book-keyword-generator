@@ -1022,7 +1022,7 @@ export async function scrapeProductPage(
       authorImage: extractAuthorImage($),
       authorOtherBooks: [],
       illustrator: undefined,
-      narrator: hasAudiobook ? undefined : undefined,
+      narrator: undefined,
       isbn10,
       isbn13,
       seriesName: extractSeriesName($),
@@ -1065,7 +1065,7 @@ export async function scrapeProductPage(
       lexileLevel: extractLexileLevel($),
       ageRange: extractAgeRange($),
       contentWarnings: extractContentWarnings($),
-      readingLevel: extractLexileLevel($),
+      readingLevel: extractLexileLevel($), // Alias for lexileLevel
       publisher: details.publisher,
       publicationDate: details.publicationDate,
       copyrightYear: extractCopyrightYear($),
