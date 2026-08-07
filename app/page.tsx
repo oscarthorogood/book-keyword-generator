@@ -29,6 +29,8 @@ const KEYWORD_SOURCES: { value: KeywordSource; label: string }[] = [
   { value: "duckduckgo-autocomplete", label: "DuckDuckGo Autocomplete" },
   { value: "comp-title", label: "Comp Title Categories" },
   { value: "comp-name", label: "Comp Author/Title Crawl" },
+  { value: "amazon-recs", label: "Bought Together / Compare Similar" },
+  { value: "firecrawl", label: "Firecrawl Page Extraction" },
   { value: "author-catalog", label: "Author's Other Books" },
   { value: "genre-metadata", label: "Genre & Subject Metadata" },
   { value: "buyer-intent", label: "Buyer-Intent Templates" },
@@ -128,6 +130,24 @@ export default function Home() {
   const [profileAvailability, setProfileAvailability] = useState<string | null>(null);
   const [profileCompDetails, setProfileCompDetails] = useState<
     Array<{ asin: string; title: string; author?: string; rating?: number; reviewCount?: number }>
+  >([]);
+
+  // Firecrawl-extracted metadata
+  const [profileFirecrawlCategories, setProfileFirecrawlCategories] = useState<string[]>([]);
+  const [profileFirecrawlFeatures, setProfileFirecrawlFeatures] = useState<string[]>([]);
+  const [profileFirecrawlKeywords, setProfileFirecrawlKeywords] = useState<string[]>([]);
+
+  // Metadata enrichment from various sources
+  const [profileWikipediaCategories, setProfileWikipediaCategories] = useState<string[]>([]);
+  const [profileWikidataGenres, setProfileWikidataGenres] = useState<string[]>([]);
+  const [profileLocSubjects, setProfileLocSubjects] = useState<string[]>([]);
+
+  // Amazon recommendation sections
+  const [profileFrequentlyBoughtTogether, setProfileFrequentlyBoughtTogether] = useState<
+    Array<{ asin: string; title: string }>
+  >([]);
+  const [profileCompareWithSimilar, setProfileCompareWithSimilar] = useState<
+    Array<{ asin: string; title: string }>
   >([]);
 
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
@@ -257,6 +277,20 @@ export default function Home() {
       setProfileQaCount(typeof body.qaCount === "number" ? body.qaCount : null);
       setProfileAvailability(typeof body.availability === "string" ? body.availability : null);
       setProfileCompDetails(Array.isArray(body.compDetails) ? body.compDetails : []);
+
+      // Firecrawl metadata
+      setProfileFirecrawlCategories(Array.isArray(body.firecrawlCategories) ? body.firecrawlCategories : []);
+      setProfileFirecrawlFeatures(Array.isArray(body.firecrawlFeatures) ? body.firecrawlFeatures : []);
+      setProfileFirecrawlKeywords(Array.isArray(body.firecrawlKeywords) ? body.firecrawlKeywords : []);
+
+      // Enriched metadata from various sources
+      setProfileWikipediaCategories(Array.isArray(body.wikipediaCategories) ? body.wikipediaCategories : []);
+      setProfileWikidataGenres(Array.isArray(body.wikidataGenres) ? body.wikidataGenres : []);
+      setProfileLocSubjects(Array.isArray(body.locSubjects) ? body.locSubjects : []);
+
+      // Amazon recommendations
+      setProfileFrequentlyBoughtTogether(Array.isArray(body.frequentlyBoughtTogether) ? body.frequentlyBoughtTogether : []);
+      setProfileCompareWithSimilar(Array.isArray(body.compareWithSimilar) ? body.compareWithSimilar : []);
 
       setAutofillStatus("idle");
     } catch (err) {
@@ -759,6 +793,156 @@ export default function Home() {
                                   style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}
                                 >
                                   +{profileGoodreadsTags.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileFirecrawlCategories.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Firecrawl Categories:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileFirecrawlCategories.slice(0, 8).map((cat) => (
+                                <span key={cat} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {cat}
+                                </span>
+                              ))}
+                              {profileFirecrawlCategories.length > 8 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileFirecrawlCategories.length - 8}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileFirecrawlFeatures.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Firecrawl Features:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileFirecrawlFeatures.slice(0, 6).map((feat) => (
+                                <span key={feat} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {feat}
+                                </span>
+                              ))}
+                              {profileFirecrawlFeatures.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileFirecrawlFeatures.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileFirecrawlKeywords.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Firecrawl Keywords:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileFirecrawlKeywords.slice(0, 6).map((kw) => (
+                                <span key={kw} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {kw}
+                                </span>
+                              ))}
+                              {profileFirecrawlKeywords.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileFirecrawlKeywords.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileWikipediaCategories.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Wikipedia Categories:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileWikipediaCategories.slice(0, 6).map((cat) => (
+                                <span key={cat} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {cat}
+                                </span>
+                              ))}
+                              {profileWikipediaCategories.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileWikipediaCategories.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileWikidataGenres.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Wikidata Genres:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileWikidataGenres.slice(0, 6).map((genre) => (
+                                <span key={genre} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {genre}
+                                </span>
+                              ))}
+                              {profileWikidataGenres.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileWikidataGenres.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileLocSubjects.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Library of Congress Subjects:</span>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                              {profileLocSubjects.slice(0, 6).map((subj) => (
+                                <span key={subj} className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                  {subj}
+                                </span>
+                              ))}
+                              {profileLocSubjects.length > 6 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileLocSubjects.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileFrequentlyBoughtTogether.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Frequently Bought Together:</span>
+                            <div className="flex flex-col gap-1 mt-1">
+                              {profileFrequentlyBoughtTogether.slice(0, 5).map((item) => (
+                                <div key={item.asin} className="text-xs">
+                                  <span className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                    {item.title.substring(0, 50)}
+                                  </span>
+                                  <span style={{ fontSize: "0.65rem", marginLeft: "0.5rem" }}>({item.asin})</span>
+                                </div>
+                              ))}
+                              {profileFrequentlyBoughtTogether.length > 5 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileFrequentlyBoughtTogether.length - 5} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileCompareWithSimilar.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Compare with Similar Items:</span>
+                            <div className="flex flex-col gap-1 mt-1">
+                              {profileCompareWithSimilar.slice(0, 5).map((item) => (
+                                <div key={item.asin} className="text-xs">
+                                  <span className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                    {item.title.substring(0, 50)}
+                                  </span>
+                                  <span style={{ fontSize: "0.65rem", marginLeft: "0.5rem" }}>({item.asin})</span>
+                                </div>
+                              ))}
+                              {profileCompareWithSimilar.length > 5 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileCompareWithSimilar.length - 5} more
                                 </span>
                               )}
                             </div>

@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { extractAmazonMetadata, isFirecrawlConfigured, type AmazonPageMetadata } from "./firecrawl";
 import { KeywordCandidate, Marketplace, ProductPageData, RelatedCompetitor, RelatedCompetitorCrawl } from "./types";
 
 const AMAZON_DOMAINS: Record<Marketplace, string> = {
@@ -126,6 +127,72 @@ const MAX_GOOGLE_SUGGEST_SEEDS = 20;
 const AUTOCOMPLETE_CONCURRENCY = 15;
 
 /**
+ * Generate additional keyword seeds from Firecrawl-extracted metadata
+ * (categories, features, keywords) to improve autocomplete coverage.
+ * These seeds target category-specific and feature-based searches.
+ * Falls back to empty seeds/metadata if Firecrawl is not configured.
+ *
+ * Returns the raw extraction alongside the seeds so callers can also mine the
+ * terms directly (buildFirecrawlCandidates in lib/keywordMerge.ts) without
+ * paying for a second extraction call.
+ */
+export async function buildMetadataSeeds(
+  asin: string,
+  marketplace: Marketplace
+): Promise<{ seeds: string[]; metadata: AmazonPageMetadata }> {
+  if (!isFirecrawlConfigured()) return { seeds: [], metadata: {} };
+
+  try {
+    const url = getProductPageUrl(asin, marketplace);
+    const metadata = await extractAmazonMetadata(url);
+
+    const seeds = new Set<string>();
+
+    // Add category-based seeds
+    if (metadata.categories && metadata.categories.length > 0) {
+      const mainCategory = metadata.categories[0];
+      seeds.add(mainCategory);
+      if (metadata.title) {
+        const combined = `${metadata.title} ${mainCategory}`.slice(0, 100);
+        seeds.add(combined);
+      }
+    }
+
+    // Add feature-based seeds (product features often become search queries)
+    if (metadata.features && metadata.features.length > 0) {
+      // Extract key words from features (skip very long ones)
+      for (const feature of metadata.features.slice(0, 3)) {
+        const words = feature.split(/\s+/).filter(w => w.length > 3);
+        if (words.length > 0 && words.length <= 3) {
+          seeds.add(words.join(" "));
+        }
+      }
+    }
+
+    // Add pre-extracted keywords if available
+    if (metadata.keywords && metadata.keywords.length > 0) {
+      for (const keyword of metadata.keywords.slice(0, 5)) {
+        if (keyword.length > 2 && keyword.length < 50) {
+          seeds.add(keyword);
+        }
+      }
+    }
+
+    // Add language-specific seeds if not English
+    if (metadata.language && metadata.language.toLowerCase() !== "english" && metadata.title) {
+      seeds.add(`${metadata.title} ${metadata.language}`);
+    }
+
+    return {
+      seeds: Array.from(seeds).filter((s) => s.length > 2 && s.length < 100),
+      metadata,
+    };
+  } catch {
+    return { seeds: [], metadata: {} };
+  }
+}
+
+/**
  * Amazon's autocomplete returns different completions depending on the next
  * character typed, so sweeping a-z after the title ("<title> a", "<title>
  * b", ...) harvests far more real suggestions than the bare title alone — a
@@ -134,6 +201,9 @@ const AUTOCOMPLETE_CONCURRENCY = 15;
  * catches modifier words that appear before the phrase instead of after it
  * (e.g. "dark sci fi romance") — a query shape the suffix sweep alone can't
  * reach. See the manual keyword research blueprint, section 2.
+ *
+ * Enhanced to also generate seeds from title fragments and author names
+ * to improve coverage for books with long or compound titles.
  */
 export function buildAutocompleteSeeds(title: string, author?: string): string[] {
   const cleanTitle = title.trim();
@@ -141,10 +211,31 @@ export function buildAutocompleteSeeds(title: string, author?: string): string[]
 
   const seeds = new Set<string>();
   seeds.add(cleanTitle);
-  for (const modifier of AUTOCOMPLETE_MODIFIERS) seeds.add(`${cleanTitle} ${modifier}`);
-  if (author) seeds.add(`${cleanTitle} ${author}`);
-  for (const letter of ALPHABET) seeds.add(`${cleanTitle} ${letter}`);
-  for (const letter of ALPHABET) seeds.add(`${letter} ${cleanTitle}`);
+
+  // Add seeds from title fragments (first/last few words)
+  const titleWords = cleanTitle.split(/\s+/).filter(w => w.length > 2);
+  if (titleWords.length > 1) {
+    seeds.add(titleWords.slice(0, Math.min(3, titleWords.length)).join(" "));
+    seeds.add(titleWords.slice(-Math.min(3, titleWords.length)).join(" "));
+  }
+
+  // Add modifier combinations
+  for (const modifier of AUTOCOMPLETE_MODIFIERS) {
+    seeds.add(`${cleanTitle} ${modifier}`);
+  }
+
+  // Add author-based seeds for better targeting
+  if (author) {
+    seeds.add(`${cleanTitle} ${author}`);
+    seeds.add(author);
+    seeds.add(`${author} books`);
+  }
+
+  // Alphabet sweeps for exhaustive coverage
+  for (const letter of ALPHABET) {
+    seeds.add(`${cleanTitle} ${letter}`);
+    seeds.add(`${letter} ${cleanTitle}`);
+  }
 
   return Array.from(seeds).slice(0, MAX_AUTOCOMPLETE_SEEDS);
 }

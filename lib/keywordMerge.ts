@@ -181,6 +181,71 @@ export function buildCompNameCandidates(competitors: RelatedCompetitor[]): Keywo
 }
 
 /**
+ * Titles from Amazon's own "Frequently bought together" and "Compare with
+ * similar items" modules. Distinct from the "also bought" carousel that feeds
+ * buildCompTitleCandidates: "also bought" is co-browsing, whereas frequently-
+ * bought-together is co-*purchase* (readers spent money on both in one order),
+ * and compare-with-similar is Amazon's own explicit substitute mapping. Both
+ * are therefore stronger comparable-title signals than a carousel impression,
+ * and both are already scraped (see extractFrequentlyBoughtTogether /
+ * extractCompareWithSimilar in lib/scrape.ts) — this just routes them into the
+ * candidate pool instead of dropping them on the floor.
+ *
+ * Emitted as bare titles, so splitKeywordsByCategory sends them to the
+ * exact-match Comparable Authors & Titles ad group alongside comp-name.
+ */
+export function buildAmazonRecommendationCandidates(
+  groups: Array<Array<{ asin: string; title: string }> | undefined>
+): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const group of groups) {
+    for (const item of group ?? []) {
+      const normalized = normalize(item.title);
+      if (isUsableKeyword(normalized)) texts.add(normalized);
+    }
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["amazon-recs" as const] }));
+}
+
+/**
+ * Firecrawl's LLM-extracted view of the product page (lib/firecrawl.ts) —
+ * categories, marketing features, and the keywords it surfaces from the title/
+ * description. Previously this extraction was fetched and used *only* to seed
+ * extra autocomplete sweeps (buildMetadataSeeds in lib/scrape.ts), throwing the
+ * terms themselves away; they're good candidates in their own right, and cost
+ * nothing extra since the same extraction call already ran.
+ *
+ * Features are marketing sentences rather than search queries, so they go
+ * through the shared key-phrase extractor rather than being added verbatim.
+ */
+export function buildFirecrawlCandidates(metadata: {
+  categories?: string[];
+  keywords?: string[];
+  features?: string[];
+}): KeywordCandidate[] {
+  const texts = new Set<string>();
+
+  for (const category of metadata.categories ?? []) {
+    for (const piece of splitCategoryString(category)) texts.add(piece);
+  }
+
+  for (const keyword of metadata.keywords ?? []) {
+    const normalized = normalize(keyword);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+
+  // Bullets are prose ("Over 2 million copies sold worldwide"), not queries —
+  // mine them the same way the book description is mined rather than bidding
+  // on whole sentences.
+  for (const phrase of extractKeyPhrases((metadata.features ?? []).join(". "))) {
+    const normalized = normalize(phrase);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+
+  return Array.from(texts).map((text) => ({ text, sources: ["firecrawl" as const] }));
+}
+
+/**
  * Tags the user reviewed and kept on the Autofill book profile (genre/
  * subgenre from Amazon's category breadcrumb, Google Books categories, Open
  * Library subjects, Goodreads shelves — see /api/lookup) get folded straight
@@ -293,8 +358,14 @@ export function splitKeywordsByCategory(keywords: KeywordCandidate[]): {
   const tropes: KeywordCandidate[] = [];
   const compNames: KeywordCandidate[] = [];
   for (const keyword of keywords) {
-    if (keyword.sources.includes("comp-name")) compNames.push(keyword);
-    else tropes.push(keyword);
+    // amazon-recs is bare comparable *titles* (frequently-bought-together /
+    // compare-with-similar), so it belongs in the same exact-match bucket as
+    // comp-name rather than the broad/phrase tropes group.
+    if (keyword.sources.includes("comp-name") || keyword.sources.includes("amazon-recs")) {
+      compNames.push(keyword);
+    } else {
+      tropes.push(keyword);
+    }
   }
   return { tropes, compNames };
 }
@@ -628,14 +699,30 @@ function sourceQualityScore(sourceCount: number, wordCount: number): number {
  * 1. Source agreement (base 2 points per source)
  * 2. Ads API authority (+3)
  * 3. User-provided sources (+2 for user-tag, +2.5 for key-trope)
- * 4. Category relevance (0-2 based on semantic value)
- * 5. Phrase length vs. breadth (ideal 3-5 word phrases)
- * 6. Source quality (rare but specific phrases get bonus)
+ * 4. Amazon's own co-purchase/substitute recommendations (+1.5)
+ * 5. Containment of a user-vetted known tag (+1.5)
+ * 6. Category relevance (0-2 based on semantic value)
+ * 7. Phrase length vs. breadth (ideal 3-5 word phrases)
+ * 8. Source quality (rare but specific phrases get bonus)
+ *
+ * `knownTags` are the tags the user reviewed and kept on the Autofill book
+ * profile. A candidate that merely *contains* one is still riding a
+ * human-vetted signal even when it came from an algorithmic source, so it
+ * earns a bonus short of the full user-tag authority above.
  */
 export function scoreAndTierBids(
   candidates: KeywordCandidate[],
-  defaultBid: number
+  defaultBid: number,
+  knownTags: string[] = []
 ): KeywordCandidate[] {
+  // Matched on word boundaries rather than as a bare substring, so "epic"
+  // hits "epic fantasy" but not "epicurean". A trailing "s" is allowed so a
+  // singular tag still matches its plural ("slow burn" -> "slow burns").
+  // Compiled once here rather than per candidate.
+  const knownTagPatterns = Array.from(
+    new Set(knownTags.map((tag) => normalize(tag)).filter((tag) => tag.length >= 3))
+  ).map((tag) => new RegExp(`\\b${tag.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}s?\\b`));
+
   return candidates
     .map((candidate) => {
       const sourceCount = candidate.sources.length;
@@ -650,6 +737,18 @@ export function scoreAndTierBids(
       if (candidate.sources.includes("user-tag")) score += 2;
       // User-supplied tropes/themes — book-specific, highest-trust user signal
       if (candidate.sources.includes("key-trope")) score += 2.5;
+      // Amazon's own co-purchase / substitute mapping — readers backed these
+      // with a purchase decision, not just a page view.
+      if (candidate.sources.includes("amazon-recs")) score += 1.5;
+
+      // Contains a tag the user explicitly reviewed and kept. Skipped when the
+      // candidate *is* a user tag, which already scored the larger bonus above.
+      if (!candidate.sources.includes("user-tag")) {
+        const candidateText = normalize(candidate.text);
+        if (knownTagPatterns.some((pattern) => pattern.test(candidateText))) {
+          score += 1.5;
+        }
+      }
 
       // Category relevance — semantic signal about keyword quality
       const categoryScore = categoryRelevanceScore(candidate.category);
@@ -672,11 +771,14 @@ export function scoreAndTierBids(
 
       let suggestedBid = candidate.suggestedBid;
       if (suggestedBid === undefined) {
-        // Bid multiplier: multi-source keywords are more confident, bid higher
-        // Single-source high-quality phrases still get decent bid (0.75)
+        // Bid multiplier: multi-source keywords are more confident, bid higher.
+        // Single-source phrases are tiered by specificity instead: a long-tail
+        // query has less competition and higher purchase intent than a short
+        // generic one, so it can carry a bid closer to the ad group's base.
         let multiplier = 0.6;
         if (sourceCount >= 3) multiplier = 1;
         else if (sourceCount === 2) multiplier = 0.9;
+        else if (wordCount >= 5) multiplier = 0.85; // Long-tail, low competition
         else if (wordCount >= 4) multiplier = 0.75; // Boost specific rare phrases
         suggestedBid = Math.round(defaultBid * multiplier * 100) / 100;
       }

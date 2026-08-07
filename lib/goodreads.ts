@@ -32,18 +32,32 @@ async function fetchGoodreadsHtml(url: string): Promise<string | null> {
 /**
  * Current Goodreads book-page markup for the "Genres" shelf-tag list —
  * unverified against a live page, like every other DOM-shape guess in this
- * app. Tries a couple of plausible selectors and degrades to an empty list
- * rather than erroring if none match.
+ * app. Tries multiple plausible selectors (current and historical patterns)
+ * and degrades to an empty list rather than erroring if none match.
  */
 function extractShelfTags($: cheerio.CheerioAPI): string[] {
   const tags = new Set<string>();
-  $(
-    '.BookPageMetadataSection__genreButton, a.actionLinkLite.bookPageGenreLink, [data-testid="genresList"] a'
-  ).each((_, el) => {
-    const text = $(el).text().replace(/\s+/g, " ").trim();
-    if (text && text.length < 40) tags.add(text.toLowerCase());
-  });
-  return Array.from(tags).slice(0, 15);
+
+  // Try multiple selector patterns to handle different Goodreads page layouts
+  const selectors = [
+    '.BookPageMetadataSection__genreButton',      // Current pattern
+    'a.actionLinkLite.bookPageGenreLink',         // Historical pattern
+    '[data-testid="genresList"] a',                // Alternative current
+    'a[href*="/genres/"]',                         // Fallback - any genre link
+    '.bookGenres a',                               // Alternative class
+    'div.elementList a[href*="/genres/"]',        // Another variant
+  ];
+
+  for (const selector of selectors) {
+    $(selector).each((_, el) => {
+      const text = $(el).text().replace(/\s+/g, " ").trim();
+      if (text && text.length > 2 && text.length < 50 && !text.includes('See more')) {
+        tags.add(text.toLowerCase());
+      }
+    });
+  }
+
+  return Array.from(tags).slice(0, 20);  // Increased from 15 to 20
 }
 
 /**
