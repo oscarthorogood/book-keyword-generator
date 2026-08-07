@@ -39,6 +39,7 @@ import {
   splitKeywordsByCategory,
 } from "@/lib/keywordMerge";
 import { boostScoresByDescriptionQuality } from "@/lib/descriptionQuality";
+import { validateFinalKeywords } from "@/lib/keywordValidation";
 import {
   ALL_KEYWORD_CATEGORIES,
   buildCategorizedKeywordCandidates,
@@ -685,6 +686,11 @@ export async function POST(req: NextRequest) {
     tropesKeywords = tropesShortlist.slice(0, RECOMMENDED_MAX_KEYWORDS);
     compNameKeywords = compNamesShortlist.slice(0, COMP_NAME_MAX_KEYWORDS);
   }
+
+  // Final quality validation pass: removes ultra-generic keywords,
+  // penalizes format-only keywords, and filters suspicious full-title scrapes
+  tropesKeywords = validateFinalKeywords(tropesKeywords, tropesBid);
+  compNameKeywords = validateFinalKeywords(compNameKeywords, compNamesBid);
 
   // Manually-added keywords bypass scoring/caps entirely — the user typed
   // them on purpose, so neither the heuristic scorer nor the AI pass gets a

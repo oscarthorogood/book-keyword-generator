@@ -28,6 +28,8 @@ const GENERIC_STANDALONE_TERMS = new Set([
   "hardback",
   "kindle",
   "ebook",
+  "audiobook",
+  "audiobooks",
   "bestseller",
   "bestsellers",
   "new",
@@ -39,6 +41,12 @@ const GENERIC_STANDALONE_TERMS = new Set([
   "gifts",
   "publisher",
   "published",
+  "crime",
+  "mystery",
+  "thriller",
+  "romance",
+  "fantasy",
+  "science fiction",
 ]);
 
 // Scraped-page boilerplate that leaks in from rating widgets / review counts
