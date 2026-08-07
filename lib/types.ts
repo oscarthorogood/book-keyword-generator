@@ -259,7 +259,7 @@ export interface RelatedCompetitorCrawl {
 }
 
 export interface SourceStatus {
-  source: KeywordSource | "product-page" | "google-books" | "open-library";
+  source: KeywordSource | "product-page";
   ok: boolean;
   count?: number;
   error?: string;
