@@ -6,6 +6,9 @@ import { buildCampaignName } from "@/lib/naming";
 import { KEYWORD_CATEGORY_META } from "@/lib/keywordCategories";
 import type { KeywordCategory, KeywordGroupType, KeywordSource } from "@/lib/types";
 
+type FormPage = 1 | 2 | 3 | 4 | 5 | 6;
+const TOTAL_PAGES = 6;
+
 type MatchType = "broad" | "phrase" | "exact";
 
 const MARKETPLACES = ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const;
@@ -58,6 +61,8 @@ function todayIso(): string {
 }
 
 export default function Home() {
+  const [currentPage, setCurrentPage] = useState<FormPage>(1);
+
   const [asin, setAsin] = useState("");
   const [marketplace, setMarketplace] = useState<(typeof MARKETPLACES)[number]>("US");
   const [creatorInitials, setCreatorInitials] = useState("");
@@ -390,77 +395,116 @@ export default function Home() {
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 md:gap-6 items-start">
-            {/* Left column */}
-            <div className="flex flex-col gap-5 md:gap-6">
-              <div className="card">
-                <p className="card-title mb-4">Book Lookup</p>
-
-                <Field label="ASIN or ISBN">
-                  <div className="flex gap-2">
-                    <input
-                      required
-                      value={asin}
-                      onChange={(e) => setAsin(e.target.value)}
-                      placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
-                      maxLength={17}
-                      className="input"
-                    />
-                    <button
-                      type="button"
-                      onClick={handleAutofill}
-                      disabled={autofillStatus === "loading"}
-                      className="btn-pill-outline shrink-0"
-                    >
-                      {autofillStatus === "loading" ? "Looking up…" : "Autofill"}
-                    </button>
-                  </div>
-                  <span className="field-hint">
-                    Scrapes the product page to fill in Author, Title, Series, and RRP.
-                  </span>
-                  {autofillStatus === "error" && autofillError && (
-                    <span className="field-hint" style={{ color: "var(--accent-red)" }}>
-                      {autofillError}
-                    </span>
-                  )}
-                </Field>
-
-                <Field label="Marketplace">
-                  <select
-                    value={marketplace}
-                    onChange={(e) => setMarketplace(e.target.value as typeof marketplace)}
-                    className="input"
-                  >
-                    {MARKETPLACES.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                </Field>
+          <div className="mb-6">
+            <div className="flex items-center justify-between mb-4">
+              <div>
+                <span className="text-sm" style={{ color: "var(--muted)" }}>
+                  Page {currentPage} of {TOTAL_PAGES}
+                </span>
               </div>
+              <div className="flex gap-1">
+                {Array.from({ length: TOTAL_PAGES }, (_, i) => {
+                  const page = (i + 1) as FormPage;
+                  return (
+                    <button
+                      key={page}
+                      type="button"
+                      onClick={() => setCurrentPage(page)}
+                      className={`w-2 h-2 rounded-full transition-colors ${
+                        page === currentPage ? "bg-accent-blue" : "bg-line"
+                      }`}
+                      style={{
+                        background: page === currentPage ? "var(--accent-blue)" : "var(--line)",
+                      }}
+                      aria-label={`Go to page ${page}`}
+                    />
+                  );
+                })}
+              </div>
+            </div>
+            <div className="w-full h-1 bg-line rounded-full overflow-hidden">
+              <div
+                className="h-full transition-all"
+                style={{
+                  background: "var(--accent-blue)",
+                  width: `${(currentPage / TOTAL_PAGES) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
 
-              {(profileCategoryPath.length > 0 ||
-                profileBestSellerRanks.length > 0 ||
-                profileDescription ||
-                profileTags.length > 0 ||
-                profileBulletPoints.length > 0 ||
-                profileCompTitles.length > 0) && (
-                <div className="card">
-                  <div className="flex items-center justify-between mb-4">
-                    <p className="card-title mb-0">Book Metadata</p>
+          <div className="min-h-96">
+            {currentPage === 1 && (
+              <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 md:gap-6 items-start">
+                <div className="flex flex-col gap-5 md:gap-6">
+                  <div className="card">
+                    <p className="card-title mb-4">Book Lookup</p>
+
+                    <Field label="ASIN or ISBN">
+                      <div className="flex gap-2">
+                        <input
+                          required
+                          value={asin}
+                          onChange={(e) => setAsin(e.target.value)}
+                          placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
+                          maxLength={17}
+                          className="input"
+                        />
+                        <button
+                          type="button"
+                          onClick={handleAutofill}
+                          disabled={autofillStatus === "loading"}
+                          className="btn-pill-outline shrink-0"
+                        >
+                          {autofillStatus === "loading" ? "Looking up…" : "Autofill"}
+                        </button>
+                      </div>
+                      <span className="field-hint">
+                        Scrapes the product page to fill in Author, Title, Series, and RRP.
+                      </span>
+                      {autofillStatus === "error" && autofillError && (
+                        <span className="field-hint" style={{ color: "var(--accent-red)" }}>
+                          {autofillError}
+                        </span>
+                      )}
+                    </Field>
+
+                    <Field label="Marketplace">
+                      <select
+                        value={marketplace}
+                        onChange={(e) => setMarketplace(e.target.value as typeof marketplace)}
+                        className="input"
+                      >
+                        {MARKETPLACES.map((m) => (
+                          <option key={m} value={m}>
+                            {m}
+                          </option>
+                        ))}
+                      </select>
+                    </Field>
+                  </div>
+
+                  {(profileCategoryPath.length > 0 ||
+                    profileBestSellerRanks.length > 0 ||
+                    profileDescription ||
+                    profileTags.length > 0 ||
+                    profileBulletPoints.length > 0 ||
+                    profileCompTitles.length > 0) && (
+                    <div className="card">
+                      <div className="flex items-center justify-between mb-4">
+                        <p className="card-title mb-0">Book Metadata</p>
                     <button
                       type="button"
                       onClick={() => setExpandedMetadata(!expandedMetadata)}
                       className="text-xs btn-pill-outline"
                       style={{ padding: "0.35rem 0.75rem", fontSize: "0.75rem" }}
                     >
-                      {expandedMetadata ? "Collapse" : "Expand"}
-                    </button>
-                  </div>
+                        {expandedMetadata ? "Collapse" : "Expand"}
+                        </button>
+                      </div>
 
-                  <div className="space-y-3">
-                    {/* Core metadata always shown */}
+                      <div className="space-y-3">
+                        {/* Core metadata always shown */}
                     {profileCategoryPath.length > 0 && (
                       <>
                         {profileCategoryPath.length > 1 && (
@@ -701,7 +745,6 @@ export default function Home() {
               )}
             </div>
 
-            {/* Right column */}
             <div className="flex flex-col gap-5 md:gap-6">
               <div className="card">
                 <p className="card-title mb-4">Campaign Details</p>
@@ -766,7 +809,12 @@ export default function Home() {
                   )}
                 </div>
               </div>
+            </div>
+            </div>
+            )}
 
+            {currentPage === 2 && (
+            <div className="flex flex-col gap-5 md:gap-6 max-w-2xl">
               <div className="card">
                 <p className="card-title mb-4">Budget &amp; Bid</p>
                 <div className="space-y-5">
@@ -899,7 +947,11 @@ export default function Home() {
                   </Field>
                 </div>
               </div>
+            </div>
+            )}
 
+            {currentPage === 3 && (
+            <div className="flex flex-col gap-5 md:gap-6 max-w-4xl">
               <div className="card">
                 <p className="card-title mb-4">Keyword Types</p>
                 <p className="field-hint mb-3" style={{ marginTop: 0 }}>
@@ -950,7 +1002,11 @@ export default function Home() {
                   ))}
                 </div>
               </div>
+            </div>
+            )}
 
+            {currentPage === 4 && (
+            <div className="flex flex-col gap-5 md:gap-6 max-w-4xl">
               <div className="card">
                 <p className="card-title mb-4">Match Types</p>
                 <p className="field-hint mb-3" style={{ marginTop: 0 }}>
@@ -992,7 +1048,11 @@ export default function Home() {
                   ))}
                 </div>
               </div>
+            </div>
+            )}
 
+            {currentPage === 5 && (
+            <div className="flex flex-col gap-5 md:gap-6 max-w-4xl">
               <div className="card">
                 <p className="card-title mb-4">Key Tropes & Themes (optional)</p>
                 <p className="field-hint mb-3" style={{ marginTop: 0 }}>
@@ -1072,14 +1132,120 @@ export default function Home() {
                 </div>
               </div>
 
+            </div>
+            )}
+
+            {currentPage === 6 && (
+            <div className="flex flex-col gap-5 md:gap-6 max-w-3xl">
+              <div className="card">
+                <p className="card-title mb-4">Campaign Summary</p>
+                <div className="space-y-6">
+                  <div className="grid grid-cols-2 gap-4">
+                    <div>
+                      <p className="field-hint mb-2" style={{ marginTop: 0 }}>Book</p>
+                      <p className="text-sm font-semibold">{bookTitle || "—"}</p>
+                      <p className="text-xs" style={{ color: "var(--muted)" }}>{authorName || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="field-hint mb-2" style={{ marginTop: 0 }}>ASIN / ISBN</p>
+                      <p className="text-sm font-mono">{asin || "—"}</p>
+                    </div>
+                    <div>
+                      <p className="field-hint mb-2" style={{ marginTop: 0 }}>Marketplace</p>
+                      <p className="text-sm">{marketplace}</p>
+                    </div>
+                    <div>
+                      <p className="field-hint mb-2" style={{ marginTop: 0 }}>Daily Budget</p>
+                      <p className="text-sm">${dailyBudget}</p>
+                    </div>
+                    <div>
+                      <p className="field-hint mb-2" style={{ marginTop: 0 }}>Campaign Start</p>
+                      <p className="text-sm">{startDate}</p>
+                    </div>
+                    <div>
+                      <p className="field-hint mb-2" style={{ marginTop: 0 }}>Match Types</p>
+                      <p className="text-sm capitalize">{matchTypes.join(", ")}</p>
+                    </div>
+                  </div>
+
+                  <div className="border-t pt-4" style={{ borderColor: "var(--line)" }}>
+                    <p className="field-hint mb-3" style={{ marginTop: 0 }}>Keyword Configuration</p>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <span style={{ color: "var(--muted)" }}>Keyword Types: </span>
+                        <span className="font-semibold">{selectedKeywordTypes.length}/3 selected</span>
+                      </div>
+                      <div>
+                        <span style={{ color: "var(--muted)" }}>Sources: </span>
+                        <span className="font-semibold">{selectedSources.length}/{KEYWORD_SOURCES.length} enabled</span>
+                      </div>
+                      <div>
+                        <span style={{ color: "var(--muted)" }}>Categories: </span>
+                        <span className="font-semibold">{selectedKeywordCategories.length}/{KEYWORD_CATEGORY_META.length} active</span>
+                      </div>
+                      <div>
+                        <span style={{ color: "var(--muted)" }}>Manual Keywords: </span>
+                        <span className="font-semibold">{manualKeywords.length} added</span>
+                      </div>
+                      <div>
+                        <span style={{ color: "var(--muted)" }}>Key Tropes: </span>
+                        <span className="font-semibold">{keyTropes.length} added</span>
+                      </div>
+                      <div>
+                        <span style={{ color: "var(--muted)" }}>Bidding: </span>
+                        <span className="font-semibold">{useRrpBidding ? "RRP-based" : "Manual"}</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {previewName && (
+                    <div className="border-t pt-4" style={{ borderColor: "var(--line)" }}>
+                      <p className="field-hint mb-2" style={{ marginTop: 0 }}>Campaign Name</p>
+                      <code className="chip-tag" style={{ cursor: "default", fontSize: "0.85rem" }}>
+                        {previewName}
+                      </code>
+                    </div>
+                  )}
+
+                  <div className="border-t pt-4" style={{ borderColor: "var(--line)" }}>
+                    <p className="text-xs" style={{ color: "var(--muted)" }}>
+                      Ready to generate your bulksheet? Click the button below to proceed.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+            )}
+          </div>
+
+          {/* Navigation */}
+          <div className="flex gap-3 mt-8 justify-between">
+            <button
+              type="button"
+              onClick={() => setCurrentPage((p) => (p > 1 ? ((p - 1) as FormPage) : p))}
+              disabled={currentPage === 1}
+              className="btn-pill-outline px-6 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              ← Previous
+            </button>
+
+            {currentPage === TOTAL_PAGES ? (
               <button
                 type="submit"
                 disabled={isLoading || matchTypes.length === 0 || selectedKeywordTypes.length === 0}
-                className="btn-pill-dark w-full py-3 text-sm"
+                className="btn-pill-dark px-6 py-2.5"
               >
                 {isLoading ? "Generating…" : "Generate Manual Bulksheet"}
               </button>
-            </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => (p < TOTAL_PAGES ? ((p + 1) as FormPage) : p))}
+                className="btn-pill-dark px-6 py-2.5"
+              >
+                Next →
+              </button>
+            )}
           </div>
         </form>
 
