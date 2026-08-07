@@ -140,6 +140,20 @@ export interface ProductPageData {
   reviewSnippets: string[]; // top-review excerpt text embedded on the page, for review-language mining
   description?: string; // publisher/author blurb, for comp-mention + description mining
   bulletPoints: string[]; // Amazon's "About this item" feature bullets
+  /** Customer rating (e.g. 4.5 out of 5) */
+  rating?: number;
+  /** Number of customer reviews/ratings */
+  reviewCount?: number;
+  /** Page count for printed books */
+  pageCount?: number;
+  /** Publisher name */
+  publisher?: string;
+  /** Publication/release date */
+  publicationDate?: string;
+  /** Language(s) */
+  language?: string;
+  /** Product dimensions or weight */
+  dimensions?: string;
   /** HTTP status of the product page fetch, when one was made — for diagnosing scrape failures. */
   fetchStatus?: number;
   /** True when the response looked like an Amazon bot/CAPTCHA check rather than the real product page. */

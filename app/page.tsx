@@ -97,6 +97,13 @@ export default function Home() {
   const [profileIsbn10, setProfileIsbn10] = useState<string | null>(null);
   const [profileIsbn13, setProfileIsbn13] = useState<string | null>(null);
   const [profilePrice, setProfilePrice] = useState<number | null>(null);
+  const [profileRating, setProfileRating] = useState<number | null>(null);
+  const [profileReviewCount, setProfileReviewCount] = useState<number | null>(null);
+  const [profilePageCount, setProfilePageCount] = useState<number | null>(null);
+  const [profilePublisher, setProfilePublisher] = useState<string | null>(null);
+  const [profilePublicationDate, setProfilePublicationDate] = useState<string | null>(null);
+  const [profileLanguage, setProfileLanguage] = useState<string | null>(null);
+  const [profileDimensions, setProfileDimensions] = useState<string | null>(null);
   const [profileGoogleBooksCategories, setProfileGoogleBooksCategories] = useState<string[]>([]);
   const [profileOpenLibrarySubjects, setProfileOpenLibrarySubjects] = useState<string[]>([]);
   const [profileGoodreadsTags, setProfileGoodreadsTags] = useState<string[]>([]);
@@ -216,6 +223,13 @@ export default function Home() {
       setProfileIsbn10(typeof body.isbn10 === "string" ? body.isbn10 : null);
       setProfileIsbn13(typeof body.isbn13 === "string" ? body.isbn13 : null);
       setProfilePrice(typeof body.price === "number" ? body.price : null);
+      setProfileRating(typeof body.rating === "number" ? body.rating : null);
+      setProfileReviewCount(typeof body.reviewCount === "number" ? body.reviewCount : null);
+      setProfilePageCount(typeof body.pageCount === "number" ? body.pageCount : null);
+      setProfilePublisher(typeof body.publisher === "string" ? body.publisher : null);
+      setProfilePublicationDate(typeof body.publicationDate === "string" ? body.publicationDate : null);
+      setProfileLanguage(typeof body.language === "string" ? body.language : null);
+      setProfileDimensions(typeof body.dimensions === "string" ? body.dimensions : null);
       setProfileGoogleBooksCategories(Array.isArray(body.googleBooksCategories) ? body.googleBooksCategories : []);
       setProfileOpenLibrarySubjects(Array.isArray(body.openLibrarySubjects) ? body.openLibrarySubjects : []);
       setProfileGoodreadsTags(Array.isArray(body.goodreadsTags) ? body.goodreadsTags : []);
@@ -475,6 +489,14 @@ export default function Home() {
                       </p>
                     )}
 
+                    {profileRating && (
+                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Rating: </span>
+                        ⭐ {profileRating.toFixed(1)}/5
+                        {profileReviewCount && ` (${profileReviewCount.toLocaleString()} reviews)`}
+                      </p>
+                    )}
+
                     {/* Expanded metadata */}
                     {expandedMetadata && (
                       <>
@@ -488,6 +510,41 @@ export default function Home() {
                           <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
                             <span className="font-semibold" style={{ color: "var(--ink)" }}>ISBN-13: </span>
                             {profileIsbn13}
+                          </p>
+                        )}
+
+                        {profilePublisher && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Publisher: </span>
+                            {profilePublisher}
+                          </p>
+                        )}
+
+                        {profilePublicationDate && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Published: </span>
+                            {profilePublicationDate}
+                          </p>
+                        )}
+
+                        {profilePageCount && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Pages: </span>
+                            {profilePageCount.toLocaleString()}
+                          </p>
+                        )}
+
+                        {profileLanguage && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Language: </span>
+                            {profileLanguage}
+                          </p>
+                        )}
+
+                        {profileDimensions && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Dimensions: </span>
+                            {profileDimensions}
                           </p>
                         )}
 
