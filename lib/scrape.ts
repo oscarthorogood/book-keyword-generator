@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { extractAmazonMetadata, isFirecrawlConfigured } from "./firecrawl";
 import { KeywordCandidate, Marketplace, ProductPageData, RelatedCompetitor, RelatedCompetitorCrawl } from "./types";
 
 const AMAZON_DOMAINS: Record<Marketplace, string> = {
@@ -124,6 +125,62 @@ const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
 const MAX_AUTOCOMPLETE_SEEDS = 65;
 const MAX_GOOGLE_SUGGEST_SEEDS = 20;
 const AUTOCOMPLETE_CONCURRENCY = 15;
+
+/**
+ * Generate additional keyword seeds from Firecrawl-extracted metadata
+ * (categories, features, keywords) to improve autocomplete coverage.
+ * These seeds target category-specific and feature-based searches.
+ * Falls back to empty array if Firecrawl is not configured.
+ */
+export async function buildMetadataSeeds(asin: string, marketplace: Marketplace): Promise<string[]> {
+  if (!isFirecrawlConfigured()) return [];
+
+  try {
+    const url = getProductPageUrl(asin, marketplace);
+    const metadata = await extractAmazonMetadata(url);
+
+    const seeds = new Set<string>();
+
+    // Add category-based seeds
+    if (metadata.categories && metadata.categories.length > 0) {
+      const mainCategory = metadata.categories[0];
+      seeds.add(mainCategory);
+      if (metadata.title) {
+        const combined = `${metadata.title} ${mainCategory}`.slice(0, 100);
+        seeds.add(combined);
+      }
+    }
+
+    // Add feature-based seeds (product features often become search queries)
+    if (metadata.features && metadata.features.length > 0) {
+      // Extract key words from features (skip very long ones)
+      for (const feature of metadata.features.slice(0, 3)) {
+        const words = feature.split(/\s+/).filter(w => w.length > 3);
+        if (words.length > 0 && words.length <= 3) {
+          seeds.add(words.join(" "));
+        }
+      }
+    }
+
+    // Add pre-extracted keywords if available
+    if (metadata.keywords && metadata.keywords.length > 0) {
+      for (const keyword of metadata.keywords.slice(0, 5)) {
+        if (keyword.length > 2 && keyword.length < 50) {
+          seeds.add(keyword);
+        }
+      }
+    }
+
+    // Add language-specific seeds if not English
+    if (metadata.language && metadata.language.toLowerCase() !== "english" && metadata.title) {
+      seeds.add(`${metadata.title} ${metadata.language}`);
+    }
+
+    return Array.from(seeds).filter(s => s.length > 2 && s.length < 100);
+  } catch {
+    return [];
+  }
+}
 
 /**
  * Amazon's autocomplete returns different completions depending on the next

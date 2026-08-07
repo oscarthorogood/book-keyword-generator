@@ -56,6 +56,7 @@ import {
 import { mineReviewLanguage } from "@/lib/reviewMining";
 import {
   buildAutocompleteSeeds,
+  buildMetadataSeeds,
   getAutocompleteKeywordSet,
   getDuckDuckGoAutocompleteKeywordSet,
   getGoogleAutocompleteKeywordSet,
@@ -276,6 +277,7 @@ export async function POST(req: NextRequest) {
 
   const [
     adsApiResult,
+    metadataSeeds,
     autocompleteResult,
     googleAutocompleteResult,
     youtubeAutocompleteResult,
@@ -298,6 +300,7 @@ export async function POST(req: NextRequest) {
           candidates: [] as KeywordCandidate[],
           error: "Amazon Ads API credentials not configured.",
         }),
+    buildMetadataSeeds(request.asin, request.marketplace),
     getAutocompleteKeywordSet(seedTerms, request.marketplace),
     getGoogleAutocompleteKeywordSet(seedTerms),
     getYoutubeAutocompleteKeywordSet(seedTerms),
@@ -327,6 +330,21 @@ export async function POST(req: NextRequest) {
     lookupLocSubjects(request.bookTitle),
   ]);
 
+  // Run additional autocomplete queries using Firecrawl-extracted metadata seeds
+  // to capture category-specific and feature-based search queries
+  const metadataAwareAutocompleteResults = await Promise.all([
+    metadataSeeds.length > 0 ? getAutocompleteKeywordSet(metadataSeeds, request.marketplace) : Promise.resolve([]),
+    metadataSeeds.length > 0 ? getGoogleAutocompleteKeywordSet(metadataSeeds) : Promise.resolve([]),
+    metadataSeeds.length > 0 ? getYoutubeAutocompleteKeywordSet(metadataSeeds) : Promise.resolve([]),
+    metadataSeeds.length > 0 ? getDuckDuckGoAutocompleteKeywordSet(metadataSeeds) : Promise.resolve([]),
+  ]);
+
+  // Merge metadata-aware autocomplete results with original results
+  const mergedAutocompleteResult = [...autocompleteResult, ...metadataAwareAutocompleteResults[0]];
+  const mergedGoogleAutocompleteResult = [...googleAutocompleteResult, ...metadataAwareAutocompleteResults[1]];
+  const mergedYoutubeAutocompleteResult = [...youtubeAutocompleteResult, ...metadataAwareAutocompleteResults[2]];
+  const mergedDuckDuckGoAutocompleteResult = [...duckDuckGoAutocompleteResult, ...metadataAwareAutocompleteResults[3]];
+
   sourceStatuses.push({
     source: "ads-api",
     ok: adsApiResult.candidates.length > 0,
@@ -335,23 +353,23 @@ export async function POST(req: NextRequest) {
   });
   sourceStatuses.push({
     source: "autocomplete",
-    ok: autocompleteResult.length > 0,
-    count: autocompleteResult.length,
+    ok: mergedAutocompleteResult.length > 0,
+    count: mergedAutocompleteResult.length,
   });
   sourceStatuses.push({
     source: "google-autocomplete",
-    ok: googleAutocompleteResult.length > 0,
-    count: googleAutocompleteResult.length,
+    ok: mergedGoogleAutocompleteResult.length > 0,
+    count: mergedGoogleAutocompleteResult.length,
   });
   sourceStatuses.push({
     source: "youtube-autocomplete",
-    ok: youtubeAutocompleteResult.length > 0,
-    count: youtubeAutocompleteResult.length,
+    ok: mergedYoutubeAutocompleteResult.length > 0,
+    count: mergedYoutubeAutocompleteResult.length,
   });
   sourceStatuses.push({
     source: "duckduckgo-autocomplete",
-    ok: duckDuckGoAutocompleteResult.length > 0,
-    count: duckDuckGoAutocompleteResult.length,
+    ok: mergedDuckDuckGoAutocompleteResult.length > 0,
+    count: mergedDuckDuckGoAutocompleteResult.length,
   });
   sourceStatuses.push({
     source: "book-content",
@@ -364,9 +382,9 @@ export async function POST(req: NextRequest) {
   // those to product targeting instead of letting them fall out as junk
   // keywords. See learnings doc, section 3.
   const { keywords: adsApiKeywords, asins: adsApiAsins } = extractAsinCandidates(adsApiResult.candidates);
-  const { keywords: autocompleteKeywords, asins: autocompleteAsins } = extractAsinCandidates(autocompleteResult);
+  const { keywords: autocompleteKeywords, asins: autocompleteAsins } = extractAsinCandidates(mergedAutocompleteResult);
   const { keywords: googleAutocompleteKeywords, asins: googleAsins } = extractAsinCandidates(
-    googleAutocompleteResult
+    mergedGoogleAutocompleteResult
   );
 
   const genreMetadataCandidates = buildGenreMetadataCandidates(bookMetadata);
@@ -501,10 +519,10 @@ export async function POST(req: NextRequest) {
   // ASINs can leak into the newer autocomplete corpora the same way they do
   // for Amazon/Google's — see the extractAsinCandidates call above.
   const { keywords: youtubeAutocompleteKeywords, asins: youtubeAsins } = extractAsinCandidates(
-    youtubeAutocompleteResult
+    mergedYoutubeAutocompleteResult
   );
   const { keywords: duckDuckGoAutocompleteKeywords, asins: duckDuckGoAsins } = extractAsinCandidates(
-    duckDuckGoAutocompleteResult
+    mergedDuckDuckGoAutocompleteResult
   );
 
   // Build categorized keyword candidates from the 20-category semantic taxonomy.
