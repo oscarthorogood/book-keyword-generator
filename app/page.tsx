@@ -140,6 +140,14 @@ export default function Home() {
   const [profileWikidataGenres, setProfileWikidataGenres] = useState<string[]>([]);
   const [profileLocSubjects, setProfileLocSubjects] = useState<string[]>([]);
 
+  // Amazon recommendation sections
+  const [profileFrequentlyBoughtTogether, setProfileFrequentlyBoughtTogether] = useState<
+    Array<{ asin: string; title: string }>
+  >([]);
+  const [profileCompareWithSimilar, setProfileCompareWithSimilar] = useState<
+    Array<{ asin: string; title: string }>
+  >([]);
+
   const [status, setStatus] = useState<"idle" | "loading" | "error" | "success">("idle");
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [sources, setSources] = useState<SourceStatus[] | null>(null);
@@ -277,6 +285,10 @@ export default function Home() {
       setProfileWikipediaCategories(Array.isArray(body.wikipediaCategories) ? body.wikipediaCategories : []);
       setProfileWikidataGenres(Array.isArray(body.wikidataGenres) ? body.wikidataGenres : []);
       setProfileLocSubjects(Array.isArray(body.locSubjects) ? body.locSubjects : []);
+
+      // Amazon recommendations
+      setProfileFrequentlyBoughtTogether(Array.isArray(body.frequentlyBoughtTogether) ? body.frequentlyBoughtTogether : []);
+      setProfileCompareWithSimilar(Array.isArray(body.compareWithSimilar) ? body.compareWithSimilar : []);
 
       setAutofillStatus("idle");
     } catch (err) {
@@ -887,6 +899,48 @@ export default function Home() {
                               {profileLocSubjects.length > 6 && (
                                 <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
                                   +{profileLocSubjects.length - 6}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileFrequentlyBoughtTogether.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Frequently Bought Together:</span>
+                            <div className="flex flex-col gap-1 mt-1">
+                              {profileFrequentlyBoughtTogether.slice(0, 5).map((item) => (
+                                <div key={item.asin} className="text-xs">
+                                  <span className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                    {item.title.substring(0, 50)}
+                                  </span>
+                                  <span style={{ fontSize: "0.65rem", marginLeft: "0.5rem" }}>({item.asin})</span>
+                                </div>
+                              ))}
+                              {profileFrequentlyBoughtTogether.length > 5 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileFrequentlyBoughtTogether.length - 5} more
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        {profileCompareWithSimilar.length > 0 && (
+                          <div className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Compare with Similar Items:</span>
+                            <div className="flex flex-col gap-1 mt-1">
+                              {profileCompareWithSimilar.slice(0, 5).map((item) => (
+                                <div key={item.asin} className="text-xs">
+                                  <span className="chip-tag" style={{ fontSize: "0.7rem" }}>
+                                    {item.title.substring(0, 50)}
+                                  </span>
+                                  <span style={{ fontSize: "0.65rem", marginLeft: "0.5rem" }}>({item.asin})</span>
+                                </div>
+                              ))}
+                              {profileCompareWithSimilar.length > 5 && (
+                                <span className="chip-tag" style={{ fontSize: "0.7rem", color: "var(--accent-purple)" }}>
+                                  +{profileCompareWithSimilar.length - 5} more
                                 </span>
                               )}
                             </div>
