@@ -75,16 +75,78 @@ export async function GET(req: NextRequest) {
   );
 
   return NextResponse.json({
+    // Identifiers
     asin,
     title: productPage.title,
     author: productPage.author,
+    authorBio: productPage.authorBio,
+    authorImage: productPage.authorImage,
     seriesName: productPage.seriesName,
+
+    // Pricing
     price: productPage.price,
-    description: productPage.description,
-    bulletPoints: productPage.bulletPoints,
+    originalPrice: productPage.originalPrice,
+    discountPercentage: productPage.discountPercentage,
+    primeEligible: productPage.primeEligible,
+
+    // Format info
+    format: productPage.format,
+    edition: productPage.edition,
+    bindingType: productPage.bindingType,
+    hasAudiobook: productPage.hasAudiobook,
+    hasKindle: productPage.hasKindle,
+    hasPhysical: productPage.hasPhysical,
+
+    // Images
+    coverImageUrl: productPage.coverImageUrl,
+
+    // Competitive products
+    compTitles: productPage.compTitles,
+    compDetails: productPage.compDetails,
+    frequentlyBoughtTogether: productPage.frequentlyBoughtTogether,
+    compareWithSimilar: productPage.compareWithSimilar,
+
+    // Ratings & reviews
+    rating: productPage.rating,
+    reviewCount: productPage.reviewCount,
+    qaCount: productPage.qaCount,
+    ratingDistribution: productPage.ratingDistribution,
+
+    // Categories & rankings
     categoryPath: productPage.categoryPath,
     bestSellerRanks: productPage.bestSellerRanks,
-    compTitles: productPage.compTitles,
+    allCategoryRanks: productPage.allCategoryRanks,
+    amazonChoiceBadge: productPage.amazonChoiceBadge,
+    bestsellerBadge: productPage.bestsellerBadge,
+
+    // Content
+    description: productPage.description,
+    bulletPoints: productPage.bulletPoints,
+    tableOfContents: productPage.tableOfContents,
+    wordCount: productPage.wordCount,
+    lexileLevel: productPage.lexileLevel,
+    ageRange: productPage.ageRange,
+    contentWarnings: productPage.contentWarnings,
+
+    // Publication details
+    publisher: productPage.publisher,
+    publicationDate: productPage.publicationDate,
+    copyrightYear: productPage.copyrightYear,
+    pageCount: productPage.pageCount,
+    language: productPage.language,
+    languages: productPage.languages,
+    dimensions: productPage.dimensions,
+
+    // Availability
+    availability: productPage.availability,
+    stockStatus: productPage.stockStatus,
+    hasLookInside: productPage.hasLookInside,
+
+    // Awards
+    awards: productPage.awards,
+    awardNominations: productPage.awardNominations,
+
+    // External metadata
     googleBooksCategories: bookMetadata.categories,
     openLibrarySubjects: bookMetadata.subjects,
     goodreadsTags,
