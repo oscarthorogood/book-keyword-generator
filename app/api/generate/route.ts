@@ -10,6 +10,7 @@ import {
   lookupWikipediaCategories,
 } from "@/lib/bookMetadata";
 import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
+import { archiveBulksheet } from "@/lib/supabaseStorage";
 import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
 import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
@@ -824,7 +825,13 @@ export async function POST(req: NextRequest) {
   const finalCompNameCount = keywordTypes.has("comp-names") ? compNameKeywords.length : 0;
   const finalProductTargetCount = keywordTypes.has("product-targeting") ? productTargets.length : 0;
 
+  // Best-effort copy to Supabase Storage. Returns null when Storage isn't
+  // configured or the upload fails — the download below is unaffected either way.
+  const archived = await archiveBulksheet(buffer, campaignName);
+
   return fileResponse(buffer, campaignName, {
+    ...(archived ? { "X-Archive-Path": encodeURIComponent(archived.path) } : {}),
+    ...(archived?.signedUrl ? { "X-Archive-Url": encodeURIComponent(archived.signedUrl) } : {}),
     "X-Keyword-Count": String(finalTropesCount + finalCompNameCount),
     "X-Tropes-Keyword-Count": String(finalTropesCount),
     "X-Comp-Name-Keyword-Count": String(finalCompNameCount),

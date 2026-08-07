@@ -361,6 +361,32 @@ Optional:
 - `GEMINI_API_KEY` / `FIRECRAWL_API_KEY` — see "AI-assisted ranking" above.
   Neither is required; the app ranks keywords with the heuristic scorer
   alone when they're unset.
+- `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — see "Bulksheet
+  archiving" below. Both are needed together; unset means downloads only.
+
+### Bulksheet archiving (Supabase Storage)
+
+When both Supabase variables are set, `/api/generate` uploads a copy of each
+generated `.xlsx` to a **private** Storage bucket named `bulksheets` and
+returns a 1-hour signed link in the `X-Archive-Url` response header, which the
+UI renders under the success banner. Objects are keyed
+`YYYY/MM/DD/<uuid>-<campaign>.xlsx`, so re-runs never overwrite each other and
+date-based cleanup is easy.
+
+Create the bucket once (Storage > New bucket, private, MIME type
+`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`).
+
+Two things to keep straight:
+
+- The service-role key bypasses row-level security. It is read only in
+  `lib/supabaseStorage.ts`, which is server-only — never import that module
+  from a Client Component, and never rename the var to `NEXT_PUBLIC_*`.
+- No Storage RLS policies are required, because only the service role touches
+  the bucket. If you later let the browser read or write it directly, you must
+  add policies on `storage.objects` first.
+
+Archiving is best-effort: a missing bucket, expired key, or Storage outage is
+logged server-side and the bulksheet still downloads normally.
 
 ### Deploy
 

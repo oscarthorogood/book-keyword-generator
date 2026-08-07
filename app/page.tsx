@@ -160,6 +160,9 @@ export default function Home() {
   const [recommendedRange, setRecommendedRange] = useState<string | null>(null);
   const [resultCampaignName, setResultCampaignName] = useState<string | null>(null);
   const [aiRankingUsed, setAiRankingUsed] = useState<boolean>(false);
+  // Signed link to the copy saved in Supabase Storage; null when archiving is
+  // not configured or the upload failed (the direct download still happened).
+  const [archiveUrl, setArchiveUrl] = useState<string | null>(null);
 
   const previewName = useMemo(() => {
     const normalizedAsin = normalizeAsinOrIsbn(asin);
@@ -321,6 +324,7 @@ export default function Home() {
     setProductTargetCount(null);
     setManualKeywordCount(null);
     setRecommendedRange(null);
+    setArchiveUrl(null);
     setResultCampaignName(null);
 
     try {
@@ -382,6 +386,9 @@ export default function Home() {
       if (rangeHeader) setRecommendedRange(rangeHeader);
       if (campaignNameHeader) setResultCampaignName(decodeURIComponent(campaignNameHeader));
       setAiRankingUsed(aiRankingHeader === "true");
+
+      const archiveHeader = res.headers.get("X-Archive-Url");
+      setArchiveUrl(archiveHeader ? decodeURIComponent(archiveHeader) : null);
 
       const disposition = res.headers.get("Content-Disposition") ?? "";
       const filenameMatch = disposition.match(/filename="([^"]+)"/);
@@ -1530,6 +1537,21 @@ export default function Home() {
                   " Tropes & Themes is below Amazon's recommended minimum — free sources came up short for this ASIN; consider adding a few keywords manually before uploading."}
               </span>
             </div>
+
+            {archiveUrl && (
+              <p className="text-sm" style={{ color: "var(--muted)" }}>
+                A copy was saved to cloud storage.{" "}
+                <a
+                  href={archiveUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={{ color: "var(--accent-green)", textDecoration: "underline" }}
+                >
+                  Download again
+                </a>{" "}
+                — link expires in 1 hour.
+              </p>
+            )}
 
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
               <div className="stat-tile tone-purple">

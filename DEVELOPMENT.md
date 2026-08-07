@@ -25,6 +25,7 @@ See `.env.example` for all available configuration options. Key variables:
 - `AUTH_SECRET` - Secret for JWT signing (auto-generated if not set, but recommend setting in production)
 - `AMAZON_ADS_*` - Amazon Ads API credentials (optional, for keyword recommendations)
 - `GEMINI_API_KEY` - Google Gemini API key for AI ranking (optional)
+- `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` - Supabase Storage archiving of generated bulksheets (optional, both required together)
 
 ## Development Workflow
 
@@ -187,6 +188,7 @@ Ensure these are set in your deployment platform:
 - `AUTH_SECRET` (recommended, will auto-generate if not set)
 - `AMAZON_ADS_*` (optional, for API features)
 - `GEMINI_API_KEY` (optional, for AI ranking)
+- `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` (optional, for bulksheet archiving)
 
 ## Getting Help
 
