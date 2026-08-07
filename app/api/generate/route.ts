@@ -833,20 +833,40 @@ export async function POST(req: NextRequest) {
   const finalProductTargetCount = keywordTypes.has("product-targeting") ? productTargets.length : 0;
 
   // Best-effort copy to Supabase Storage. Returns null when Storage isn't
-  // configured or the upload fails — the download below is unaffected either way.
+  // configured or the upload fails — the email is still sent either way.
   const archived = await archiveBulksheet(buffer, campaignName, user.id);
 
-  return fileResponse(buffer, campaignName, {
-    ...(archived ? { "X-Archive-Path": encodeURIComponent(archived.path) } : {}),
-    ...(archived?.signedUrl ? { "X-Archive-Url": encodeURIComponent(archived.signedUrl) } : {}),
-    "X-Keyword-Count": String(finalTropesCount + finalCompNameCount),
-    "X-Tropes-Keyword-Count": String(finalTropesCount),
-    "X-Comp-Name-Keyword-Count": String(finalCompNameCount),
-    "X-Product-Target-Count": String(finalProductTargetCount),
-    "X-Manual-Keyword-Count": String(guaranteedManualKeywords.length + (manualAsins.length > 0 ? manualAsins.length : 0)),
-    "X-Recommended-Keyword-Range": `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
-    "X-Source-Status": encodeURIComponent(JSON.stringify(sourceStatuses)),
-    "X-Ai-Ranking-Used": String(aiRankingUsed),
-    "X-Firecrawl-Used": String(!!firecrawlMarkdown),
+  // Email the bulksheet instead of streaming to browser
+  const { sendBulksheetEmail } = await import("@/lib/email");
+  const emailSent = await sendBulksheetEmail({
+    to: user.email,
+    campaignName,
+    fileBuffer: buffer,
   });
+
+  if (!emailSent) {
+    return new Response(
+      JSON.stringify({
+        error: "Bulksheet generated but email delivery failed. Check your email configuration.",
+      }),
+      { status: 500, headers: { "Content-Type": "application/json" } }
+    );
+  }
+
+  return new Response(
+    JSON.stringify({
+      success: true,
+      archiveUrl: archived?.signedUrl ?? null,
+      tropesKeywordCount: finalTropesCount,
+      compNameKeywordCount: finalCompNameCount,
+      productTargetCount: finalProductTargetCount,
+      manualKeywordCount: guaranteedManualKeywords.length + (manualAsins.length > 0 ? manualAsins.length : 0),
+      recommendedRange: `${RECOMMENDED_MIN_KEYWORDS}-${RECOMMENDED_MAX_KEYWORDS}`,
+      sourceStatuses,
+      aiRankingUsed,
+      firecrawlUsed: !!firecrawlMarkdown,
+      campaignName,
+    }),
+    { status: 200, headers: { "Content-Type": "application/json" } }
+  );
 }

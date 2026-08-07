@@ -154,3 +154,69 @@ export async function sendApprovedEmail(args: {
     `,
   });
 }
+
+/** Send generated bulksheet file as email attachment. */
+export async function sendBulksheetEmail(args: {
+  to: string;
+  campaignName: string;
+  fileBuffer: Buffer;
+}): Promise<boolean> {
+  if (!isEmailConfigured()) {
+    console.error("Email not configured: set RESEND_API_KEY, EMAIL_FROM, ADMIN_EMAIL.");
+    return false;
+  }
+
+  try {
+    const base64File = args.fileBuffer.toString("base64");
+    const filename = `${args.campaignName}.xlsx`;
+    const campaignEscaped = escapeHtml(args.campaignName);
+
+    const res = await fetch(RESEND_ENDPOINT, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${process.env.RESEND_API_KEY}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        from: process.env.EMAIL_FROM,
+        to: [args.to],
+        subject: `Bulksheet ready: ${args.campaignName}`,
+        html: `
+          <div style="${WRAPPER}">
+            <h2 style="font-size:18px;margin:0 0 12px">Your bulksheet is ready</h2>
+            <p style="margin:0 0 20px">
+              <strong>${campaignEscaped}</strong> is attached and ready to upload to Amazon Ads.
+            </p>
+            <p style="margin:0 0 24px">
+              <a href="https://advertising.amazon.com" style="${BUTTON};background:#0f7b3f;color:#ffffff">Go to Amazon Ads</a>
+            </p>
+            <p style="margin:0;color:#666;font-size:13px">
+              You can also access your bulksheet archive in the Amazon Book Ads Builder anytime
+              to download it again or generate new campaigns.
+            </p>
+          </div>
+        `,
+        attachments: [
+          {
+            filename,
+            content: base64File,
+            content_type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          },
+        ],
+      }),
+    });
+
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      console.error(`Resend rejected the bulksheet email (${res.status}): ${detail}`);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.error(
+      "Sending bulksheet email failed:",
+      err instanceof Error ? err.message : err
+    );
+    return false;
+  }
+}
