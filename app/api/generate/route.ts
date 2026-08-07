@@ -11,6 +11,7 @@ import {
 } from "@/lib/bookMetadata";
 import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
 import { archiveBulksheet } from "@/lib/supabaseStorage";
+import { currentUserEmail } from "@/lib/supabaseServer";
 import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
 import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
@@ -250,6 +251,11 @@ function fileResponse(buffer: Buffer, campaignName: string, extraHeaders: Record
 }
 
 export async function POST(req: NextRequest) {
+  // Defence in depth alongside proxy.ts — see the note in app/api/lookup/route.ts.
+  if (!(await currentUserEmail())) {
+    return NextResponse.json({ error: "Not signed in." }, { status: 401 });
+  }
+
   let body: unknown;
   try {
     body = await req.json();

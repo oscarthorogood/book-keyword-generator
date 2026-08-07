@@ -20,7 +20,7 @@ list out" tool. More functionality (including possibly that workflow) may
 get layered on later, but the core loop below is meant to stay simple.
 
 One page, two API routes, no database — stateless: one request in, one file
-out. Gated behind HTTP Basic Auth for private/single-user use.
+out. Gated behind magic-link sign-in with an admin-approved allowlist.
 
 ## How it works
 
@@ -340,7 +340,13 @@ npm run dev
 
 See `.env.example`. Required:
 
-- `APP_PASSWORD` — gates the app (HTTP Basic Auth, any username, this password).
+- `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` /
+  `SUPABASE_SERVICE_ROLE_KEY` — back both authentication and bulksheet
+  archiving. See "Authentication" below.
+- `AUTH_SECRET` — signs the approve/deny links. Must be a long random value in
+  production.
+- `RESEND_API_KEY` / `EMAIL_FROM` / `ADMIN_EMAIL` — send the sign-in and
+  approval emails.
 - `AMAZON_ADS_CLIENT_ID` / `AMAZON_ADS_CLIENT_SECRET` — from a Login with Amazon
   security profile registered in the [Amazon Ads developer console](https://advertising.amazon.com/API/docs).
 - `AMAZON_ADS_REFRESH_TOKEN` — minted once via a manual Login with Amazon OAuth
@@ -363,6 +369,46 @@ Optional:
   alone when they're unset.
 - `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — see "Bulksheet
   archiving" below. Both are needed together; unset means downloads only.
+
+### Authentication
+
+Sign-in is a **magic link gated by an allowlist**. There is no password.
+
+1. Someone enters their email on `/login`.
+2. If the address is **approved**, they're emailed a one-time sign-in link.
+3. If it's **new**, it's recorded as `pending` and `ADMIN_EMAIL` receives an
+   email with **Approve** and **Deny** buttons.
+4. Approving emails them a working sign-in link immediately. Denying is silent
+   — they're never told.
+
+The allowlist lives in `public.access_requests`, with RLS on and zero policies,
+so only the service role can read it. To pre-approve someone without waiting
+for them to ask:
+
+```sql
+insert into public.access_requests (email, status, decided_at)
+values ('them@example.com', 'approved', now())
+on conflict (email) do update set status = 'approved', decided_at = now();
+```
+
+To revoke, set `status` to `'denied'` — they lose the ability to request new
+links, though an already-issued session survives until it expires.
+
+**Approve/deny links carry no session** — they're clicked straight from a phone
+mail app. What makes that safe: each link is HMAC-signed with `AUTH_SECRET`, is
+bound to a nonce that's cleared on first use (so it works exactly once), and
+expires after 14 days. This is why `AUTH_SECRET` must be a real random value in
+production; the code falls back to a hardcoded development default, and with
+that in place anyone could forge an approval for their own address.
+
+Magic links are minted server-side (`lib/magicLink.ts`) and delivered through
+Resend rather than Supabase's built-in mailer, which is rate-limited to a few
+messages an hour and not intended for production. Nothing extra needs
+configuring in the Supabase dashboard.
+
+Route protection is in `proxy.ts` (Next 16's rename of `middleware.ts`).
+Because a matcher change can silently drop coverage, `/api/generate` and
+`/api/lookup` re-check the session themselves.
 
 ### Bulksheet archiving (Supabase Storage)
 

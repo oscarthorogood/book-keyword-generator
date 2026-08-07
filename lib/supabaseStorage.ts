@@ -1,4 +1,4 @@
-import { createClient, SupabaseClient } from "@supabase/supabase-js";
+import { isSupabaseConfigured, supabaseAdmin } from "./supabaseAdmin";
 
 /**
  * Server-side archive of generated bulksheets in Supabase Storage.
@@ -29,22 +29,11 @@ export interface ArchivedBulksheet {
 }
 
 /**
- * True when both env vars are present. Deployments that haven't configured
- * Supabase keep working with downloads only.
+ * True when Supabase is configured. Deployments without it keep working with
+ * downloads only.
  */
 export function isStorageConfigured(): boolean {
-  return Boolean(
-    process.env.NEXT_PUBLIC_SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY
-  );
-}
-
-function adminClient(): SupabaseClient {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!,
-    // No user session on the server — don't try to persist or refresh one.
-    { auth: { persistSession: false, autoRefreshToken: false } }
-  );
+  return isSupabaseConfigured();
 }
 
 /**
@@ -82,7 +71,7 @@ export async function archiveBulksheet(
   const path = buildObjectPath(campaignName);
 
   try {
-    const storage = adminClient().storage.from(BUCKET);
+    const storage = supabaseAdmin().storage.from(BUCKET);
 
     const { error: uploadError } = await storage.upload(
       path,
@@ -124,7 +113,7 @@ export async function createDownloadUrl(path: string): Promise<string | null> {
   if (!isStorageConfigured()) {
     return null;
   }
-  const { data, error } = await adminClient()
+  const { data, error } = await supabaseAdmin()
     .storage.from(BUCKET)
     .createSignedUrl(path, SIGNED_URL_TTL_SECONDS);
   if (error || !data?.signedUrl) {

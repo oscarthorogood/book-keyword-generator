@@ -4,16 +4,17 @@
  */
 
 export const AUTH_CONFIG = {
+  // Signs the one-click approve/deny links emailed to the admin. Session
+  // handling itself is Supabase's job — this secret no longer mints sessions.
   SECRET_KEY: new TextEncoder().encode(process.env.AUTH_SECRET || "your-secret-key-change-this-in-production"),
-  TOKEN_EXPIRY: "7d",
-  COOKIE_CONFIG: {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax" as const,
-    maxAge: 60 * 60 * 24 * 7, // 7 days
-    path: "/",
-  },
-  PUBLIC_PATHS: ["/login", "/api/login", "/api/logout"],
+  // Reachable without a session. Anything here is also matched as a prefix,
+  // so "/auth" covers "/auth/confirm".
+  PUBLIC_PATHS: [
+    "/login",
+    "/auth", // magic-link landing (/auth/confirm)
+    "/api/auth", // sign-in request + admin approve/deny
+    "/api/logout",
+  ],
 };
 
 export const API_CONFIG = {
