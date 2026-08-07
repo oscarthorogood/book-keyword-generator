@@ -548,13 +548,59 @@ function phraseLengthScore(wordCount: number): number {
   return 0;
 }
 
+// Category-based scoring: certain keyword categories are inherently more
+// valuable for book advertising (core genre, character tropes) than others
+// (seasonal, gift-specific).
+function categoryRelevanceScore(category: string | undefined): number {
+  if (!category) return 0;
+  // High-value categories that drive targeted searches
+  const highValue = new Set([
+    "core-genre",
+    "sub-genre",
+    "competing-authors",
+    "comp-titles",
+    "character-tropes",
+    "relationship-tropes",
+    "plot-devices",
+    "setting-aesthetic",
+  ]);
+  // Medium-value categories
+  const mediumValue = new Set([
+    "series-names",
+    "mood-tone",
+    "time-period",
+    "award-bestseller",
+    "age-demographic",
+  ]);
+  // Lower-value but still useful
+  const lowValue = new Set([
+    "format",
+    "gift",
+    "problem-solving",
+    "skill-goal",
+    "identity-cultural",
+    "synonym-alt",
+    "seasonal-holiday",
+  ]);
+
+  if (highValue.has(category)) return 2;
+  if (mediumValue.has(category)) return 1;
+  if (lowValue.has(category)) return 0.5;
+  return 0;
+}
+
 /**
  * Scores each candidate by how much independent agreement backs it (more
- * sources = more confidence) and whether it's a specific long-tail phrase
- * vs. a single broad word, then fills in a bid for sources that don't carry
- * one of their own (only Ads API does): full confidence terms get the form's
- * default bid, single-source speculative terms get a discounted bid so
- * testing them risks less spend. Returns candidates sorted best-first.
+ * sources = more confidence), keyword category relevance, phrase specificity,
+ * and source authority. Fills in bids for sources that don't carry one of
+ * their own (only Ads API does). Returns candidates sorted best-first.
+ *
+ * Scoring factors (in order of weight):
+ * 1. Source agreement (base 2 points per source)
+ * 2. Ads API authority (+3)
+ * 3. User-provided sources (+2 for user-tag, +2.5 for key-trope)
+ * 4. Category relevance (0-2 based on semantic value)
+ * 5. Phrase length vs. breadth (ideal 3-5 word phrases)
  */
 export function scoreAndTierBids(
   candidates: KeywordCandidate[],
@@ -565,16 +611,34 @@ export function scoreAndTierBids(
       const sourceCount = candidate.sources.length;
       const wordCount = candidate.text.split(" ").length;
 
+      // Base: source agreement is the strongest signal
       let score = sourceCount * 2 + phraseLengthScore(wordCount);
+
+      // Authority signals (high confidence)
       if (candidate.sources.includes("ads-api")) score += 3;
-      // A human reviewed and kept this tag on the Autofill book profile —
-      // worth trusting more than an algorithmically-agreed-upon term, though
-      // not as much as real Ads API bid data.
+      // User-reviewed tags from Autofill — human vetted, very trustworthy
       if (candidate.sources.includes("user-tag")) score += 2;
+      // User-supplied tropes/themes — book-specific, highest-trust user signal
+      if (candidate.sources.includes("key-trope")) score += 2.5;
+
+      // Category relevance — semantic signal about keyword quality
+      const categoryScore = categoryRelevanceScore(candidate.category);
+      score += categoryScore;
+
+      // Source diversity bonus: if keyword appears in manual + discovered,
+      // it's strongly aligned with user intent (not just algorithmic).
+      const hasManualSource = candidate.sources.includes("manual");
+      const hasNonManualSource = candidate.sources.some(
+        (s) => s !== "manual" && s !== "user-tag" && s !== "key-trope"
+      );
+      if (hasManualSource && hasNonManualSource) {
+        score += 1.5; // User-validated keyword
+      }
 
       let suggestedBid = candidate.suggestedBid;
       if (suggestedBid === undefined) {
-        const multiplier = sourceCount >= 2 ? 1 : 0.6;
+        // Bid multiplier: multi-source keywords are more confident, bid higher
+        const multiplier = sourceCount >= 3 ? 1 : sourceCount >= 2 ? 0.9 : 0.6;
         suggestedBid = Math.round(defaultBid * multiplier * 100) / 100;
       }
 
@@ -596,6 +660,76 @@ export const RECOMMENDED_MAX_KEYWORDS = 50;
 // competitors; caps the comp-names ad group independently of the tropes cap
 // above since they're two separate ad groups now, not one shared budget.
 export const COMP_NAME_MAX_KEYWORDS = 40;
+
+/**
+ * Boosts scores for keywords from high-quality competitor books (bestsellers,
+ * high ratings, many reviews). Used for "comp-name" keywords sourced from the
+ * deep competitor crawl.
+ */
+export function boostScoresByCompetitorQuality(
+  candidates: KeywordCandidate[],
+  competitors: RelatedCompetitor[],
+  boostMultiplier: number = 0.15 // Up to 15% boost
+): KeywordCandidate[] {
+  if (boostMultiplier <= 0 || competitors.length === 0) return candidates;
+
+  const competitorTitles = new Map<string, number>();
+  const competitorAuthors = new Map<string, number>();
+
+  // Build maps of competitor titles/authors → quality score (0-1)
+  for (const comp of competitors) {
+    let quality = 0;
+
+    // Bestseller rank (most reliable)
+    if (comp.bestSellerRank !== undefined) {
+      if (comp.bestSellerRank <= 100) quality += 0.4;
+      else if (comp.bestSellerRank <= 1000) quality += 0.25;
+      else if (comp.bestSellerRank <= 10000) quality += 0.15;
+      else quality += 0.05;
+    }
+
+    // Rating signal
+    if (comp.rating !== undefined) {
+      if (comp.rating >= 4.5) quality += 0.35;
+      else if (comp.rating >= 4.0) quality += 0.25;
+      else if (comp.rating >= 3.5) quality += 0.15;
+      else quality += 0.05;
+    }
+
+    // Review count signal
+    if (comp.reviewCount !== undefined) {
+      if (comp.reviewCount >= 1000) quality += 0.35;
+      else if (comp.reviewCount >= 500) quality += 0.25;
+      else if (comp.reviewCount >= 100) quality += 0.15;
+      else if (comp.reviewCount >= 10) quality += 0.05;
+    }
+
+    const finalQuality = Math.min(quality, 1);
+
+    if (comp.title) {
+      const normalized = normalize(comp.title);
+      competitorTitles.set(normalized, Math.max(competitorTitles.get(normalized) ?? 0, finalQuality));
+    }
+    if (comp.author) {
+      const normalized = normalize(comp.author);
+      competitorAuthors.set(normalized, Math.max(competitorAuthors.get(normalized) ?? 0, finalQuality));
+    }
+  }
+
+  // Apply boosts to matching keywords
+  return candidates.map((candidate) => {
+    const normalized = normalize(candidate.text);
+    const titleQuality = competitorTitles.get(normalized) ?? 0;
+    const authorQuality = competitorAuthors.get(normalized) ?? 0;
+    const maxQuality = Math.max(titleQuality, authorQuality);
+
+    if (maxQuality > 0) {
+      const scoreBoost = maxQuality * boostMultiplier * 10; // Convert to score points
+      return { ...candidate, score: (candidate.score ?? 0) + scoreBoost };
+    }
+    return candidate;
+  });
+}
 
 /**
  * Full pipeline from raw per-source candidate groups to the final keyword

@@ -173,6 +173,10 @@ export interface RelatedCompetitor {
   asin: string;
   author?: string;
   title?: string;
+  /** Book quality metrics for scoring competitor keywords higher if from bestsellers. */
+  rating?: number;
+  reviewCount?: number;
+  bestSellerRank?: number;
 }
 
 export interface RelatedCompetitorCrawl {

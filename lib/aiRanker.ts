@@ -58,9 +58,31 @@ async function fetchWithTimeout(url: string, init: RequestInit, timeoutMs: numbe
   }
 }
 
+export type KeywordSemantic =
+  | "core-genre"
+  | "sub-genre"
+  | "competing-authors"
+  | "comp-titles"
+  | "series-names"
+  | "character-tropes"
+  | "relationship-tropes"
+  | "plot-devices"
+  | "setting-aesthetic"
+  | "format"
+  | "age-demographic"
+  | "gift"
+  | "problem-solving"
+  | "skill-goal"
+  | "mood-tone"
+  | "award-bestseller"
+  | "time-period"
+  | "identity-cultural"
+  | "synonym-alt"
+  | "seasonal-holiday";
+
 function buildPrompt(
   context: BookContext,
-  candidates: { text: string; category: "tropes" | "comp-names" }[]
+  candidates: { text: string; category: "tropes" | "comp-names"; semantic?: KeywordSemantic }[]
 ): string {
   const contextLines = [
     `Title: ${context.title}`,
@@ -75,7 +97,12 @@ function buildPrompt(
     .filter((line): line is string => !!line)
     .join("\n");
 
-  const candidateLines = candidates.map((c) => `- "${c.text}" (currently bucketed: ${c.category})`).join("\n");
+  const candidateLines = candidates
+    .map((c) => {
+      const semanticLabel = c.semantic ? ` [${c.semantic}]` : "";
+      return `- "${c.text}" (currently bucketed: ${c.category}${semanticLabel})`;
+    })
+    .join("\n");
 
   return `You are helping choose Amazon Sponsored Products keywords for a book, to maximize ad relevance and the likelihood a search leads to a sale.
 
@@ -85,6 +112,8 @@ ${contextLines}
 Candidate keywords/phrases below were gathered from multiple free sources (autocomplete sweeps, comparable-title crawling, review-language mining, genre metadata, synonym expansion, etc). Some are noisy, too generic, or irrelevant to this specific book. For EACH candidate, decide:
 - category: "tropes" (a thematic/genre/buyer-intent search phrase a reader might type), "comp-names" (a specific comparable author or book title someone would search by name — reclassify into this if a "tropes" candidate is actually a name), or "drop" (irrelevant, too generic, nonsensical, or unlikely to lead to a sale of this specific book)
 - score: 0-100, how likely this exact phrase is to be searched by a reader who would go on to buy THIS book
+
+Note: Some candidates include semantic category hints (e.g., [character-tropes], [plot-devices]) indicating what type of keyword intent we believe they represent. Use this context to better assess relevance, but trust the actual text of the keyword over any category hint.
 
 Candidates:
 ${candidateLines}
@@ -125,8 +154,16 @@ export async function rankKeywordsWithAi(
   if (!GEMINI_API_KEY) return null;
 
   const candidates = [
-    ...tropesShortlist.map((c) => ({ text: c.text, category: "tropes" as const })),
-    ...compNamesShortlist.map((c) => ({ text: c.text, category: "comp-names" as const })),
+    ...tropesShortlist.map((c) => ({
+      text: c.text,
+      category: "tropes" as const,
+      semantic: c.category as KeywordSemantic | undefined,
+    })),
+    ...compNamesShortlist.map((c) => ({
+      text: c.text,
+      category: "comp-names" as const,
+      semantic: c.category as KeywordSemantic | undefined,
+    })),
   ];
   if (candidates.length === 0) return [];
 

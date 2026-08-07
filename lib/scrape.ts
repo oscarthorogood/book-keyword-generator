@@ -709,7 +709,16 @@ export async function scrapeRelatedCompetitors(
   firstHopAsins.forEach((asin, i) => {
     const page = firstHopPages[i];
     for (const category of page.categories) categories.add(category);
-    if (page.title || page.author) competitors.set(asin, { asin, author: page.author, title: page.title });
+    if (page.title || page.author) {
+      competitors.set(asin, {
+        asin,
+        author: page.author,
+        title: page.title,
+        rating: page.rating,
+        reviewCount: page.reviewCount,
+        bestSellerRank: page.bestSellerRanks?.[0]?.rank,
+      });
+    }
     reviewSnippets.push(...page.reviewSnippets);
     for (const compAsin of page.compAsins) {
       if (compAsin !== seedAsin && !firstHopAsins.includes(compAsin)) secondHopCandidates.add(compAsin);
@@ -723,7 +732,16 @@ export async function scrapeRelatedCompetitors(
     );
     secondHopAsins.forEach((asin, i) => {
       const page = secondHopPages[i];
-      if (page.title || page.author) competitors.set(asin, { asin, author: page.author, title: page.title });
+      if (page.title || page.author) {
+        competitors.set(asin, {
+          asin,
+          author: page.author,
+          title: page.title,
+          rating: page.rating,
+          reviewCount: page.reviewCount,
+          bestSellerRank: page.bestSellerRanks?.[0]?.rank,
+        });
+      }
       reviewSnippets.push(...page.reviewSnippets);
     });
   }

@@ -29,8 +29,11 @@ const STOPWORDS = new Set([
 ]);
 
 const MIN_SNIPPET_LENGTH = 15;
-const MIN_GRAM_OCCURRENCES = 2;
-const MAX_MINED_PHRASES = 20;
+// Phrases with 2+ occurrences are definitely valuable; single occurrences are
+// kept if they're high-quality (specific multi-word phrases, not generic terms)
+const MIN_GRAM_OCCURRENCES = 1;
+const MIN_GRAM_OCCURRENCES_FOR_SINGLE_WORD = 3; // Single words need more evidence
+const MAX_MINED_PHRASES = 30; // Increased from 20 to capture more variety
 
 function tokenize(text: string): string[] {
   return text
@@ -56,6 +59,7 @@ function extractNgrams(tokens: string[], n: number): string[] {
 /** Mines recurring 2-4 word phrases out of review excerpt text. Returns candidates tagged "review-language". */
 export function mineReviewLanguage(snippets: string[]): KeywordCandidate[] {
   const counts = new Map<string, number>();
+  const wordCounts = new Map<string, number>(); // Track word count per phrase
 
   for (const snippet of snippets) {
     if (snippet.length < MIN_SNIPPET_LENGTH) continue;
@@ -64,12 +68,18 @@ export function mineReviewLanguage(snippets: string[]): KeywordCandidate[] {
       for (const gram of extractNgrams(tokens, n)) {
         if (isGarbledText(gram) || isScrapedBoilerplate(gram)) continue;
         counts.set(gram, (counts.get(gram) ?? 0) + 1);
+        wordCounts.set(gram, n);
       }
     }
   }
 
   return Array.from(counts.entries())
-    .filter(([, count]) => count >= MIN_GRAM_OCCURRENCES)
+    .filter(([gram, count]) => {
+      const words = wordCounts.get(gram) ?? 2;
+      // Multi-word phrases (3-4 words) are kept with 1+ occurrences
+      // 2-word phrases need 2+ occurrences to avoid noise
+      return words >= 3 || count >= MIN_GRAM_OCCURRENCES_FOR_SINGLE_WORD;
+    })
     .sort((a, b) => b[1] - a[1])
     .slice(0, MAX_MINED_PHRASES)
     .map(([text]) => ({ text, sources: ["review-language" as const] }));

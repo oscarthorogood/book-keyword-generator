@@ -28,6 +28,7 @@ import {
   buildQnaCandidates,
   buildWikidataCandidates,
   buildWikipediaCandidates,
+  boostScoresByCompetitorQuality,
   collapseNearDuplicates,
   COMP_NAME_MAX_KEYWORDS,
   extractAsinCandidates,
@@ -624,7 +625,17 @@ export async function POST(req: NextRequest) {
     0,
     Math.round(RECOMMENDED_MAX_KEYWORDS * AI_SHORTLIST_MULTIPLIER)
   );
-  const compNamesShortlist = scoreAndTierBids(compNameCandidates, compNamesBid).slice(
+
+  // Boost comp-name keywords based on competitor book quality (bestseller
+  // status, ratings, review counts) — makes sure high-quality competitors
+  // are prioritized over unknowns.
+  const scoredCompNames = scoreAndTierBids(compNameCandidates, compNamesBid);
+  const qualityBoostedCompNames = boostScoresByCompetitorQuality(
+    scoredCompNames,
+    relatedCompetitors.competitors,
+    0.2 // Up to 20% score boost for keywords from bestsellers
+  );
+  const compNamesShortlist = qualityBoostedCompNames.slice(
     0,
     Math.round(COMP_NAME_MAX_KEYWORDS * AI_SHORTLIST_MULTIPLIER)
   );
