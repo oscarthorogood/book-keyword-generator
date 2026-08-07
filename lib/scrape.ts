@@ -246,6 +246,84 @@ export async function getGoogleAutocompleteKeywordSet(seedTerms: string[]): Prom
   return results.flat();
 }
 
+/**
+ * YouTube's search box uses the same unofficial Google suggest endpoint as
+ * getGoogleAutocompleteSuggestions, just scoped to YouTube via `ds=yt`. This
+ * surfaces how people search for book content on video (BookTok/BookTube
+ * reviews, "explained", "audiobook" style queries) — a different register
+ * than either the Amazon or plain Google suggest corpora.
+ */
+export async function getYoutubeAutocompleteSuggestions(seedTerm: string): Promise<KeywordCandidate[]> {
+  const url = `https://suggestqueries.google.com/complete/search?client=firefox&ds=yt&hl=en&q=${encodeURIComponent(
+    seedTerm
+  )}`;
+
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { headers: { "User-Agent": USER_AGENT, Accept: "application/json" } },
+      AUTOCOMPLETE_TIMEOUT_MS
+    );
+    if (!res.ok) return [];
+
+    const json = (await res.json()) as [string, string[]];
+    const suggestions = json?.[1] ?? [];
+
+    return suggestions
+      .map((s) => s?.trim().toLowerCase())
+      .filter((v): v is string => !!v)
+      .map((text) => ({ text, sources: ["youtube-autocomplete" as const] }));
+  } catch {
+    return [];
+  }
+}
+
+export async function getYoutubeAutocompleteKeywordSet(seedTerms: string[]): Promise<KeywordCandidate[]> {
+  const results = await mapWithConcurrency(
+    seedTerms.slice(0, MAX_GOOGLE_SUGGEST_SEEDS),
+    AUTOCOMPLETE_CONCURRENCY,
+    (term) => getYoutubeAutocompleteSuggestions(term)
+  );
+  return results.flat();
+}
+
+/**
+ * DuckDuckGo's own unofficial autocomplete endpoint — a third independent
+ * suggest corpus alongside Amazon's and Google's, free and keyless like the
+ * others. Returns `{ phrase: string }[]` rather than Google's `[query,
+ * [strings]]` shape.
+ */
+export async function getDuckDuckGoAutocompleteSuggestions(seedTerm: string): Promise<KeywordCandidate[]> {
+  const url = `https://ac.duckduckgo.com/ac/?q=${encodeURIComponent(seedTerm)}`;
+
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      { headers: { "User-Agent": USER_AGENT, Accept: "application/json" } },
+      AUTOCOMPLETE_TIMEOUT_MS
+    );
+    if (!res.ok) return [];
+
+    const json = (await res.json()) as { phrase?: string }[];
+
+    return json
+      .map((s) => s.phrase?.trim().toLowerCase())
+      .filter((v): v is string => !!v)
+      .map((text) => ({ text, sources: ["duckduckgo-autocomplete" as const] }));
+  } catch {
+    return [];
+  }
+}
+
+export async function getDuckDuckGoAutocompleteKeywordSet(seedTerms: string[]): Promise<KeywordCandidate[]> {
+  const results = await mapWithConcurrency(
+    seedTerms.slice(0, MAX_GOOGLE_SUGGEST_SEEDS),
+    AUTOCOMPLETE_CONCURRENCY,
+    (term) => getDuckDuckGoAutocompleteSuggestions(term)
+  );
+  return results.flat();
+}
+
 function extractIsbns($: cheerio.CheerioAPI): { isbn10?: string; isbn13?: string } {
   let isbn10: string | undefined;
   let isbn13: string | undefined;
@@ -270,6 +348,11 @@ const EMPTY_PRODUCT_PAGE: ProductPageData = {
   reviewSnippets: [],
   bulletPoints: [],
 };
+
+function resolveAmazonUrl(href: string, domain: string): string {
+  if (/^https?:\/\//i.test(href)) return href;
+  return `https://www.${domain}${href.startsWith("/") ? "" : "/"}${href}`;
+}
 
 /**
  * Amazon's product page often embeds a handful of top review excerpts
@@ -418,13 +501,22 @@ export async function scrapeProductPage(
     if (!title) {
       console.error(`${logPrefix} -> HTTP ${res.status}, page loaded but #productTitle not found (selector drift, or a partial/soft block)`);
     }
-    const author =
-      $("#bylineInfo .author a, .author a.contributorNameID")
-        .first()
-        .text()
-        .trim() || undefined;
+    const authorLink = $("#bylineInfo .author a, .author a.contributorNameID").first();
+    const author = authorLink.text().trim() || undefined;
+    const authorHref = authorLink.attr("href");
+    const authorUrl = authorHref ? resolveAmazonUrl(authorHref, AMAZON_DOMAINS[marketplace]) : undefined;
 
     const { isbn10, isbn13 } = extractIsbns($);
+
+    const descriptionText =
+      [
+        $("#bookDescription_feature_div").text(),
+        $("#productDescription").text(),
+        $("#editorialReviews_feature_div").text(),
+      ]
+        .map((t) => t.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+        .join(" ") || undefined;
 
     const compTitles = new Set<string>();
     const compAsins = new Set<string>();
@@ -480,6 +572,7 @@ export async function scrapeProductPage(
     return {
       title,
       author,
+      authorUrl,
       isbn10,
       isbn13,
       seriesName: extractSeriesName($),
@@ -565,4 +658,128 @@ export async function scrapeRelatedCompetitors(
     productTargetAsins: [...firstHopAsins, ...secondHopAsins],
     reviewSnippets,
   };
+}
+
+/**
+ * Scrapes the book's own "Customer questions & answers" page. Real reader
+ * questions are natural-language buyer phrases ("is this good for a 10 year
+ * old", "does this come with a case") that differ from both the review and
+ * autocomplete registers. This is a separate server-rendered page (not an
+ * AJAX-only widget), so it's scrapeable the same way as the product page
+ * itself, but the exact markup isn't verified against a live page from this
+ * environment — treat a miss as "no Q&A found," never a hard failure.
+ */
+export async function scrapeCustomerQnA(asin: string, marketplace: Marketplace): Promise<string[]> {
+  const domain = AMAZON_DOMAINS[marketplace];
+  const url = `https://www.${domain}/ask/questions/asin/${encodeURIComponent(asin)}/1`;
+
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      },
+      PAGE_TIMEOUT_MS
+    );
+    if (!res.ok) return [];
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const questions = new Set<string>();
+    $("[class*='question'] span, [class*='Question'] span, .askQuestionText").each((_, el) => {
+      const text = $(el).text().trim();
+      if (text.length > 5 && text.length < 300) questions.add(text);
+    });
+
+    return Array.from(questions).slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Scrapes the book's customer reviews page for review body text — "voice of
+ * the customer" phrasing that captures how actual readers describe the book,
+ * distinct from marketing copy or category taxonomy. Amazon sometimes serves
+ * review pages behind extra bot-detection compared to the product page
+ * itself; a block here just yields no candidates from this source, same
+ * degrade-to-empty pattern as the rest of this file.
+ */
+export async function scrapeCustomerReviews(asin: string, marketplace: Marketplace): Promise<string[]> {
+  const domain = AMAZON_DOMAINS[marketplace];
+  const url = `https://www.${domain}/product-reviews/${encodeURIComponent(asin)}`;
+
+  try {
+    const res = await fetchWithTimeout(
+      url,
+      {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      },
+      PAGE_TIMEOUT_MS
+    );
+    if (!res.ok) return [];
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const bodies: string[] = [];
+    $('[data-hook="review-body"]').each((_, el) => {
+      const text = $(el).text().replace(/\s+/g, " ").trim();
+      if (text) bodies.push(text);
+    });
+
+    return bodies.slice(0, 20);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Scrapes the author's Amazon page for their other book titles — a form of
+ * comp-title mining scoped to "readers of this author's other books," which
+ * is a stronger relevance signal than the general "customers also bought"
+ * carousel for series/backlist keywords. Best-effort like scrapeProductPage.
+ */
+export async function scrapeAuthorCatalog(authorUrl: string, excludeAsin: string): Promise<string[]> {
+  try {
+    const res = await fetchWithTimeout(
+      authorUrl,
+      {
+        headers: {
+          "User-Agent": USER_AGENT,
+          Accept: "text/html,application/xhtml+xml",
+          "Accept-Language": "en-US,en;q=0.9",
+        },
+      },
+      PAGE_TIMEOUT_MS
+    );
+    if (!res.ok) return [];
+
+    const html = await res.text();
+    const $ = cheerio.load(html);
+
+    const titles = new Set<string>();
+    $('a[href*="/dp/"]').each((_, el) => {
+      const href = $(el).attr("href") ?? "";
+      const asinMatch = href.match(/\/dp\/([A-Z0-9]{10})/i);
+      if (!asinMatch || asinMatch[1].toUpperCase() === excludeAsin.toUpperCase()) return;
+
+      const alt = $(el).find("img").attr("alt")?.trim();
+      const text = alt || $(el).text().trim();
+      if (text && text.length > 3) titles.add(text);
+    });
+
+    return Array.from(titles).slice(0, 15);
+  } catch {
+    return [];
+  }
 }

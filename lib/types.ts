@@ -55,9 +55,16 @@ export type KeywordSource =
   | "buyer-intent"
   | "book-content"
   | "google-autocomplete"
+  | "youtube-autocomplete"
+  | "duckduckgo-autocomplete"
   | "review-language"
   | "book-description"
+  | "customer-qna"
   | "synonym"
+  | "wikipedia"
+  | "wikidata"
+  | "loc-subjects"
+  | "author-catalog"
   | "goodreads-tags"
   | "user-tag"
   | "manual";
@@ -87,6 +94,7 @@ export interface BookMetadata {
 export interface ProductPageData {
   title?: string;
   author?: string;
+  authorUrl?: string; // absolute URL to the author's Amazon page, for author-catalog lookup
   isbn10?: string;
   isbn13?: string;
   seriesName?: string;

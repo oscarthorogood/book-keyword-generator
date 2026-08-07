@@ -1,4 +1,6 @@
 import { looksLikeAsin } from "./productTargets";
+import { expandSynonyms } from "./synonyms";
+import { extractKeyPhrases } from "./textExtract";
 import { BookMetadata, KeywordCandidate, KeywordSource, ProductPageData, RelatedCompetitor } from "./types";
 
 function normalize(text: string): string {
@@ -364,6 +366,106 @@ export function extractAsinCandidates(candidates: KeywordCandidate[]): {
   }
 
   return { keywords, asins };
+}
+
+/**
+ * Runs the local RAKE extractor (lib/textExtract.ts) over free-form scraped
+ * text and wraps the resulting phrases as candidates under `source`. Shared
+ * by the content-mining sources below since they differ only in where the
+ * raw text came from.
+ */
+function buildTextMiningCandidates(texts: string[], source: KeywordSource): KeywordCandidate[] {
+  const combined = texts.join(". ");
+  const phrases = extractKeyPhrases(combined, 20);
+  const usable = new Set<string>();
+  for (const phrase of phrases) {
+    const normalized = normalize(phrase);
+    if (isUsableKeyword(normalized)) usable.add(normalized);
+  }
+  return Array.from(usable).map((text) => ({ text, sources: [source] }));
+}
+
+/**
+ * RAKE-mines the raw description prose (as opposed to buildDescriptionCandidates,
+ * which only looks at explicit comp mentions and the feature bullets) for
+ * additional thematic phrases. Folded into the same "book-description"
+ * bucket rather than its own source.
+ */
+export function buildDescriptionPhraseCandidates(description: string | undefined): KeywordCandidate[] {
+  if (!description) return [];
+  return buildTextMiningCandidates([description], "book-description");
+}
+
+export function buildQnaCandidates(questions: string[]): KeywordCandidate[] {
+  return buildTextMiningCandidates(questions, "customer-qna");
+}
+
+/**
+ * Local, offline expansion of already-extracted genre terms into related
+ * buyer-search phrasing via the curated book-genre thesaurus in
+ * lib/synonyms.ts — a complementary signal to the Datamuse-based synonym
+ * expansion (lib/datamuse.ts), which the generate route merges into the
+ * same "synonym" bucket.
+ */
+export function buildCuratedSynonymCandidates(genreTerms: string[]): KeywordCandidate[] {
+  const expanded = expandSynonyms(genreTerms);
+  const texts = new Set<string>();
+  for (const term of expanded) {
+    const normalized = normalize(term);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["synonym" as const] }));
+}
+
+export function buildWikipediaCandidates(categories: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const category of categories) {
+    const normalized = normalize(category);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["wikipedia" as const] }));
+}
+
+export function buildWikidataCandidates(genres: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const genre of genres) {
+    const normalized = normalize(genre);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["wikidata" as const] }));
+}
+
+/**
+ * LCSH subject strings often chain subdivisions with " -- " (e.g. "Great
+ * Britain -- History -- Fiction"); split those into individual thematic
+ * terms the same way category strings are split above.
+ */
+export function buildLocCandidates(subjects: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const subject of subjects) {
+    for (const piece of subject.split(/--/)) {
+      const normalized = normalize(piece);
+      if (isUsableKeyword(normalized)) texts.add(normalized);
+    }
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["loc-subjects" as const] }));
+}
+
+/**
+ * The author's other book titles (lib/scrape.ts#scrapeAuthorCatalog) are a
+ * stronger-signal replacement for comp-title mining, so they're tagged
+ * "comp-name" for ad-group routing (see splitKeywordsByCategory) even though
+ * they're tracked as their own toggle/status under the "author-catalog" key
+ * in the generate route — the same mixed-tag pattern buildDescriptionCandidates
+ * uses for its comp-mention half.
+ */
+export function buildAuthorCatalogCandidates(titles: string[]): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const title of titles) {
+    const normalized = normalize(title);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["comp-name" as const] }));
 }
 
 /**

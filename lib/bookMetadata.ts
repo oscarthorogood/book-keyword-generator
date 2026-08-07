@@ -173,6 +173,138 @@ export async function lookupOpenLibrary(
   }
 }
 
+interface WikipediaSearchResult {
+  query?: { search?: { title?: string }[] };
+}
+interface WikipediaCategoriesResult {
+  query?: { pages?: Record<string, { categories?: { title?: string }[] }> };
+}
+
+// Wikipedia's own maintenance/administrative categories (article-quality
+// tags, citation-style tags, etc.) rather than actual subject matter — these
+// show up on nearly every article and would otherwise pollute every result.
+const WIKIPEDIA_NOISE_CATEGORY = /wikipedia|cs1|articles|pages|stub|dates|use \w+ english|short description|all\s/i;
+
+/**
+ * Wikipedia's free, keyless search + categories API. Looks up the closest
+ * matching article for the book title, then pulls that article's categories
+ * as thematic keyword candidates. Most indie/niche titles won't have a
+ * Wikipedia article at all — this is expected to come back empty far more
+ * often than the other sources, which is fine, it's zero-cost when it does.
+ */
+export async function lookupWikipediaCategories(title: string | undefined): Promise<string[]> {
+  if (!title) return [];
+
+  try {
+    const searchUrl = `https://en.wikipedia.org/w/api.php?action=query&list=search&format=json&srlimit=1&srsearch=${encodeURIComponent(
+      title
+    )}`;
+    const searchRes = await fetchWithTimeout(searchUrl);
+    if (!searchRes.ok) return [];
+    const searchJson = (await searchRes.json()) as WikipediaSearchResult;
+    const pageTitle = searchJson.query?.search?.[0]?.title;
+    if (!pageTitle) return [];
+
+    const catUrl = `https://en.wikipedia.org/w/api.php?action=query&prop=categories&format=json&cllimit=50&titles=${encodeURIComponent(
+      pageTitle
+    )}`;
+    const catRes = await fetchWithTimeout(catUrl);
+    if (!catRes.ok) return [];
+    const catJson = (await catRes.json()) as WikipediaCategoriesResult;
+
+    const categories: string[] = [];
+    for (const page of Object.values(catJson.query?.pages ?? {})) {
+      for (const category of page.categories ?? []) {
+        const name = category.title?.replace(/^Category:/, "");
+        if (name && !WIKIPEDIA_NOISE_CATEGORY.test(name)) categories.push(name);
+      }
+    }
+    return categories;
+  } catch {
+    return [];
+  }
+}
+
+interface WikidataSearchResult {
+  search?: { id?: string }[];
+}
+interface WikidataEntityResult {
+  entities?: Record<
+    string,
+    { claims?: Record<string, { mainsnak?: { datavalue?: { value?: { id?: string } } } }[]> }
+  >;
+}
+interface WikidataLabelsResult {
+  entities?: Record<string, { labels?: { en?: { value?: string } } }>;
+}
+
+const WIKIDATA_GENRE_PROPERTY = "P136";
+
+/**
+ * Wikidata's free, keyless API: searches for an entity matching the book
+ * title, reads its "genre" (P136) statements, then resolves those genre
+ * entity IDs to human-readable English labels. Three small requests instead
+ * of one — Wikidata claims store genre as a QID reference, not text, so a
+ * label lookup is required to get anything keyword-usable back.
+ */
+export async function lookupWikidataGenres(title: string | undefined): Promise<string[]> {
+  if (!title) return [];
+
+  try {
+    const searchUrl = `https://www.wikidata.org/w/api.php?action=wbsearchentities&format=json&language=en&type=item&limit=1&search=${encodeURIComponent(
+      title
+    )}`;
+    const searchRes = await fetchWithTimeout(searchUrl);
+    if (!searchRes.ok) return [];
+    const searchJson = (await searchRes.json()) as WikidataSearchResult;
+    const qid = searchJson.search?.[0]?.id;
+    if (!qid) return [];
+
+    const entityUrl = `https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`;
+    const entityRes = await fetchWithTimeout(entityUrl);
+    if (!entityRes.ok) return [];
+    const entityJson = (await entityRes.json()) as WikidataEntityResult;
+    const genreClaims = entityJson.entities?.[qid]?.claims?.[WIKIDATA_GENRE_PROPERTY] ?? [];
+    const genreQids = genreClaims
+      .map((claim) => claim.mainsnak?.datavalue?.value?.id)
+      .filter((v): v is string => !!v);
+    if (genreQids.length === 0) return [];
+
+    const labelsUrl = `https://www.wikidata.org/w/api.php?action=wbgetentities&format=json&props=labels&languages=en&ids=${genreQids.join(
+      "|"
+    )}`;
+    const labelsRes = await fetchWithTimeout(labelsUrl);
+    if (!labelsRes.ok) return [];
+    const labelsJson = (await labelsRes.json()) as WikidataLabelsResult;
+    return Object.values(labelsJson.entities ?? {})
+      .map((entity) => entity.labels?.en?.value)
+      .filter((v): v is string => !!v);
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * Library of Congress Subject Headings — free, keyless OpenSearch-style
+ * suggest endpoint (`[query, labels[], descriptions[], urls[]]`, the same
+ * response shape as most browser search-box suggest APIs). LCSH terms are a
+ * controlled vocabulary curated by librarians, a different (more formal)
+ * register than autocomplete or review-text sources.
+ */
+export async function lookupLocSubjects(term: string | undefined): Promise<string[]> {
+  if (!term) return [];
+
+  try {
+    const url = `https://id.loc.gov/authorities/subjects/suggest/?q=${encodeURIComponent(term)}`;
+    const res = await fetchWithTimeout(url);
+    if (!res.ok) return [];
+    const json = (await res.json()) as [string, string[], string[], string[]];
+    return json?.[1] ?? [];
+  } catch {
+    return [];
+  }
+}
+
 export async function enrichBookMetadata(params: {
   isbn10?: string;
   isbn13?: string;

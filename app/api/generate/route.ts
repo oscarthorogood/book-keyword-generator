@@ -2,20 +2,32 @@ import { NextRequest, NextResponse } from "next/server";
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
 import { isAiRankingConfigured, mergeAiRanking, rankKeywordsWithAi } from "@/lib/aiRanker";
 import { AD_GROUP_BID_MULTIPLIER, computeMaxCpc, round2 } from "@/lib/bidding";
-import { enrichBookMetadata } from "@/lib/bookMetadata";
+import {
+  enrichBookMetadata,
+  lookupLocSubjects,
+  lookupWikidataGenres,
+  lookupWikipediaCategories,
+} from "@/lib/bookMetadata";
 import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
 import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
 import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
 import {
+  buildAuthorCatalogCandidates,
   buildBookContentCandidates,
   buildBuyerIntentCandidates,
   buildCompNameCandidates,
   buildCompTitleCandidates,
+  buildCuratedSynonymCandidates,
   buildDescriptionCandidates,
+  buildDescriptionPhraseCandidates,
   buildGenreMetadataCandidates,
   buildKnownTagCandidates,
+  buildLocCandidates,
   buildManualKeywordCandidates,
+  buildQnaCandidates,
+  buildWikidataCandidates,
+  buildWikipediaCandidates,
   collapseNearDuplicates,
   COMP_NAME_MAX_KEYWORDS,
   extractAsinCandidates,
@@ -36,8 +48,13 @@ import { mineReviewLanguage } from "@/lib/reviewMining";
 import {
   buildAutocompleteSeeds,
   getAutocompleteKeywordSet,
+  getDuckDuckGoAutocompleteKeywordSet,
   getGoogleAutocompleteKeywordSet,
   getProductPageUrl,
+  getYoutubeAutocompleteKeywordSet,
+  scrapeAuthorCatalog,
+  scrapeCustomerQnA,
+  scrapeCustomerReviews,
   scrapeProductPage,
   scrapeRelatedCompetitors,
 } from "@/lib/scrape";
@@ -67,6 +84,8 @@ const ALL_KEYWORD_SOURCES: KeywordSource[] = [
   "ads-api",
   "autocomplete",
   "google-autocomplete",
+  "youtube-autocomplete",
+  "duckduckgo-autocomplete",
   "comp-title",
   "comp-name",
   "genre-metadata",
@@ -74,7 +93,12 @@ const ALL_KEYWORD_SOURCES: KeywordSource[] = [
   "book-content",
   "review-language",
   "book-description",
+  "customer-qna",
   "synonym",
+  "wikipedia",
+  "wikidata",
+  "loc-subjects",
+  "author-catalog",
   "goodreads-tags",
   "user-tag",
 ];
@@ -242,34 +266,58 @@ export async function POST(req: NextRequest) {
 
   const seedTerms = buildAutocompleteSeeds(request.bookTitle, request.authorName);
 
-  const [adsApiResult, autocompleteResult, googleAutocompleteResult, bookMetadata, relatedCompetitors, firecrawlMarkdown] =
-    await Promise.all([
-      isAdsApiConfigured()
-        ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
-            .then((candidates) => ({ candidates, error: undefined as string | undefined }))
-            .catch((err: Error) => ({ candidates: [] as KeywordCandidate[], error: err.message }))
-        : Promise.resolve({
-            candidates: [] as KeywordCandidate[],
-            error: "Amazon Ads API credentials not configured.",
-          }),
-      getAutocompleteKeywordSet(seedTerms, request.marketplace),
-      getGoogleAutocompleteKeywordSet(seedTerms),
-      enrichBookMetadata({
-        isbn10: productPage.isbn10,
-        isbn13: productPage.isbn13,
-        title: request.bookTitle,
-        author: request.authorName,
-      }),
-      // Deep "also bought" crawl (manual research blueprint, section 3) —
-      // goes a hop past the target book's own carousel to approximate the
-      // blueprint's best-seller deep dive, bounded for serverless time.
-      scrapeRelatedCompetitors(request.asin, productPage.compAsins, request.marketplace),
-      // Richer natural-language context for the AI ranking pass below — not
-      // used for structured extraction (see lib/firecrawl.ts).
-      isFirecrawlConfigured()
-        ? scrapeMarkdown(getProductPageUrl(request.asin, request.marketplace))
-        : Promise.resolve(undefined),
-    ]);
+  const [
+    adsApiResult,
+    autocompleteResult,
+    googleAutocompleteResult,
+    youtubeAutocompleteResult,
+    duckDuckGoAutocompleteResult,
+    bookMetadata,
+    relatedCompetitors,
+    firecrawlMarkdown,
+    qnaQuestions,
+    reviewBodies,
+    authorCatalogTitles,
+    wikipediaCategories,
+    wikidataGenres,
+    locSubjects,
+  ] = await Promise.all([
+    isAdsApiConfigured()
+      ? getAdsApiKeywordRecommendations(request.asin, request.marketplace)
+          .then((candidates) => ({ candidates, error: undefined as string | undefined }))
+          .catch((err: Error) => ({ candidates: [] as KeywordCandidate[], error: err.message }))
+      : Promise.resolve({
+          candidates: [] as KeywordCandidate[],
+          error: "Amazon Ads API credentials not configured.",
+        }),
+    getAutocompleteKeywordSet(seedTerms, request.marketplace),
+    getGoogleAutocompleteKeywordSet(seedTerms),
+    getYoutubeAutocompleteKeywordSet(seedTerms),
+    getDuckDuckGoAutocompleteKeywordSet(seedTerms),
+    enrichBookMetadata({
+      isbn10: productPage.isbn10,
+      isbn13: productPage.isbn13,
+      title: request.bookTitle,
+      author: request.authorName,
+    }),
+    // Deep "also bought" crawl (manual research blueprint, section 3) —
+    // goes a hop past the target book's own carousel to approximate the
+    // blueprint's best-seller deep dive, bounded for serverless time.
+    scrapeRelatedCompetitors(request.asin, productPage.compAsins, request.marketplace),
+    // Richer natural-language context for the AI ranking pass below — not
+    // used for structured extraction (see lib/firecrawl.ts).
+    isFirecrawlConfigured()
+      ? scrapeMarkdown(getProductPageUrl(request.asin, request.marketplace))
+      : Promise.resolve(undefined),
+    scrapeCustomerQnA(request.asin, request.marketplace),
+    scrapeCustomerReviews(request.asin, request.marketplace),
+    productPage.authorUrl
+      ? scrapeAuthorCatalog(productPage.authorUrl, request.asin)
+      : Promise.resolve([] as string[]),
+    lookupWikipediaCategories(request.bookTitle),
+    lookupWikidataGenres(request.bookTitle),
+    lookupLocSubjects(request.bookTitle),
+  ]);
 
   sourceStatuses.push({
     source: "ads-api",
@@ -286,6 +334,16 @@ export async function POST(req: NextRequest) {
     source: "google-autocomplete",
     ok: googleAutocompleteResult.length > 0,
     count: googleAutocompleteResult.length,
+  });
+  sourceStatuses.push({
+    source: "youtube-autocomplete",
+    ok: youtubeAutocompleteResult.length > 0,
+    count: youtubeAutocompleteResult.length,
+  });
+  sourceStatuses.push({
+    source: "duckduckgo-autocomplete",
+    ok: duckDuckGoAutocompleteResult.length > 0,
+    count: duckDuckGoAutocompleteResult.length,
   });
   sourceStatuses.push({
     source: "google-books",
@@ -319,6 +377,11 @@ export async function POST(req: NextRequest) {
   // name, high intent), their category placement is "comp-title" (thematic).
   const compTitleCandidates = buildCompTitleCandidates(productPage);
   const deepCompNameCandidates = buildCompNameCandidates(relatedCompetitors.competitors);
+  // The author's other books on Amazon — a stronger-signal replacement for a
+  // WorldCat lookup (its free API tier is discontinued). Tagged "comp-name"
+  // internally for ad-group routing, tracked under its own "author-catalog"
+  // toggle/status below.
+  const authorCatalogCandidates = buildAuthorCatalogCandidates(authorCatalogTitles);
   // Tags the user reviewed/kept on the Autofill book profile — high-trust,
   // human-vetted genre/subgenre/tag signal, folded into both the seed terms
   // below and the final candidate pool. See buildKnownTagCandidates.
@@ -330,25 +393,40 @@ export async function POST(req: NextRequest) {
     seriesName: request.seriesName,
   });
   // Publisher/author's own blurb — comp mentions ("perfect for fans of X")
-  // plus short marketing bullets, mixed comp-name/book-description tags.
-  const descriptionCandidates = buildDescriptionCandidates(productPage.description, productPage.bulletPoints);
-  // Pools review text across the seed book *and* every deep-crawled comp
-  // title, not just the seed book's own (often sparse) reviews.
+  // and short marketing bullets taken as-is, plus RAKE-mined phrases from the
+  // full description prose (buildDescriptionPhraseCandidates) for additional
+  // coverage the bullet/comp-mention extraction alone misses.
+  const descriptionCandidates = [
+    ...buildDescriptionCandidates(productPage.description, productPage.bulletPoints),
+    ...buildDescriptionPhraseCandidates(productPage.description),
+  ];
+  // Real reader Q&A phrasing — a natural-language buyer register distinct
+  // from both review text and autocomplete.
+  const qnaCandidates = buildQnaCandidates(qnaQuestions);
+  // Pools review text across the seed book's embedded snippets, every
+  // deep-crawled comp title, *and* the seed book's own dedicated reviews
+  // page (richer/fuller bodies than what's embedded on the product page).
   const reviewLanguageCandidates = mineReviewLanguage([
     ...productPage.reviewSnippets,
     ...relatedCompetitors.reviewSnippets,
+    ...reviewBodies,
   ]);
+  const wikipediaCandidates = buildWikipediaCandidates(wikipediaCategories);
+  const wikidataCandidates = buildWikidataCandidates(wikidataGenres);
+  const locCandidates = buildLocCandidates(locSubjects);
 
-  // Two more free, low-risk sources: Datamuse (a real API, no scraping risk)
-  // for synonym expansion of the genre/trope terms already found (now
-  // including user-curated tags), and a best-effort Goodreads lookup for
+  // More free, low-risk sources: Datamuse (a real API, no scraping risk) and
+  // a curated book-genre thesaurus (lib/synonyms.ts, fully offline) for
+  // synonym expansion of the genre/trope terms already found (now including
+  // user-curated tags), and a best-effort Goodreads lookup for
   // community-tagged tropes/genres — the richest free source of exact
   // fiction reader vocabulary, but a scrape with the same fragility/blocking
   // caveats as the Amazon ones above.
-  const [synonymCandidates, goodreadsTags] = await Promise.all([
+  const [datamuseSynonymCandidates, goodreadsTags] = await Promise.all([
     getSynonymExpansionCandidates(genreSeedTerms),
     getGoodreadsTags(productPage.isbn10, request.bookTitle, request.authorName),
   ]);
+  const synonymCandidates = [...datamuseSynonymCandidates, ...buildCuratedSynonymCandidates(genreSeedTerms)];
   const goodreadsTagCandidates = buildGoodreadsTagCandidates(goodreadsTags);
 
   sourceStatuses.push({
@@ -387,15 +465,49 @@ export async function POST(req: NextRequest) {
     count: reviewLanguageCandidates.length,
   });
   sourceStatuses.push({
+    source: "customer-qna",
+    ok: qnaCandidates.length > 0,
+    count: qnaCandidates.length,
+  });
+  sourceStatuses.push({
     source: "synonym",
     ok: synonymCandidates.length > 0,
     count: synonymCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "wikipedia",
+    ok: wikipediaCandidates.length > 0,
+    count: wikipediaCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "wikidata",
+    ok: wikidataCandidates.length > 0,
+    count: wikidataCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "loc-subjects",
+    ok: locCandidates.length > 0,
+    count: locCandidates.length,
+  });
+  sourceStatuses.push({
+    source: "author-catalog",
+    ok: authorCatalogCandidates.length > 0,
+    count: authorCatalogCandidates.length,
   });
   sourceStatuses.push({
     source: "goodreads-tags",
     ok: goodreadsTagCandidates.length > 0,
     count: goodreadsTagCandidates.length,
   });
+
+  // ASINs can leak into the newer autocomplete corpora the same way they do
+  // for Amazon/Google's — see the extractAsinCandidates call above.
+  const { keywords: youtubeAutocompleteKeywords, asins: youtubeAsins } = extractAsinCandidates(
+    youtubeAutocompleteResult
+  );
+  const { keywords: duckDuckGoAutocompleteKeywords, asins: duckDuckGoAsins } = extractAsinCandidates(
+    duckDuckGoAutocompleteResult
+  );
 
   // User-deselected sources still ran (they're entangled with data other
   // sources depend on — see the comment on ALL_KEYWORD_SOURCES), but their
@@ -406,15 +518,22 @@ export async function POST(req: NextRequest) {
     "ads-api": adsApiKeywords,
     autocomplete: autocompleteKeywords,
     "google-autocomplete": googleAutocompleteKeywords,
+    "youtube-autocomplete": youtubeAutocompleteKeywords,
+    "duckduckgo-autocomplete": duckDuckGoAutocompleteKeywords,
     "comp-title": compTitleCandidates,
     "comp-name": deepCompNameCandidates,
+    "author-catalog": authorCatalogCandidates,
     "user-tag": knownTagCandidates,
     "genre-metadata": genreMetadataCandidates,
     "book-content": bookContentCandidates,
     "buyer-intent": buyerIntentCandidates,
     "book-description": descriptionCandidates,
     "review-language": reviewLanguageCandidates,
+    "customer-qna": qnaCandidates,
     synonym: synonymCandidates,
+    wikipedia: wikipediaCandidates,
+    wikidata: wikidataCandidates,
+    "loc-subjects": locCandidates,
     "goodreads-tags": goodreadsTagCandidates,
   };
   for (const status of sourceStatuses) {
@@ -519,7 +638,10 @@ export async function POST(req: NextRequest) {
   const productTargets = mergeProductTargetCandidates(
     buildProductTargetCandidates(productPage.compAsins, "comp-title"),
     buildProductTargetCandidates(relatedCompetitors.productTargetAsins, "comp-title"),
-    buildProductTargetCandidates([...adsApiAsins, ...autocompleteAsins, ...googleAsins], "autocomplete"),
+    buildProductTargetCandidates(
+      [...adsApiAsins, ...autocompleteAsins, ...googleAsins, ...youtubeAsins, ...duckDuckGoAsins],
+      "autocomplete"
+    ),
     buildProductTargetCandidates(manualAsins, "manual")
   ).slice(0, PRODUCT_TARGET_MAX);
 
