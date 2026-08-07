@@ -130,46 +130,108 @@ export interface BookMetadata {
 }
 
 export interface ProductPageData {
+  // Basic identifiers
   title?: string;
   author?: string;
-  authorUrl?: string; // absolute URL to the author's Amazon page, for author-catalog lookup
+  authorUrl?: string;
   isbn10?: string;
   isbn13?: string;
   seriesName?: string;
-  /** Best-effort list price scrape, for prefilling the RRP field — not guaranteed to be the print RRP specifically. */
+
+  // Author intelligence
+  authorBio?: string;
+  authorImage?: string;
+  authorOtherBooks?: Array<{ title: string; asin?: string; categories?: string[] }>;
+  illustrator?: string;
+  narrator?: string; // for audiobooks
+
+  // Pricing & deals
   price?: number;
-  /** Book cover image URL */
+  originalPrice?: number;
+  discountPercentage?: number;
+  primeEligible?: boolean;
+  isDeal?: boolean;
+
+  // Format & edition information
+  format?: "Hardcover" | "Paperback" | "Kindle" | "Audiobook" | "Unknown";
+  edition?: string;
+  bindingType?: string;
+  formatVariants?: Array<{ format: string; price?: number; asin?: string }>;
+
+  // Images
   coverImageUrl?: string;
-  compTitles: string[]; // "customers also bought" style titles
-  /** Detailed competitor info for "customers also bought" with ratings */
+  authorImageUrl?: string;
+  previewImages?: string[];
+  customerImageCount?: number;
+  customerVideoCount?: number;
+
+  // Competitive & related products
+  compTitles: string[];
   compDetails?: Array<{ asin: string; title: string; author?: string; rating?: number; reviewCount?: number }>;
-  /** Q&A count for the book */
-  qaCount?: number;
-  /** Availability status (e.g., "In Stock", "Usually ships within 1-2 weeks") */
-  availability?: string;
-  categories: string[]; // browse node / bestseller category text (flat, deduped)
-  /** Ordered breadcrumb trail (e.g. ["Books", "Mystery, Thriller & Suspense", "Cozy", "Culinary"]) — genre/subgenre in Amazon's own hierarchy order. */
-  categoryPath: string[];
-  /** Best Sellers Rank entries with the actual rank number, not just the category name. */
-  bestSellerRanks: { rank: number; category: string }[];
-  compAsins: string[]; // ASINs of "customers also bought" titles, for the deep competitor crawl
-  reviewSnippets: string[]; // top-review excerpt text embedded on the page, for review-language mining
-  description?: string; // publisher/author blurb, for comp-mention + description mining
-  bulletPoints: string[]; // Amazon's "About this item" feature bullets
-  /** Customer rating (e.g. 4.5 out of 5) */
+  compAsins: string[];
+  frequentlyBoughtTogether?: Array<{ asin: string; title: string }>;
+  compareWithSimilar?: Array<{ asin: string; title: string }>;
+  seriesBooks?: Array<{ position?: number; title: string; asin?: string }>;
+
+  // Ratings & reviews
   rating?: number;
-  /** Number of customer reviews/ratings */
   reviewCount?: number;
-  /** Page count for printed books */
-  pageCount?: number;
-  /** Publisher name */
+  qaCount?: number;
+  ratingDistribution?: { stars: number; count: number }[];
+  verifiedPurchasePercentage?: number;
+
+  // Categories & rankings
+  categories: string[];
+  categoryPath: string[];
+  bestSellerRanks: { rank: number; category: string }[];
+  allCategoryRanks?: Array<{ category: string; rank: number; browseNode?: string }>;
+  amazonChoiceBadge?: boolean;
+  bestsellerBadge?: boolean;
+
+  // Content metadata
+  reviewSnippets: string[];
+  description?: string;
+  bulletPoints: string[];
+  tableOfContents?: string[];
+  wordCount?: number;
+  lexileLevel?: string;
+  ageRange?: string;
+  contentWarnings?: string[];
+  readingLevel?: string;
+
+  // Publication & physical
   publisher?: string;
-  /** Publication/release date */
   publicationDate?: string;
-  /** Language(s) */
+  copyrightYear?: number;
+  firstPublishedDate?: string;
+  pageCount?: number;
   language?: string;
-  /** Product dimensions or weight */
+  languages?: string[]; // multiple languages if applicable
   dimensions?: string;
+  weight?: string;
+
+  // Availability & status
+  availability?: string;
+  stockStatus?: "In Stock" | "Out of Stock" | "Pre-order" | "Unknown";
+  deliveryOptions?: string[];
+  hasLookInside?: boolean;
+  isPreOrder?: boolean;
+  preOrderDate?: string;
+
+  // Format availability
+  hasAudiobook?: boolean;
+  hasKindle?: boolean;
+  hasPhysical?: boolean;
+  hasHardcover?: boolean;
+  hasPaperback?: boolean;
+
+  // Awards & recognition
+  awards?: string[];
+  awardNominations?: string[];
+  goodreadsRating?: number;
+  goodreadsRatingCount?: number;
+
+  // Metadata
   /** HTTP status of the product page fetch, when one was made — for diagnosing scrape failures. */
   fetchStatus?: number;
   /** True when the response looked like an Amazon bot/CAPTCHA check rather than the real product page. */

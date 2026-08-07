@@ -324,6 +324,178 @@ export async function getDuckDuckGoAutocompleteKeywordSet(seedTerms: string[]): 
   return results.flat();
 }
 
+function extractAuthorBio($: cheerio.CheerioAPI): string | undefined {
+  const selectors = [
+    '.a-span-last .contribution [data-a-expander-name="book_description_expander"]',
+    '[data-a-expander-name="author_byline_expander"]',
+    '.a-container [data-a-expander-name="author"]',
+  ];
+
+  for (const selector of selectors) {
+    const text = $(selector).text().replace(/\s+/g, " ").trim();
+    if (text && text.length > 20) return text;
+  }
+  return undefined;
+}
+
+function extractAuthorImage($: cheerio.CheerioAPI): string | undefined {
+  const src = $("#bylineInfo img").attr("src");
+  return src || undefined;
+}
+
+function extractFormatVariants($: cheerio.CheerioAPI): Array<{ format: string; price?: number; asin?: string }> {
+  const formats: Array<{ format: string; price?: number; asin?: string }> = [];
+
+  // Look for format toggles (Kindle, Hardcover, Paperback, etc.)
+  $(".a-tabs-container [role='tab']").each((_, el) => {
+    const text = $(el).text().trim();
+    if (text && (text.includes("Kindle") || text.includes("Hardcover") || text.includes("Paperback") || text.includes("Audio"))) {
+      formats.push({ format: text });
+    }
+  });
+
+  return formats;
+}
+
+function extractEditionInfo($: cheerio.CheerioAPI): { edition?: string; bindingType?: string } {
+  const result: { edition?: string; bindingType?: string } = {};
+
+  $("#detailBulletsWrapper_feature_div li, #productDetails_detailBullets_sections1 tr").each((_, el) => {
+    const text = $(el).text().replace(/\s+/g, " ").trim();
+
+    if (/^Edition/.test(text)) {
+      const match = text.match(/Edition[^;]*[;:]?\s*([^;(]+)/i);
+      if (match) result.edition = match[1].trim();
+    }
+
+    if (/^Binding|Hardcover|Paperback|Board Book/.test(text)) {
+      const match = text.match(/(Hardcover|Paperback|Board Book|Leather Bound|Spiral-bound)/);
+      if (match) result.bindingType = match[1];
+    }
+  });
+
+  return result;
+}
+
+function extractWordCount($: cheerio.CheerioAPI): number | undefined {
+  const text = $("body").text();
+  const match = text.match(/(\d+(?:,\d{3})*)\s*words/i);
+  if (match) {
+    return parseInt(match[1].replace(/,/g, ""), 10);
+  }
+  return undefined;
+}
+
+function extractLexileLevel($: cheerio.CheerioAPI): string | undefined {
+  const text = $("#detailBulletsWrapper_feature_div, #productDetails_detailBullets_sections1").text();
+  const match = text.match(/Lexile[^:]*:\s*([\dL\-]+)/i);
+  return match ? match[1].trim() : undefined;
+}
+
+function extractAgeRange($: cheerio.CheerioAPI): string | undefined {
+  const text = $("#detailBulletsWrapper_feature_div, #productDetails_detailBullets_sections1").text();
+  const match = text.match(/(?:Ages?|Grade|Reading Level)[^:]*:\s*([^;]+)/i);
+  return match ? match[1].trim() : undefined;
+}
+
+function extractCopyrightYear($: cheerio.CheerioAPI): number | undefined {
+  const text = $("body").text();
+  const match = text.match(/©\s*(\d{4})/);
+  if (match) {
+    return parseInt(match[1], 10);
+  }
+  return undefined;
+}
+
+function extractRatingDistribution($: cheerio.CheerioAPI): Array<{ stars: number; count: number }> {
+  const distribution: Array<{ stars: number; count: number }> = [];
+
+  $('[data-star-count]').each((_, el) => {
+    const starText = $(el).attr("data-star-count");
+    const countText = $(el).closest('tr').find('a').text();
+
+    if (starText && countText) {
+      const stars = parseInt(starText, 10);
+      const count = parseInt(countText.replace(/[^0-9]/g, ''), 10);
+      if (Number.isFinite(stars) && Number.isFinite(count)) {
+        distribution.push({ stars, count });
+      }
+    }
+  });
+
+  return distribution;
+}
+
+function extractFrequentlyBoughtTogether($: cheerio.CheerioAPI): Array<{ asin: string; title: string }> {
+  const items: Array<{ asin: string; title: string }> = [];
+
+  $('[data-a-carousel-options*="frequently-bought-together"] a[href*="/dp/"]').each((_, el) => {
+    const href = $(el).attr("href") ?? "";
+    const asinMatch = href.match(/\/dp\/([A-Z0-9]{10})/i);
+    if (asinMatch) {
+      const title = $(el).find("img").attr("alt") || $(el).text().trim();
+      if (title) {
+        items.push({ asin: asinMatch[1].toUpperCase(), title });
+      }
+    }
+  });
+
+  return items.slice(0, 10);
+}
+
+function extractCompareWithSimilar($: cheerio.CheerioAPI): Array<{ asin: string; title: string }> {
+  const items: Array<{ asin: string; title: string }> = [];
+
+  $('[id*="compare"], [data-component-type="s-compare-side-by-side"] a[href*="/dp/"]').each((_, el) => {
+    const href = $(el).attr("href") ?? "";
+    const asinMatch = href.match(/\/dp\/([A-Z0-9]{10})/i);
+    if (asinMatch) {
+      const title = $(el).text().trim();
+      if (title) {
+        items.push({ asin: asinMatch[1].toUpperCase(), title });
+      }
+    }
+  });
+
+  return items.slice(0, 10);
+}
+
+function extractAwards($: cheerio.CheerioAPI): { awards: string[]; nominations: string[] } {
+  const awards: string[] = [];
+  const nominations: string[] = [];
+
+  $(".a-section .a-size-small, [data-a-badge-type*='award']").each((_, el) => {
+    const text = $(el).text().trim();
+    if (text && (text.includes("Award") || text.includes("Winner") || text.includes("Bestseller"))) {
+      if (text.includes("Nominated")) {
+        nominations.push(text);
+      } else {
+        awards.push(text);
+      }
+    }
+  });
+
+  return { awards, nominations };
+}
+
+function extractContentWarnings($: cheerio.CheerioAPI): string[] {
+  const warnings: string[] = [];
+
+  const text = $(".a-section").text().toLowerCase();
+  const warningKeywords = [
+    "violence", "graphic", "trigger", "warning", "mature", "adult content",
+    "sexual content", "abuse", "self-harm", "suicide", "dark"
+  ];
+
+  warningKeywords.forEach(keyword => {
+    if (text.includes(keyword)) {
+      warnings.push(keyword.charAt(0).toUpperCase() + keyword.slice(1));
+    }
+  });
+
+  return [...new Set(warnings)];
+}
+
 function extractIsbns($: cheerio.CheerioAPI): { isbn10?: string; isbn13?: string } {
   let isbn10: string | undefined;
   let isbn13: string | undefined;
@@ -348,6 +520,20 @@ const EMPTY_PRODUCT_PAGE: ProductPageData = {
   compAsins: [],
   reviewSnippets: [],
   bulletPoints: [],
+  authorOtherBooks: [],
+  formatVariants: [],
+  previewImages: [],
+  frequentlyBoughtTogether: [],
+  compareWithSimilar: [],
+  seriesBooks: [],
+  ratingDistribution: [],
+  allCategoryRanks: [],
+  tableOfContents: [],
+  contentWarnings: [],
+  languages: [],
+  deliveryOptions: [],
+  awards: [],
+  awardNominations: [],
 };
 
 function resolveAmazonUrl(href: string, domain: string): string {
@@ -511,6 +697,118 @@ function extractPrice($: cheerio.CheerioAPI): number | undefined {
     if (Number.isFinite(value)) return value;
   }
   return undefined;
+}
+
+function extractOriginalPrice($: cheerio.CheerioAPI): number | undefined {
+  const selectors = [
+    ".a-price.a-text-strike .a-offscreen",
+    "[data-a-strike='true'] .a-offscreen",
+    ".a-text-strike .a-offscreen",
+  ];
+
+  for (const selector of selectors) {
+    const text = $(selector).first().text().trim();
+    const match = text.match(/[\d,]+\.\d{2}/);
+    if (match) {
+      return parseFloat(match[0].replace(/,/g, ""));
+    }
+  }
+  return undefined;
+}
+
+function extractPrimeEligible($: cheerio.CheerioAPI): boolean {
+  const primeIndicators = $('[aria-label*="Prime"]').length > 0 ||
+                          $('[data-feature-name="prime"]').length > 0 ||
+                          $('[class*="prime"]').length > 0;
+  return primeIndicators;
+}
+
+function extractStockStatus($: cheerio.CheerioAPI): "In Stock" | "Out of Stock" | "Pre-order" | "Unknown" | undefined {
+  const availability = $("#availability span").text().trim();
+  if (availability.includes("Out of Stock")) return "Out of Stock";
+  if (availability.includes("In Stock")) return "In Stock";
+  if (availability.includes("Pre-order")) return "Pre-order";
+  return undefined;
+}
+
+function extractAmazonBadges($: cheerio.CheerioAPI): { amazonChoice: boolean; bestseller: boolean } {
+  const amazonChoice = $('[data-a-badge-type="standard"]').text().includes("Choice") ||
+                       $('[aria-label*="Amazon Choice"]').length > 0;
+  const bestseller = $('[aria-label*="Best"]').text().includes("Seller") ||
+                     $('[class*="best"]').text().includes("seller");
+  return { amazonChoice, bestseller };
+}
+
+function extractHasLookInside($: cheerio.CheerioAPI): boolean {
+  return $('[data-feature-name="look-inside"]').length > 0 ||
+         $("a:contains('Look inside')").length > 0;
+}
+
+function extractFormatFlags($: cheerio.CheerioAPI): {
+  hasAudiobook: boolean;
+  hasKindle: boolean;
+  hasPhysical: boolean;
+  hasHardcover: boolean;
+  hasPaperback: boolean;
+} {
+  const pageText = $("body").text().toLowerCase();
+  const hrefText = $("a").map((_, el) => $(el).attr("href") || "").get().join("");
+
+  return {
+    hasAudiobook: /audiobook|audible|narrated/i.test(hrefText + pageText),
+    hasKindle: /kindle|ebook/i.test(hrefText + pageText),
+    hasPhysical: /hardcover|paperback|print|physical/i.test(hrefText + pageText),
+    hasHardcover: /hardcover/i.test(hrefText + pageText),
+    hasPaperback: /paperback/i.test(hrefText + pageText),
+  };
+}
+
+function extractTableOfContents($: cheerio.CheerioAPI): string[] {
+  const toc: string[] = [];
+
+  $('[data-a-expander-name="table_of_contents"] li, .a-expander-content li').each((_, el) => {
+    const text = $(el).text().trim();
+    if (text && text.length > 2 && !text.includes("...")) {
+      toc.push(text);
+    }
+  });
+
+  return toc.slice(0, 30);
+}
+
+function extractLanguages($: cheerio.CheerioAPI): string[] {
+  const languages: string[] = [];
+
+  $("#detailBulletsWrapper_feature_div li, #productDetails_detailBullets_sections1 tr").each((_, el) => {
+    const text = $(el).text().replace(/\s+/g, " ").trim();
+    if (/^Language/.test(text)) {
+      const matches = text.match(/Language[^:]*[;:]?\s*([^;]+)/i);
+      if (matches) {
+        const langs = matches[1].split(/,|and/).map(l => l.trim());
+        languages.push(...langs.filter(l => l.length > 0));
+      }
+    }
+  });
+
+  return [...new Set(languages)];
+}
+
+function extractDiscountInfo($: cheerio.CheerioAPI): { originalPrice?: number; discountPercentage?: number } {
+  const result: { originalPrice?: number; discountPercentage?: number } = {};
+
+  const strikeText = $(".a-price.a-text-strike .a-offscreen").text();
+  if (strikeText) {
+    const match = strikeText.match(/[\d,]+\.\d{2}/);
+    if (match) result.originalPrice = parseFloat(match[0].replace(/,/g, ""));
+  }
+
+  const discountText = $(".savingsPercent").text();
+  if (discountText) {
+    const match = discountText.match(/(\d+)%/);
+    if (match) result.discountPercentage = parseInt(match[1], 10);
+  }
+
+  return result;
 }
 
 /** Book cover image URL — tries multiple selectors for different Amazon templates. */
@@ -709,34 +1007,89 @@ export async function scrapeProductPage(
     );
 
     const details = extractProductDetails($);
+    const { amazonChoice, bestseller } = extractAmazonBadges($);
+    const { hasAudiobook, hasKindle, hasPhysical, hasHardcover, hasPaperback } = extractFormatFlags($);
+    const { awards, nominations } = extractAwards($);
+    const { originalPrice, discountPercentage } = extractDiscountInfo($);
+    const editionInfo = extractEditionInfo($);
+    const languages = extractLanguages($);
 
     return {
       title,
       author,
       authorUrl,
+      authorBio: extractAuthorBio($),
+      authorImage: extractAuthorImage($),
+      authorOtherBooks: [],
+      illustrator: undefined,
+      narrator: hasAudiobook ? undefined : undefined,
       isbn10,
       isbn13,
       seriesName: extractSeriesName($),
       price: extractPrice($),
+      originalPrice,
+      discountPercentage,
+      primeEligible: extractPrimeEligible($),
+      isDeal: !!(discountPercentage && discountPercentage > 0),
+      format: undefined,
+      edition: editionInfo.edition,
+      bindingType: editionInfo.bindingType,
+      formatVariants: extractFormatVariants($),
       coverImageUrl: extractCoverImageUrl($),
+      authorImageUrl: extractAuthorImage($),
+      previewImages: [],
+      customerImageCount: undefined,
+      customerVideoCount: undefined,
       compTitles: Array.from(compTitles).slice(0, 15),
       compDetails: compDetails.slice(0, 15),
-      categories: Array.from(categories).slice(0, 15),
-      categoryPath,
-      bestSellerRanks: bestSellerRanks.slice(0, 10),
       compAsins: Array.from(compAsins).slice(0, 5),
-      reviewSnippets: extractReviewSnippets($),
-      description: extractDescription($),
-      bulletPoints: extractBulletPoints($),
+      frequentlyBoughtTogether: extractFrequentlyBoughtTogether($),
+      compareWithSimilar: extractCompareWithSimilar($),
+      seriesBooks: [],
       rating: extractRating($),
       reviewCount: extractReviewCount($),
       qaCount: extractQaCount($),
-      availability: extractAvailability($),
-      pageCount: details.pageCount,
+      ratingDistribution: extractRatingDistribution($),
+      verifiedPurchasePercentage: undefined,
+      categories: Array.from(categories).slice(0, 15),
+      categoryPath,
+      bestSellerRanks: bestSellerRanks.slice(0, 10),
+      allCategoryRanks: bestSellerRanks,
+      amazonChoiceBadge: amazonChoice,
+      bestsellerBadge: bestseller,
+      reviewSnippets: extractReviewSnippets($),
+      description: extractDescription($),
+      bulletPoints: extractBulletPoints($),
+      tableOfContents: extractTableOfContents($),
+      wordCount: extractWordCount($),
+      lexileLevel: extractLexileLevel($),
+      ageRange: extractAgeRange($),
+      contentWarnings: extractContentWarnings($),
+      readingLevel: extractLexileLevel($),
       publisher: details.publisher,
       publicationDate: details.publicationDate,
+      copyrightYear: extractCopyrightYear($),
+      firstPublishedDate: details.publicationDate,
+      pageCount: details.pageCount,
       language: details.language,
+      languages,
       dimensions: details.dimensions,
+      weight: undefined,
+      availability: extractAvailability($),
+      stockStatus: extractStockStatus($),
+      deliveryOptions: [],
+      hasLookInside: extractHasLookInside($),
+      isPreOrder: undefined,
+      preOrderDate: undefined,
+      hasAudiobook,
+      hasKindle,
+      hasPhysical,
+      hasHardcover,
+      hasPaperback,
+      awards,
+      awardNominations: nominations,
+      goodreadsRating: undefined,
+      goodreadsRatingCount: undefined,
       fetchStatus: res.status,
     };
   } catch (err) {
