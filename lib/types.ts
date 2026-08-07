@@ -44,6 +44,10 @@ export interface GenerateRequest extends CampaignIdentity {
   keywordTypes?: KeywordGroupType[];
   /** Free-typed keywords the user explicitly wants included — bypass scoring/caps, guaranteed a slot. See buildManualKeywordCandidates. */
   manualKeywords?: string[];
+  /** Which of the 20 keyword-intent categories to generate — see lib/keywordCategories.ts. Omitted = every category. */
+  keywordCategories?: KeywordCategory[];
+  /** User-supplied tropes/themes/settings (e.g. "grumpy billionaire", "enemies to lovers") — the app can't reliably scrape these, so they seed the character-trope/relationship-trope/plot-device/setting categories directly. See buildKeyTropeCandidates. */
+  keyTropes?: string[];
 }
 
 export type KeywordSource =
@@ -60,10 +64,42 @@ export type KeywordSource =
   | "synonym"
   | "goodreads-tags"
   | "user-tag"
-  | "manual";
+  | "manual"
+  | "key-trope";
 
 /** The three ad-group buckets a Manual campaign splits into — see the generate route and README "Campaign structure". */
 export type KeywordGroupType = "tropes" | "comp-names" | "product-targeting";
+
+/**
+ * The 20-category keyword-intent taxonomy — see lib/keywordCategories.ts for
+ * the human-readable labels/hints and the generation logic behind each one.
+ * Distinct from KeywordSource (which describes *where* a candidate came
+ * from — a scrape, an API, a user); this describes *what kind of keyword it
+ * is* semantically, and is only set on candidates the categorized generator
+ * produces (buyer-intent/autocomplete/etc. candidates are left uncategorized
+ * rather than guessed at).
+ */
+export type KeywordCategory =
+  | "core-genre"
+  | "sub-genre"
+  | "competing-authors"
+  | "comp-titles"
+  | "series-names"
+  | "character-tropes"
+  | "relationship-tropes"
+  | "plot-devices"
+  | "setting-aesthetic"
+  | "format"
+  | "age-demographic"
+  | "gift"
+  | "problem-solving"
+  | "skill-goal"
+  | "mood-tone"
+  | "award-bestseller"
+  | "time-period"
+  | "identity-cultural"
+  | "synonym-alt"
+  | "seasonal-holiday";
 
 export interface KeywordCandidate {
   text: string;
@@ -71,6 +107,8 @@ export interface KeywordCandidate {
   suggestedBid?: number;
   /** Relevance/confidence score used to tier bids and order the output. Not written to the Bulksheet. */
   score?: number;
+  /** Which of the 20 keyword-intent categories this came from, if the categorized generator produced it. */
+  category?: KeywordCategory;
 }
 
 export interface BookMetadata {

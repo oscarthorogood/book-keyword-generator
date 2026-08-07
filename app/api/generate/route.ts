@@ -25,6 +25,11 @@ import {
   scoreAndTierBids,
   splitKeywordsByCategory,
 } from "@/lib/keywordMerge";
+import {
+  ALL_KEYWORD_CATEGORIES,
+  buildCategorizedKeywordCandidates,
+  KEYWORD_CATEGORY_META,
+} from "@/lib/keywordCategories";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildAdGroupName, buildCampaignName } from "@/lib/naming";
 import {
@@ -45,6 +50,7 @@ import {
   BidEconomics,
   GenerateRequest,
   KeywordCandidate,
+  KeywordCategory,
   KeywordGroupType,
   KeywordSource,
   Marketplace,
@@ -178,6 +184,21 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
         .slice(0, 100)
     : [];
 
+  const keywordCategories: KeywordCategory[] = Array.isArray(b.keywordCategories)
+    ? (b.keywordCategories as unknown[]).filter(
+        (c): c is KeywordCategory =>
+          typeof c === "string" && ALL_KEYWORD_CATEGORIES.includes(c as KeywordCategory)
+      )
+    : ALL_KEYWORD_CATEGORIES;
+
+  const keyTropes = Array.isArray(b.keyTropes)
+    ? (b.keyTropes as unknown[])
+        .filter((t): t is string => typeof t === "string")
+        .map((t) => t.trim())
+        .filter(Boolean)
+        .slice(0, 50)
+    : [];
+
   return {
     value: {
       asin,
@@ -196,6 +217,8 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
       sources,
       keywordTypes,
       manualKeywords,
+      keywordCategories,
+      keyTropes,
     },
   };
 }
@@ -397,6 +420,24 @@ export async function POST(req: NextRequest) {
     count: goodreadsTagCandidates.length,
   });
 
+  // Build categorized keyword candidates from the 20-category semantic taxonomy.
+  const reviewLanguagePhrases = reviewLanguageCandidates.map((c) => c.text);
+  const categorizedCandidates = buildCategorizedKeywordCandidates({
+    title: request.bookTitle,
+    author: request.authorName,
+    seriesName: request.seriesName,
+    genreTerms: genreSeedTerms,
+    categoryPath: productPage.categoryPath,
+    competitors: relatedCompetitors.competitors,
+    compTitles: productPage.compTitles,
+    description: productPage.description,
+    bulletPoints: productPage.bulletPoints,
+    keyTropes: request.keyTropes ?? [],
+    goodreadsTags,
+    reviewLanguagePhrases,
+    enabledCategories: new Set(request.keywordCategories ?? ALL_KEYWORD_CATEGORIES),
+  });
+
   // User-deselected sources still ran (they're entangled with data other
   // sources depend on — see the comment on ALL_KEYWORD_SOURCES), but their
   // candidates are excluded from the merge below, and their status entry
@@ -440,9 +481,10 @@ export async function POST(req: NextRequest) {
   // buckets the research blueprint recommends tracking separately (section
   // 5) and score/cap each independently — a strong comp-author name
   // shouldn't lose its ad group slot to a flood of tropes candidates sharing
-  // one combined cap.
+  // one combined cap. Include categorized candidates alongside structured sources.
   const merged = mergeKeywordCandidates(
-    ...ALL_KEYWORD_SOURCES.filter((s) => enabledSources.has(s)).map((s) => sourceCandidateGroups[s] ?? [])
+    ...ALL_KEYWORD_SOURCES.filter((s) => enabledSources.has(s)).map((s) => sourceCandidateGroups[s] ?? []),
+    categorizedCandidates
   );
   const { tropes: tropesCandidates, compNames: compNameCandidates } = splitKeywordsByCategory(
     collapseNearDuplicates(merged)

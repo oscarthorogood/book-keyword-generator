@@ -3,7 +3,8 @@
 import { FormEvent, useMemo, useState } from "react";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildCampaignName } from "@/lib/naming";
-import type { KeywordGroupType, KeywordSource } from "@/lib/types";
+import { KEYWORD_CATEGORY_META } from "@/lib/keywordCategories";
+import type { KeywordCategory, KeywordGroupType, KeywordSource } from "@/lib/types";
 
 type MatchType = "broad" | "phrase" | "exact";
 
@@ -67,6 +68,11 @@ export default function Home() {
   const [selectedKeywordTypes, setSelectedKeywordTypes] = useState<KeywordGroupType[]>(
     KEYWORD_TYPES.map((t) => t.value)
   );
+  const [selectedKeywordCategories, setSelectedKeywordCategories] = useState<KeywordCategory[]>(
+    KEYWORD_CATEGORY_META.map((c) => c.value)
+  );
+  const [keyTropes, setKeyTropes] = useState<string[]>([]);
+  const [keyTropesInput, setKeyTropesInput] = useState("");
   const [manualKeywords, setManualKeywords] = useState<string[]>([]);
   const [manualKeywordInput, setManualKeywordInput] = useState("");
 
@@ -133,6 +139,24 @@ export default function Home() {
     setSelectedKeywordTypes((prev) =>
       prev.includes(value) ? prev.filter((t) => t !== value) : [...prev, value]
     );
+  }
+
+  function toggleKeywordCategory(value: KeywordCategory) {
+    setSelectedKeywordCategories((prev) =>
+      prev.includes(value) ? prev.filter((c) => c !== value) : [...prev, value]
+    );
+  }
+
+  function addKeyTrope() {
+    const trimmed = keyTropesInput.trim();
+    if (trimmed && !keyTropes.includes(trimmed)) {
+      setKeyTropes((prev) => [...prev, trimmed]);
+    }
+    setKeyTropesInput("");
+  }
+
+  function removeKeyTrope(trope: string) {
+    setKeyTropes((prev) => prev.filter((t) => t !== trope));
   }
 
   function addManualKeyword() {
@@ -229,6 +253,8 @@ export default function Home() {
         knownTags: profileTags,
         sources: selectedSources,
         keywordTypes: selectedKeywordTypes,
+        keywordCategories: selectedKeywordCategories,
+        keyTropes,
         manualKeywords,
       };
       if (useRrpBidding) {
@@ -388,10 +414,26 @@ export default function Home() {
 
                   <div className="space-y-3">
                     {profileCategoryPath.length > 0 && (
-                      <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
-                        <span className="font-semibold" style={{ color: "var(--ink)" }}>Category: </span>
-                        {profileCategoryPath.join(" › ")}
-                      </p>
+                      <>
+                        {profileCategoryPath.length > 1 && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Genre: </span>
+                            {profileCategoryPath[1] || "—"}
+                          </p>
+                        )}
+                        {profileCategoryPath.length > 2 && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Subgenre: </span>
+                            {profileCategoryPath.slice(2).join(" › ")}
+                          </p>
+                        )}
+                        {profileCategoryPath.length > 0 && (
+                          <p className="text-xs leading-relaxed" style={{ color: "var(--muted)" }}>
+                            <span className="font-semibold" style={{ color: "var(--ink)" }}>Full Path: </span>
+                            {profileCategoryPath.join(" › ")}
+                          </p>
+                        )}
+                      </>
                     )}
 
                     {profileBestSellerRanks.length > 0 && (
@@ -719,6 +761,67 @@ export default function Home() {
                       {label}
                     </label>
                   ))}
+                </div>
+              </div>
+
+              <div className="card">
+                <p className="card-title mb-4">Keyword Categories</p>
+                <p className="field-hint mb-3" style={{ marginTop: 0 }}>
+                  20-category semantic taxonomy describing what kind of keyword each is
+                  (genre, trope, mood, gift-intent, etc.). All are enabled by default;
+                  deselect categories you don&apos;t want generating candidates.
+                </p>
+                <div className="flex flex-wrap gap-2">
+                  {KEYWORD_CATEGORY_META.map(({ value, label }) => (
+                    <label key={value} className="chip-toggle">
+                      <input
+                        type="checkbox"
+                        checked={selectedKeywordCategories.includes(value)}
+                        onChange={() => toggleKeywordCategory(value)}
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              <div className="card">
+                <p className="card-title mb-4">Key Tropes & Themes (optional)</p>
+                <p className="field-hint mb-3" style={{ marginTop: 0 }}>
+                  Main character archetypes, relationship dynamics, plot devices, or settings
+                  in your book (e.g., &quot;grumpy billionaire&quot;, &quot;enemies to lovers&quot;). These are high-trust
+                  signals the app can&apos;t reliably scrape, so you supply them directly to seed
+                  character/relationship/plot/setting category generation.
+                </p>
+                <div className="flex flex-wrap gap-1.5 mb-3">
+                  {keyTropes.map((trope) => (
+                    <button
+                      key={trope}
+                      type="button"
+                      onClick={() => removeKeyTrope(trope)}
+                      title="Remove trope"
+                      className="chip-tag"
+                    >
+                      {trope} ×
+                    </button>
+                  ))}
+                </div>
+                <div className="flex gap-2">
+                  <input
+                    value={keyTropesInput}
+                    onChange={(e) => setKeyTropesInput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        addKeyTrope();
+                      }
+                    }}
+                    placeholder="e.g., grumpy billionaire, slow burn romance"
+                    className="input"
+                  />
+                  <button type="button" onClick={addKeyTrope} className="btn-pill-outline shrink-0">
+                    Add
+                  </button>
                 </div>
               </div>
 
