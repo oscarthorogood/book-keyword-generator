@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { enrichBookMetadata } from "./bookMetadata";
 import { normalizeAsinOrIsbn } from "./isbn";
+import { fetchAmazonProductViaSerpApi, isSerpApiConfigured } from "./serpApi";
 
 const USER_AGENT =
   "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
@@ -228,7 +229,32 @@ export async function fetchAmazonBookMetadata(
   const isIsbn10 = /^\d{10}$/.test(normalized);
   const isIsbn13 = /^\d{13}$/.test(normalized);
 
-  const amazonData: Partial<AmazonBookData> = await scrapeAmazonBook(normalized, marketplace);
+  // Amazon CAPTCHAs/blocks product-page requests from cloud/datacenter IPs
+  // (the classic "autofill silently comes back empty" symptom), so prefer
+  // SerpApi's Amazon Product API when configured — it fetches server-side
+  // on SerpApi's own infrastructure and hands back structured JSON instead
+  // of an HTML page that might be a bot-check interstitial. Only fall back
+  // to the direct scrape when SerpApi isn't configured or came back empty.
+  let amazonData: Partial<AmazonBookData> = { asin: normalized };
+  if (isSerpApiConfigured()) {
+    const serpResult = await fetchAmazonProductViaSerpApi(normalized, marketplace);
+    if (serpResult) {
+      amazonData = { asin: normalized, ...serpResult };
+    }
+  }
+  if (!amazonData.title) {
+    const scraped = await scrapeAmazonBook(normalized, marketplace);
+    // Keep any fields SerpApi already found; only fill in gaps from the
+    // scrape. A plain object spread would let SerpApi's explicit
+    // `undefined`s stomp real scraped values, so merge field-by-field.
+    const merged: Partial<AmazonBookData> = { ...scraped, asin: normalized };
+    for (const [key, value] of Object.entries(amazonData)) {
+      if (value !== undefined && value !== null) {
+        (merged as Record<string, unknown>)[key] = value;
+      }
+    }
+    amazonData = merged;
+  }
 
   // Enrich with metadata from other sources
   // For ISBNs, this will lookup Google Books/Open Library using the ISBN
