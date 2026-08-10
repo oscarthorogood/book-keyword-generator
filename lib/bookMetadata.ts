@@ -138,7 +138,17 @@ export async function lookupOpenLibrary(
   isbn: string | undefined,
   title: string | undefined,
   author: string | undefined
-): Promise<{ subjects: string[] }> {
+): Promise<{
+  subjects: string[];
+  title?: string;
+  author?: string;
+  description?: string;
+  isbn10?: string;
+  isbn13?: string;
+  publisherName?: string;
+  publishDate?: string;
+  pageCount?: number;
+}> {
   const userAgent = "amazon-ads-assistant/0.1 (single-user internal tool)";
 
   try {
@@ -151,19 +161,50 @@ export async function lookupOpenLibrary(
         const json = (await res.json()) as Record<string, OpenLibraryBookEntry>;
         const entry = json[`ISBN:${isbn}`];
         const subjects = entry?.subjects?.map((s) => s.name) ?? [];
-        if (subjects.length > 0) return { subjects };
+        if (entry) {
+          return {
+            subjects,
+            title: entry.title,
+            author: entry.authors?.[0]?.name,
+            description: entry.description,
+            isbn10: entry.isbn_10?.[0],
+            isbn13: entry.isbn_13?.[0],
+            publisherName: entry.publishers?.[0]?.name,
+            publishDate: entry.publish_date,
+            pageCount: entry.number_of_pages,
+          };
+        }
       }
     }
 
     if (title) {
       const searchUrl = `https://openlibrary.org/search.json?title=${encodeURIComponent(
         title
-      )}${author ? `&author=${encodeURIComponent(author)}` : ""}&limit=1&fields=subject`;
+      )}${author ? `&author=${encodeURIComponent(author)}` : ""}&limit=1&fields=subject,author_name,isbn,publisher,first_publish_year,page_count`;
       const res = await fetchWithTimeout(searchUrl, { headers: { "User-Agent": userAgent } });
       if (res.ok) {
-        const json = (await res.json()) as { docs?: { subject?: string[] }[] };
-        const subjects = json.docs?.[0]?.subject ?? [];
-        return { subjects };
+        const json = (await res.json()) as {
+          docs?: Array<{
+            title?: string;
+            author_name?: string[];
+            subject?: string[];
+            isbn?: string[];
+            publisher?: string[];
+            first_publish_year?: number;
+            page_count?: number;
+          }>;
+        };
+        const doc = json.docs?.[0];
+        if (doc) {
+          return {
+            subjects: doc.subject ?? [],
+            title: doc.title,
+            author: doc.author_name?.[0],
+            isbn10: doc.isbn?.[0],
+            publisherName: doc.publisher?.[0],
+            pageCount: doc.page_count,
+          };
+        }
       }
     }
 
@@ -321,13 +362,16 @@ export async function enrichBookMetadata(params: {
   ]);
 
   return {
-    title: params.title,
-    author: params.author,
-    isbn10: params.isbn10,
-    isbn13: params.isbn13,
-    description: googleBooks.description,
+    title: params.title || openLibrary.title,
+    author: params.author || openLibrary.author,
+    isbn10: params.isbn10 || openLibrary.isbn10,
+    isbn13: params.isbn13 || openLibrary.isbn13,
+    description: googleBooks.description || openLibrary.description,
     categories: googleBooks.categories,
     subjects: openLibrary.subjects,
     commonTerms,
+    publisher: openLibrary.publisherName,
+    publicationDate: openLibrary.publishDate?.toString(),
+    pageCount: openLibrary.pageCount,
   };
 }
