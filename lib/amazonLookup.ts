@@ -242,7 +242,7 @@ export async function fetchAmazonBookMetadata(
     author: amazonData.author,
   });
 
-  // Merge enrichment data
+  // Merge enrichment data - Open Library is used as fallback when Amazon fails
   const result: AmazonBookData = {
     asin: normalized,
     title: amazonData.title || enrichment.title || "Unknown Title",
@@ -253,9 +253,9 @@ export async function fetchAmazonBookMetadata(
     description: amazonData.description || enrichment.description,
     isbn10: amazonData.isbn10 || enrichment.isbn10,
     isbn13: amazonData.isbn13 || enrichment.isbn13,
-    publisher: amazonData.publisher,
-    publicationDate: amazonData.publicationDate,
-    pageCount: amazonData.pageCount,
+    publisher: amazonData.publisher || (enrichment.publisher as any),
+    publicationDate: amazonData.publicationDate || (enrichment.publicationDate as any),
+    pageCount: amazonData.pageCount || (enrichment.pageCount as any),
     language: amazonData.language,
     dimensions: amazonData.dimensions,
     categoryPath: amazonData.categoryPath,
