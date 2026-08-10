@@ -31,6 +31,7 @@ import { logFieldCoverage, normalizeListingText, validateListingRecord, type Lis
 import { crawlAmazonViaSerpApi, isSerpApiConfigured } from "./serpApi";
 import {
   buildSeedsFromMetadata,
+  EMPTY_PRODUCT_PAGE,
   getProductPageUrl,
   scrapeAuthorCatalog,
   scrapeCustomerQnA,
@@ -126,6 +127,8 @@ export interface BookSnapshot {
   capture: {
     ok: boolean;
     blocked: boolean;
+    /** True when the capture spent its whole time budget and gave up on the rest. */
+    timedOut: boolean;
     fetchStatus?: number;
     /** Which fetch paths actually produced the book's identity. */
     providers: Array<"amazon-page" | "firecrawl">;
@@ -147,15 +150,63 @@ export function isUsableSnapshot(value: unknown): value is BookSnapshot {
 }
 
 /**
- * Resolves to `fallback` instead of hanging the whole capture when one
- * best-effort source is slow. Each underlying fetch has its own timeout, but
- * the comp crawl chains several of them, so the outer bound matters.
+ * How long the whole capture may take, end to end.
+ *
+ * This is the number that keeps "add a book" from failing outright. The
+ * capture runs inside one serverless invocation with a hard platform ceiling
+ * (`maxDuration` on the route, 60s), and per-source timeouts alone don't
+ * bound it: the capture runs in phases, so the slowest source in each phase
+ * adds to the slowest source in the last one, and the total sailed past 60s
+ * whenever Amazon was slow — the function was killed mid-flight and the
+ * caller got a 504 with no book saved and no explanation. Budgeting the whole
+ * capture instead means a slow read costs metadata, not the book.
  */
-async function withBudget<T>(promise: Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
+export const DEFAULT_CAPTURE_BUDGET_MS = 45000;
+
+export interface CaptureDeadline {
+  /** Milliseconds left in the budget; never negative. */
+  remaining(): number;
+  /** `cap`, or the rest of the budget when less than `cap` is left. */
+  allow(cap: number): number;
+  expired(): boolean;
+}
+
+/** A deadline `budgetMs` from now. `now` is injectable for tests. */
+export function createCaptureDeadline(budgetMs: number, now: () => number = Date.now): CaptureDeadline {
+  const endsAt = now() + budgetMs;
+  const remaining = () => Math.max(0, endsAt - now());
+  return {
+    remaining,
+    allow: (cap: number) => Math.min(cap, remaining()),
+    expired: () => remaining() <= 0,
+  };
+}
+
+/**
+ * Runs one best-effort source under a time bound, resolving to `fallback`
+ * instead of hanging (or failing) the whole capture.
+ *
+ * Takes a factory rather than a promise so that a source whose budget is
+ * already gone is never *started* — by the last phase the deadline is often
+ * spent, and firing requests whose results can't be waited for just burns
+ * API credits and rate-limit budget. A rejection lands on `fallback` too:
+ * every source here is optional, and none of them should be able to take the
+ * book down with it.
+ */
+async function withBudget<T>(start: () => Promise<T>, ms: number, fallback: T, label: string): Promise<T> {
+  if (ms <= 0) {
+    console.warn(`[captureBookSnapshot] skipped ${label} — capture budget already spent`);
+    return fallback;
+  }
+
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
+    const work = start();
+    // The race below leaves the rejection unobserved when the timeout wins,
+    // which Node reports as an unhandled rejection; this observes it.
+    work.catch(() => {});
     return await Promise.race([
-      promise,
+      work,
       new Promise<T>((resolve) => {
         timer = setTimeout(() => {
           console.warn(`[captureBookSnapshot] ${label} exceeded ${ms}ms budget — continuing without it`);
@@ -163,6 +214,9 @@ async function withBudget<T>(promise: Promise<T>, ms: number, fallback: T, label
         }, ms);
       }),
     ]);
+  } catch (err) {
+    console.error(`[captureBookSnapshot] ${label} failed:`, err instanceof Error ? err.message : err);
+    return fallback;
   } finally {
     if (timer) clearTimeout(timer);
   }
@@ -183,27 +237,39 @@ function dedupe(values: (string | undefined)[], limit: number): string[] {
   return out;
 }
 
-// Budgets are sized so the two sequential phases (page read, then everything
-// that depends on it) fit inside the route's 60s ceiling with headroom:
-// ~25s for the slowest reader, then ~18s for the slowest dependent source.
+// Per-source caps. Each one is also clamped to whatever is left of the
+// overall capture budget (see DEFAULT_CAPTURE_BUDGET_MS), so these size a
+// single slow source rather than the capture as a whole.
 const COMP_CRAWL_BUDGET_MS = 18000;
 const SOURCE_BUDGET_MS = 12000;
 // Firecrawl renders the page before extracting, so it's the slowest single
 // source — but it runs alongside the direct scrape, not after it.
 const FIRECRAWL_BUDGET_MS = 25000;
+// The product page is the one source the book's identity comes from, so it
+// gets the widest cap of the first phase — but it does get one. It chains a
+// proxied fetch and (when that is bot-checked) a SerpApi lookup, and left
+// unbounded it was what pushed the capture past the platform ceiling.
+const PRODUCT_PAGE_BUDGET_MS = 26000;
+// The SerpApi comp crawl runs after everything else, and only when the direct
+// crawl found nothing. Below this much remaining budget it can't finish, and
+// starting it would spend search credits on a result nobody waits for.
+const SERPAPI_CRAWL_MIN_REMAINING_MS = 8000;
 // Enough page text for the AI relevance pass without bloating the book row.
 const MAX_MARKDOWN_CHARS = 8000;
 
 /**
  * One ASIN in, one complete snapshot out. Never throws for a source that
- * fails — a blocked or partial scrape still produces a usable book, flagged
- * via `capture` so the UI can offer a re-fetch.
+ * fails, and never runs longer than `budgetMs` — a blocked, partial or
+ * timed-out scrape still produces a usable book, flagged via `capture` so the
+ * UI can offer a re-fetch.
  */
 export async function captureBookSnapshot(
   asin: string,
-  marketplace: Marketplace
+  marketplace: Marketplace,
+  options: { budgetMs?: number } = {}
 ): Promise<BookSnapshot> {
   const startedAt = Date.now();
+  const deadline = createCaptureDeadline(options.budgetMs ?? DEFAULT_CAPTURE_BUDGET_MS);
   const productUrl = getProductPageUrl(asin, marketplace);
 
   // Two independent reads of the same page, run together:
@@ -218,12 +284,27 @@ export async function captureBookSnapshot(
     AmazonPageMetadata,
     string | undefined,
   ] = await Promise.all([
-    scrapeProductPage(asin, marketplace),
+    withBudget(
+      () => scrapeProductPage(asin, marketplace),
+      deadline.allow(PRODUCT_PAGE_BUDGET_MS),
+      EMPTY_PRODUCT_PAGE,
+      "product page"
+    ),
     isFirecrawlConfigured()
-      ? withBudget(extractAmazonMetadata(productUrl), FIRECRAWL_BUDGET_MS, {}, "firecrawl extraction")
+      ? withBudget(
+          () => extractAmazonMetadata(productUrl, deadline.allow(FIRECRAWL_BUDGET_MS)),
+          deadline.allow(FIRECRAWL_BUDGET_MS),
+          {} as AmazonPageMetadata,
+          "firecrawl extraction"
+        )
       : Promise.resolve({} as AmazonPageMetadata),
     isFirecrawlConfigured()
-      ? withBudget(scrapeMarkdown(productUrl), FIRECRAWL_BUDGET_MS, undefined, "firecrawl markdown")
+      ? withBudget(
+          () => scrapeMarkdown(productUrl, deadline.allow(FIRECRAWL_BUDGET_MS)),
+          deadline.allow(FIRECRAWL_BUDGET_MS),
+          undefined,
+          "firecrawl markdown"
+        )
       : Promise.resolve(undefined),
   ]);
 
@@ -233,6 +314,7 @@ export async function captureBookSnapshot(
   const resolvedAuthor = productPage.author || firecrawl.author;
   const resolvedIsbn10 = productPage.isbn10 || firecrawl.isbn10;
   const resolvedIsbn13 = productPage.isbn13 || firecrawl.isbn13;
+  const authorUrl = productPage.authorUrl;
 
   const [
     externalMetadata,
@@ -246,33 +328,44 @@ export async function captureBookSnapshot(
     goodreadsTags,
   ] = await Promise.all([
     withBudget(
-      enrichBookMetadata({
-        isbn10: resolvedIsbn10,
-        isbn13: resolvedIsbn13,
-        title: resolvedTitle,
-        author: resolvedAuthor,
-      }),
-      SOURCE_BUDGET_MS,
+      () =>
+        enrichBookMetadata({
+          isbn10: resolvedIsbn10,
+          isbn13: resolvedIsbn13,
+          title: resolvedTitle,
+          author: resolvedAuthor,
+        }),
+      deadline.allow(SOURCE_BUDGET_MS),
       { categories: [], subjects: [], commonTerms: [] },
       "google-books/open-library"
     ),
     withBudget(
-      scrapeRelatedCompetitors(asin, productPage.compAsins, marketplace),
-      COMP_CRAWL_BUDGET_MS,
+      () => scrapeRelatedCompetitors(asin, productPage.compAsins, marketplace),
+      deadline.allow(COMP_CRAWL_BUDGET_MS),
       { categories: [], competitors: [], productTargetAsins: [], reviewSnippets: [] },
       "competitor crawl"
     ),
-    withBudget(scrapeCustomerQnA(asin, marketplace), SOURCE_BUDGET_MS, [] as string[], "customer Q&A"),
-    withBudget(scrapeCustomerReviews(asin, marketplace), SOURCE_BUDGET_MS, [] as string[], "customer reviews"),
-    productPage.authorUrl
-      ? withBudget(scrapeAuthorCatalog(productPage.authorUrl, asin), SOURCE_BUDGET_MS, [] as string[], "author catalog")
-      : Promise.resolve([] as string[]),
-    withBudget(lookupWikipediaCategories(resolvedTitle), SOURCE_BUDGET_MS, [] as string[], "wikipedia"),
-    withBudget(lookupWikidataGenres(resolvedTitle), SOURCE_BUDGET_MS, [] as string[], "wikidata"),
-    withBudget(lookupLocSubjects(resolvedTitle), SOURCE_BUDGET_MS, [] as string[], "loc subjects"),
+    withBudget(() => scrapeCustomerQnA(asin, marketplace), deadline.allow(SOURCE_BUDGET_MS), [] as string[], "customer Q&A"),
     withBudget(
-      getGoodreadsTags(resolvedIsbn10, resolvedTitle, resolvedAuthor),
-      SOURCE_BUDGET_MS,
+      () => scrapeCustomerReviews(asin, marketplace),
+      deadline.allow(SOURCE_BUDGET_MS),
+      [] as string[],
+      "customer reviews"
+    ),
+    authorUrl
+      ? withBudget(
+          () => scrapeAuthorCatalog(authorUrl, asin),
+          deadline.allow(SOURCE_BUDGET_MS),
+          [] as string[],
+          "author catalog"
+        )
+      : Promise.resolve([] as string[]),
+    withBudget(() => lookupWikipediaCategories(resolvedTitle), deadline.allow(SOURCE_BUDGET_MS), [] as string[], "wikipedia"),
+    withBudget(() => lookupWikidataGenres(resolvedTitle), deadline.allow(SOURCE_BUDGET_MS), [] as string[], "wikidata"),
+    withBudget(() => lookupLocSubjects(resolvedTitle), deadline.allow(SOURCE_BUDGET_MS), [] as string[], "loc subjects"),
+    withBudget(
+      () => getGoodreadsTags(resolvedIsbn10, resolvedTitle, resolvedAuthor),
+      deadline.allow(SOURCE_BUDGET_MS),
       [] as string[],
       "goodreads"
     ),
@@ -320,16 +413,22 @@ export async function captureBookSnapshot(
   // When the direct crawl found no comparable titles — the usual outcome of
   // a bot-checked page — SerpApi's snowball crawl reads the same carousels
   // from its own infrastructure. Credit-budgeted, and skipped entirely when
-  // the direct crawl already worked or no key is configured.
-  if (competitors.length === 0 && isSerpApiConfigured() && title) {
+  // the direct crawl already worked, no key is configured, or the capture has
+  // run late enough that this last phase can't finish inside its budget.
+  if (
+    competitors.length === 0 &&
+    isSerpApiConfigured() &&
+    title &&
+    deadline.remaining() >= SERPAPI_CRAWL_MIN_REMAINING_MS
+  ) {
     // Seeded with the deepest (most specific) category node rather than the
     // title: searching a title returns the book itself, searching its
     // subgenre returns the shelf it competes on.
     const categorySeeds = [...productPage.categoryPath, ...(firecrawl.categories ?? [])].slice(-2).reverse();
     const seeds = [...categorySeeds, title].filter((seed): seed is string => !!seed);
     const crawl = await withBudget(
-      crawlAmazonViaSerpApi(seeds, marketplace, { maxHops: 1, creditBudget: 6 }),
-      COMP_CRAWL_BUDGET_MS,
+      () => crawlAmazonViaSerpApi(seeds, marketplace, { maxHops: 1, creditBudget: 6 }),
+      deadline.allow(COMP_CRAWL_BUDGET_MS),
       { phrases: [], asins: [], competitors: [], creditsUsed: 0 },
       "serpapi comp crawl"
     );
@@ -494,6 +593,7 @@ export async function captureBookSnapshot(
       // the direct scrape was bot-checked.
       ok: !!title,
       blocked: !!productPage.blocked && !firecrawl.title,
+      timedOut: deadline.expired(),
       fetchStatus: productPage.fetchStatus,
       providers,
       emptySources,
@@ -554,6 +654,11 @@ export function describeCapture(snapshot: BookSnapshot): string | undefined {
   }
   if (!snapshot.capture.ok) {
     return `The Amazon product page could not be read, so this book has only partial metadata.${firecrawlHint}`;
+  }
+  // Deliberately ranked below the two failures above: a capture can run out of
+  // time *and* be blocked, and the block is the more actionable of the two.
+  if (snapshot.capture.timedOut) {
+    return "The sources took too long, so some of this book's metadata is missing. Re-fetch to fill in the rest.";
   }
   if (snapshot.capture.emptySources.length > 0) {
     return `Captured, but these sources returned nothing: ${snapshot.capture.emptySources.join(", ")}.`;

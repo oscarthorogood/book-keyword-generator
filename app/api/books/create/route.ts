@@ -1,5 +1,5 @@
 import { parseAmazonInput } from "@/lib/amazonUrl";
-import { captureBookSnapshot, describeCapture } from "@/lib/bookSnapshot";
+import { captureBookSnapshot, DEFAULT_CAPTURE_BUDGET_MS, describeCapture } from "@/lib/bookSnapshot";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import type { Marketplace } from "@/lib/types";
 
@@ -8,6 +8,13 @@ export const runtime = "nodejs";
 // crawl, reviews, Q&A, external catalogues) — the same budget the keyword
 // generator used to need, moved here so it happens once per book instead of
 // on every generate.
+//
+// The capture (see DEFAULT_CAPTURE_BUDGET_MS) has to finish well before this
+// ceiling so there's still time to write the row. Previously it ran
+// unbounded and hit the ceiling itself: the function was killed mid-capture,
+// the browser got a 504 with no JSON body, and the book was never saved —
+// the "couldn't add that book" reports. Budgeting the capture below the
+// ceiling means a slow scrape costs metadata, not the book.
 export const maxDuration = 60;
 
 const MARKETPLACES: Marketplace[] = ["US", "UK", "CA", "DE", "FR", "IT", "ES"];
@@ -79,7 +86,7 @@ export async function POST(request: Request) {
       );
     }
 
-    const snapshot = await captureBookSnapshot(asin, marketplace);
+    const snapshot = await captureBookSnapshot(asin, marketplace, { budgetMs: DEFAULT_CAPTURE_BUDGET_MS });
 
     const { data: newBook, error: insertError } = await supabase
       .from("books")

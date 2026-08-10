@@ -705,7 +705,12 @@ function extractIsbns($: cheerio.CheerioAPI): { isbn10?: string; isbn13?: string
   return { isbn10, isbn13 };
 }
 
-const EMPTY_PRODUCT_PAGE: ProductPageData = {
+/**
+ * The shape a failed page read returns: every list empty, every field
+ * undefined. Exported so a caller that abandons the scrape on a deadline can
+ * fall back to the same value the scraper itself would have returned.
+ */
+export const EMPTY_PRODUCT_PAGE: ProductPageData = {
   compTitles: [],
   compDetails: [],
   categories: [],
