@@ -119,6 +119,28 @@ const AUTOCOMPLETE_MODIFIERS = [
   "best sellers",
   "new release",
 ];
+
+// Common book genres to try as autocomplete seed variations
+const COMMON_GENRES = [
+  "thriller",
+  "mystery",
+  "suspense",
+  "crime",
+  "drama",
+  "literary fiction",
+  "psychological",
+  "detective",
+];
+
+// Format-specific search queries
+const SEARCH_FORMATS = [
+  "ebook",
+  "audio",
+  "boxset",
+  "omnibus",
+  "edition",
+  "complete",
+];
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
 // Suffix sweep (title + a..z) + prefix sweep (a..z + title) both cost a
 // letter each, plus title/modifiers/author — see buildAutocompleteSeeds.
@@ -224,17 +246,39 @@ export function buildAutocompleteSeeds(title: string, author?: string): string[]
     seeds.add(`${cleanTitle} ${modifier}`);
   }
 
+  // Add genre-based variations (helps with short titles like "Never Lie")
+  for (const genre of COMMON_GENRES) {
+    seeds.add(`${cleanTitle} ${genre}`);
+    if (author) {
+      seeds.add(`${author} ${genre}`);
+    }
+  }
+
+  // Add format-specific searches
+  for (const format of SEARCH_FORMATS) {
+    seeds.add(`${cleanTitle} ${format}`);
+  }
+
   // Add author-based seeds for better targeting
   if (author) {
     seeds.add(`${cleanTitle} ${author}`);
     seeds.add(author);
     seeds.add(`${author} books`);
+    seeds.add(`${author} thriller`);
+    seeds.add(`${author} mystery`);
+
+    // Author name variations (first name only if available)
+    const authorWords = author.split(/\s+/);
+    if (authorWords.length > 1) {
+      seeds.add(authorWords[0]); // First name
+      seeds.add(`${authorWords[0]} books`);
+    }
   }
 
-  // Alphabet sweeps for exhaustive coverage
-  for (const letter of ALPHABET) {
+  // Alphabet sweeps for exhaustive coverage (more selective now)
+  const selectedLetters = "abcmnopstux".split(""); // Focus on common starting letters
+  for (const letter of selectedLetters) {
     seeds.add(`${cleanTitle} ${letter}`);
-    seeds.add(`${letter} ${cleanTitle}`);
   }
 
   return Array.from(seeds).slice(0, MAX_AUTOCOMPLETE_SEEDS);
@@ -280,6 +324,7 @@ export async function getAutocompleteSuggestions(
 /**
  * Fetches autocomplete completions across every seed in `seedTerms` (see
  * buildAutocompleteSeeds), bounded to AUTOCOMPLETE_CONCURRENCY in flight.
+ * Includes retry logic for seeds that don't return results on first try.
  */
 export async function getAutocompleteKeywordSet(
   seedTerms: string[],
@@ -288,7 +333,24 @@ export async function getAutocompleteKeywordSet(
   const results = await mapWithConcurrency(seedTerms, AUTOCOMPLETE_CONCURRENCY, (term) =>
     getAutocompleteSuggestions(term, marketplace)
   );
-  return results.flat();
+
+  const allResults = results.flat();
+
+  // If we got very few results, try simpler seed variations
+  if (allResults.length < 3 && seedTerms.length > 0) {
+    const simpleSeeds = seedTerms
+      .map(t => t.split(/\s+/).slice(0, 1).join("")) // First word only
+      .filter((t, i, arr) => arr.indexOf(t) === i && t.length > 0); // Deduplicate
+
+    if (simpleSeeds.length > 0) {
+      const simpleResults = await mapWithConcurrency(simpleSeeds.slice(0, 5), AUTOCOMPLETE_CONCURRENCY, (term) =>
+        getAutocompleteSuggestions(term, marketplace)
+      );
+      allResults.push(...simpleResults.flat());
+    }
+  }
+
+  return allResults;
 }
 
 /**

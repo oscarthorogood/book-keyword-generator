@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { isValidProductAsin } from "./asinValidation";
 import { MATCH_TYPE_BID_MULTIPLIER } from "./bidding";
 import { KeywordCandidate, MatchType, ProductTargetCandidate } from "./types";
 
@@ -77,13 +78,22 @@ export interface SpmAdGroup {
 
 export interface BulksheetInput {
   campaignName: string;
+  campaignId?: string;
   asin: string;
+  author?: string;
+  bookTitle?: string;
+  seriesName?: string;
+  seriesOrder?: number;
+  seriesTotal?: number;
   dailyBudget: number;
   startDate: string;
+  endDate?: string;
   /** Base CPC ceiling (from RRP-derived bid economics, or a manual override) everything else scales off of. */
   baseBid: number;
   /** Ad groups with neither keywords nor product targets are skipped. */
   adGroups: SpmAdGroup[];
+  /** Optional: add separate metadata sheet */
+  includeMetadataSheet?: boolean;
 }
 
 function round2(n: number): number {
@@ -92,8 +102,14 @@ function round2(n: number): number {
 
 export async function buildBulksheet(input: BulksheetInput): Promise<Buffer> {
   const workbook = new ExcelJS.Workbook();
-  const sheet = workbook.addWorksheet("Sponsored Products Campaigns");
 
+  // Add metadata sheet if requested
+  if (input.includeMetadataSheet) {
+    addMetadataSheet(workbook, input);
+  }
+
+  // Add main Sponsored Products sheet
+  const sheet = workbook.addWorksheet("Sponsored Products Campaigns");
   sheet.columns = COLUMNS.map((header) => ({ header, key: header, width: 24 }));
 
   const rows: Row[] = [];
@@ -104,6 +120,7 @@ export async function buildBulksheet(input: BulksheetInput): Promise<Buffer> {
     Operation: "Create",
     "Campaign Name": input.campaignName,
     "Start Date": formatDate(input.startDate),
+    ...(input.endDate && { "End Date": formatDate(input.endDate) }),
     "Targeting Type": "Manual",
     State: "enabled",
     "Daily Budget": input.dailyBudget,
@@ -154,6 +171,14 @@ export async function buildBulksheet(input: BulksheetInput): Promise<Buffer> {
     }
 
     for (const target of adGroup.productTargets ?? []) {
+      // Validate ASIN before shipping to bulksheet (§2.2)
+      if (!isValidProductAsin(target.asin)) {
+        console.warn(
+          `[buildBulksheet] Skipping invalid product target ASIN: "${target.asin}"`
+        );
+        continue;
+      }
+
       rows.push({
         Product: "Sponsored Products",
         Entity: "Product Targeting",
@@ -171,4 +196,55 @@ export async function buildBulksheet(input: BulksheetInput): Promise<Buffer> {
 
   const arrayBuffer = await workbook.xlsx.writeBuffer();
   return Buffer.from(arrayBuffer);
+}
+
+/**
+ * Adds a metadata sheet with book information and campaign details.
+ * This sheet can be used for tracking and reference purposes.
+ */
+function addMetadataSheet(workbook: ExcelJS.Workbook, input: BulksheetInput): void {
+  const sheet = workbook.addWorksheet("Book Metadata", { state: "hidden" });
+
+  // Add metadata rows with labels in first column
+  const metadata = [
+    ["Campaign ID", input.campaignId || "Auto-generated on upload"],
+    ["Campaign Name", input.campaignName],
+    ["Book Title", input.bookTitle || "—"],
+    ["Author", input.author || "—"],
+    ...(input.seriesName ? [["Series Name", input.seriesName]] : []),
+    ...(input.seriesOrder ? [["Series Book #", `Book ${input.seriesOrder}${input.seriesTotal ? ` of ${input.seriesTotal}` : ""}`]] : []),
+    ["ASIN", input.asin],
+    ["Created", new Date().toISOString()],
+    ["Daily Budget", `$${input.dailyBudget}`],
+    ["Start Date", input.startDate],
+    ["End Date", input.endDate || "Ongoing"],
+    ["Base Bid", `$${input.baseBid.toFixed(2)}`],
+    ["", ""],
+    ["Ad Groups Summary", ""],
+  ];
+
+  // Add ad group summary
+  let adGroupNum = 1;
+  for (const adGroup of input.adGroups) {
+    const keywordCount = adGroup.keywords?.length ?? 0;
+    const targetCount = adGroup.productTargets?.length ?? 0;
+    if (keywordCount > 0 || targetCount > 0) {
+      metadata.push([
+        `${adGroupNum}. ${adGroup.name}`,
+        `${keywordCount} keywords, ${targetCount} targets, $${adGroup.defaultBid.toFixed(2)} default bid`,
+      ]);
+      adGroupNum++;
+    }
+  }
+
+  sheet.addRows(metadata);
+
+  // Format metadata sheet
+  sheet.getColumn(1).width = 20;
+  sheet.getColumn(2).width = 60;
+
+  for (let i = 1; i <= metadata.length; i++) {
+    const cell = sheet.getCell(i, 1);
+    cell.font = { bold: true };
+  }
 }

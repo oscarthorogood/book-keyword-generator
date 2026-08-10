@@ -73,7 +73,7 @@ export function mineReviewLanguage(snippets: string[]): KeywordCandidate[] {
     }
   }
 
-  return Array.from(counts.entries())
+  const candidates = Array.from(counts.entries())
     .filter(([gram, count]) => {
       const words = wordCounts.get(gram) ?? 2;
       // Multi-word phrases (3-4 words) are kept with 1+ occurrences
@@ -83,4 +83,27 @@ export function mineReviewLanguage(snippets: string[]): KeywordCandidate[] {
     .sort((a, b) => b[1] - a[1])
     .slice(0, MAX_MINED_PHRASES)
     .map(([text]) => ({ text, sources: ["review-language" as const] }));
+
+  // If we only found a few phrases, lower the threshold and try again with 2-word phrases
+  if (candidates.length < 5 && counts.size > 0) {
+    const moreCandidates = Array.from(counts.entries())
+      .filter(([gram, count]) => {
+        const words = wordCounts.get(gram) ?? 2;
+        // Allow single-occurrence 2-word phrases if we don't have enough results
+        return words === 2 && count >= 1;
+      })
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 10)
+      .map(([text]) => ({ text, sources: ["review-language" as const] }));
+
+    // Merge, removing duplicates
+    const existingTexts = new Set(candidates.map(c => c.text));
+    for (const candidate of moreCandidates) {
+      if (!existingTexts.has(candidate.text) && candidates.length < MAX_MINED_PHRASES) {
+        candidates.push(candidate);
+      }
+    }
+  }
+
+  return candidates;
 }
