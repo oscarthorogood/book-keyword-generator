@@ -1,6 +1,6 @@
 "use client";
 
-import { Plus, FileText, MoreVertical, Search } from "lucide-react";
+import { Plus, FileText, MoreVertical, Search, Zap, Target, Sparkles } from "lucide-react";
 import { useEffect, useState } from "react";
 import { createBrowserClient } from "@supabase/ssr";
 
@@ -22,11 +22,11 @@ interface CampaignsDashboardProps {
   onCreateNew: () => void;
 }
 
-const statusColors = {
-  draft: "bg-yellow-50 text-yellow-700 border-yellow-200",
-  uploaded: "bg-blue-50 text-blue-700 border-blue-200",
-  active: "bg-green-50 text-green-700 border-green-200",
-  archived: "bg-gray-50 text-gray-700 border-gray-200",
+const statusConfig = {
+  draft: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", badge: "bg-amber-100" },
+  uploaded: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", badge: "bg-blue-100" },
+  active: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", badge: "bg-emerald-100" },
+  archived: { bg: "bg-slate-50", text: "text-slate-700", border: "border-slate-200", badge: "bg-slate-100" },
 };
 
 export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardProps) {
@@ -77,57 +77,111 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
   const isEmpty = campaigns.length === 0;
 
   return (
-    <div className="min-h-screen bg-gray-50">
+    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50 to-blue-50">
       {/* Header */}
-      <div className="bg-white border-b border-gray-200">
-        <div className="max-w-7xl mx-auto px-8 py-6">
-          <h1 className="text-2xl font-bold text-gray-900">All campaigns</h1>
+      <div className="bg-white/70 backdrop-blur-xl border-b border-slate-200">
+        <div className="max-w-7xl mx-auto px-8 py-8">
+          <div className="flex items-center justify-between">
+            <div>
+              <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+                All campaigns
+              </h1>
+              <p className="text-slate-600 mt-1">Manage your Amazon Ads campaigns</p>
+            </div>
+            <button
+              onClick={onCreateNew}
+              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold rounded-xl hover:shadow-lg hover:shadow-purple-500/20 transition-all duration-200 transform hover:scale-105"
+            >
+              <Plus size={20} />
+              New campaign
+            </button>
+          </div>
         </div>
       </div>
 
       {/* Main Content */}
-      <div className="max-w-7xl mx-auto px-8 py-8">
+      <div className="max-w-7xl mx-auto px-8 py-12">
         {isEmpty ? (
           // Empty State
-          <div className="space-y-6">
+          <div className="space-y-8">
             {/* Quick Actions */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <button
                 onClick={onCreateNew}
-                className="bg-gray-900 hover:bg-gray-800 text-white rounded-lg p-8 flex flex-col items-center justify-center gap-3 transition-colors"
+                className="group relative overflow-hidden bg-gradient-to-br from-purple-600 to-purple-700 rounded-2xl p-8 text-white hover:shadow-xl transition-all duration-300 transform hover:scale-105"
               >
-                <FileText size={32} />
-                <span className="text-lg font-medium">New campaign</span>
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-br from-purple-500 to-blue-500"></div>
+                <div className="relative flex flex-col items-center justify-center gap-3">
+                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center group-hover:bg-white/30 transition-colors">
+                    <FileText size={24} />
+                  </div>
+                  <span className="text-lg font-semibold">Create campaign</span>
+                  <span className="text-sm opacity-80">15+ keyword sources</span>
+                </div>
               </button>
-              <div className="bg-white border border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-3 opacity-40">
-                <div className="text-3xl">📊</div>
-                <span className="text-sm font-medium text-gray-600">Coming soon</span>
+
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 flex flex-col items-center justify-center gap-3 opacity-50 hover:opacity-75 transition-opacity cursor-not-allowed">
+                <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
+                  <Sparkles size={24} className="text-slate-400" />
+                </div>
+                <span className="text-lg font-semibold text-slate-900">Template library</span>
+                <span className="text-sm text-slate-600">Coming soon</span>
               </div>
-              <div className="bg-white border border-gray-200 rounded-lg p-8 flex flex-col items-center justify-center gap-3 opacity-40">
-                <div className="text-3xl">📁</div>
-                <span className="text-sm font-medium text-gray-600">Coming soon</span>
+
+              <div className="bg-white rounded-2xl border border-slate-200 p-8 flex flex-col items-center justify-center gap-3 opacity-50 hover:opacity-75 transition-opacity cursor-not-allowed">
+                <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
+                  <Target size={24} className="text-slate-400" />
+                </div>
+                <span className="text-lg font-semibold text-slate-900">AI optimizer</span>
+                <span className="text-sm text-slate-600">Coming soon</span>
               </div>
             </div>
 
-            {/* Feature Overview */}
-            <div className="bg-white rounded-lg border border-gray-200 p-12">
-              <div className="max-w-2xl mx-auto text-center">
-                <h2 className="text-2xl font-bold text-gray-900 mb-4">Generate Amazon Ads Campaigns</h2>
-                <p className="text-gray-600 mb-8 leading-relaxed">
-                  Create optimized Sponsored Products campaigns in minutes. Our system harvests keywords from 15+ sources, applies budget-aware strategies, and generates ready-to-upload Excel bulksheets.
+            {/* Features Overview */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-12 shadow-sm hover:shadow-md transition-shadow">
+              <div className="max-w-3xl">
+                <h2 className="text-2xl font-bold text-slate-900 mb-3">
+                  Generate Amazon Ads Campaigns in Minutes
+                </h2>
+                <p className="text-slate-600 mb-8 leading-relaxed">
+                  Create optimized Sponsored Products campaigns powered by 15+ data sources. Get budget-aware keyword selection, strategy recommendations, and ready-to-upload Excel bulksheets.
                 </p>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="text-left">
-                    <div className="text-2xl font-bold text-blue-600 mb-2">15+</div>
-                    <p className="text-sm text-gray-600">Data sources for keywords</p>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0">
+                      <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-purple-100">
+                        <Zap className="h-6 w-6 text-purple-600" />
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-slate-900">15+ Sources</h3>
+                      <p className="text-sm text-slate-600 mt-1">Amazon APIs, Google Books, Goodreads & more</p>
+                    </div>
                   </div>
-                  <div className="text-left">
-                    <div className="text-2xl font-bold text-green-600 mb-2">3</div>
-                    <p className="text-sm text-gray-600">Match-type strategies</p>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0">
+                      <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-blue-100">
+                        <Target className="h-6 w-6 text-blue-600" />
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-slate-900">3 Strategies</h3>
+                      <p className="text-sm text-slate-600 mt-1">Phrase-only, balanced, aggressive options</p>
+                    </div>
                   </div>
-                  <div className="text-left">
-                    <div className="text-2xl font-bold text-purple-600 mb-2">100%</div>
-                    <p className="text-sm text-gray-600">Budget-aware capping</p>
+
+                  <div className="flex gap-4">
+                    <div className="flex-shrink-0">
+                      <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-emerald-100">
+                        <Sparkles className="h-6 w-6 text-emerald-600" />
+                      </div>
+                    </div>
+                    <div>
+                      <h3 className="font-semibold text-slate-900">Budget Control</h3>
+                      <p className="text-sm text-slate-600 mt-1">100% budget-aware keyword capping</p>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -136,127 +190,105 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
         ) : (
           <>
             {/* Search and Filters */}
-            <div className="mb-6 flex flex-col gap-4">
+            <div className="mb-8 space-y-4">
               <div className="flex items-center gap-3">
                 <div className="flex-1 relative">
-                  <Search className="absolute left-3 top-3 text-gray-400" size={18} />
+                  <Search className="absolute left-4 top-3.5 text-slate-400" size={20} />
                   <input
                     type="text"
-                    placeholder="Search campaigns..."
+                    placeholder="Search campaigns, ASIN..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-blue-500 bg-white"
+                    className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 bg-white transition-all"
                   />
                 </div>
               </div>
 
               {/* Filter Tabs */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setFilterStatus("all")}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    filterStatus === "all"
-                      ? "bg-gray-200 text-gray-900"
-                      : "text-gray-600 hover:bg-gray-100"
-                  }`}
-                >
-                  View all
-                </button>
-                <button
-                  onClick={() => setFilterStatus("draft")}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    filterStatus === "draft"
-                      ? "bg-yellow-100 text-yellow-700"
-                      : "text-gray-600 hover:bg-gray-100"
-                  }`}
-                >
-                  Draft
-                </button>
-                <button
-                  onClick={() => setFilterStatus("uploaded")}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    filterStatus === "uploaded"
-                      ? "bg-blue-100 text-blue-700"
-                      : "text-gray-600 hover:bg-gray-100"
-                  }`}
-                >
-                  Uploaded
-                </button>
-                <button
-                  onClick={() => setFilterStatus("active")}
-                  className={`px-4 py-2 rounded-lg text-sm font-medium transition-colors ${
-                    filterStatus === "active"
-                      ? "bg-green-100 text-green-700"
-                      : "text-gray-600 hover:bg-gray-100"
-                  }`}
-                >
-                  Active
-                </button>
+              <div className="flex gap-2 overflow-x-auto">
+                {["all", "draft", "uploaded", "active"].map((status) => (
+                  <button
+                    key={status}
+                    onClick={() => setFilterStatus(status)}
+                    className={`px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
+                      filterStatus === status
+                        ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg shadow-purple-500/20"
+                        : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                    }`}
+                  >
+                    {status.charAt(0).toUpperCase() + status.slice(1)}
+                  </button>
+                ))}
               </div>
             </div>
 
             {/* Campaigns Table */}
             {loading ? (
-              <div className="flex items-center justify-center py-12">
+              <div className="flex items-center justify-center py-16">
                 <div className="text-center">
-                  <div className="animate-spin w-12 h-12 border-4 border-gray-200 border-t-gray-900 rounded-full mx-auto mb-4"></div>
-                  <p className="text-gray-600">Loading campaigns...</p>
+                  <div className="animate-spin w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full mx-auto mb-4"></div>
+                  <p className="text-slate-600">Loading campaigns...</p>
                 </div>
               </div>
             ) : filteredCampaigns.length === 0 ? (
-              <div className="text-center py-12">
-                <p className="text-gray-600">No campaigns found</p>
+              <div className="text-center py-16 bg-white rounded-2xl border border-slate-200">
+                <FileText size={48} className="mx-auto text-slate-300 mb-4" />
+                <p className="text-slate-600">No campaigns found</p>
               </div>
             ) : (
-              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
+              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-gray-200 bg-gray-50">
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Campaign Name</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">ASIN</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Keywords</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Budget</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Status</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Created</th>
-                      <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900">Action</th>
+                    <tr className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-slate-50">
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Campaign</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">ASIN</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Keywords</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Budget</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Status</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Created</th>
+                      <th className="px-6 py-4 text-right text-sm font-semibold text-slate-900"></th>
                     </tr>
                   </thead>
-                  <tbody>
+                  <tbody className="divide-y divide-slate-200">
                     {filteredCampaigns.map((campaign) => (
-                      <tr key={campaign.id} className="border-b border-gray-200 hover:bg-gray-50 transition-colors">
+                      <tr key={campaign.id} className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-blue-50 transition-colors">
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
-                            <FileText size={18} className="text-gray-400" />
+                            <div className="w-10 h-10 bg-gradient-to-br from-purple-100 to-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <FileText size={20} className="text-purple-600" />
+                            </div>
                             <div>
-                              <p className="font-medium text-gray-900">{campaign.name}</p>
-                              <p className="text-xs text-gray-600 mt-1">{campaign.id.slice(0, 8)}...</p>
+                              <p className="font-semibold text-slate-900 text-sm">{campaign.name}</p>
+                              <p className="text-xs text-slate-500 mt-0.5">{campaign.id.slice(0, 8)}...</p>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="font-mono text-sm text-gray-600">{campaign.asin}</span>
+                          <span className="font-mono text-sm text-slate-600 bg-slate-50 px-3 py-1 rounded-lg">
+                            {campaign.asin}
+                          </span>
                         </td>
                         <td className="px-6 py-4">
-                          <div className="flex gap-3 text-sm">
-                            <span className="px-2 py-1 bg-blue-50 text-blue-700 rounded text-xs font-medium">
-                              {campaign.total_rows} rows
-                            </span>
-                          </div>
+                          <span className="inline-flex px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-semibold border border-purple-200">
+                            {campaign.total_rows} rows
+                          </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="text-sm font-medium text-gray-900">${campaign.daily_budget?.toFixed(2) || "0.00"}</span>
+                          <span className="text-sm font-semibold text-slate-900">
+                            ${campaign.daily_budget?.toFixed(2) || "0.00"}
+                          </span>
                         </td>
                         <td className="px-6 py-4">
                           <span
-                            className={`inline-flex px-2.5 py-1 rounded-full text-xs font-medium border ${
-                              statusColors[campaign.status]
-                            }`}
+                            className={`inline-flex px-3 py-1.5 rounded-lg text-xs font-semibold border ${
+                              statusConfig[campaign.status].badge
+                            } ${statusConfig[campaign.status].text} border-current`}
                           >
                             {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="text-sm text-gray-600">
+                          <span className="text-sm text-slate-600">
                             {new Date(campaign.created_at).toLocaleDateString("en-US", {
                               month: "short",
                               day: "numeric",
@@ -265,7 +297,7 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button className="text-gray-400 hover:text-gray-600 transition-colors">
+                          <button className="text-slate-400 hover:text-slate-600 transition-colors p-2 hover:bg-slate-100 rounded-lg">
                             <MoreVertical size={18} />
                           </button>
                         </td>
