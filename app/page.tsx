@@ -71,6 +71,8 @@ export default function Home() {
   const [authorName, setAuthorName] = useState("");
   const [bookTitle, setBookTitle] = useState("");
   const [seriesName, setSeriesName] = useState("");
+  const [seriesOrder, setSeriesOrder] = useState("");
+  const [seriesTotal, setSeriesTotal] = useState("");
   const [variant, setVariant] = useState("1");
   const [dailyBudget, setDailyBudget] = useState("10");
   const [startDate, setStartDate] = useState(todayIso());
@@ -336,6 +338,8 @@ export default function Home() {
         authorName,
         bookTitle,
         seriesName: seriesName || undefined,
+        seriesOrder: seriesOrder ? Number(seriesOrder) : undefined,
+        seriesTotal: seriesTotal ? Number(seriesTotal) : undefined,
         variant: Number(variant) || 1,
         dailyBudget: Number(dailyBudget),
         startDate,
@@ -1032,7 +1036,43 @@ export default function Home() {
                       placeholder="A DC Mairead Maclean Mystery"
                       className="input"
                     />
+                    <span className="field-hint">
+                      Full series name for metadata and targeting
+                    </span>
                   </Field>
+
+                  {seriesName && (
+                    <div className="grid grid-cols-2 gap-4">
+                      <Field label="Series Book #">
+                        <input
+                          type="number"
+                          min="1"
+                          max="999"
+                          value={seriesOrder}
+                          onChange={(e) => setSeriesOrder(e.target.value)}
+                          placeholder="5"
+                          className="input"
+                        />
+                        <span className="field-hint">
+                          This book's position in series (e.g., Book 5 of X)
+                        </span>
+                      </Field>
+                      <Field label="Series Total (optional)">
+                        <input
+                          type="number"
+                          min="1"
+                          max="999"
+                          value={seriesTotal}
+                          onChange={(e) => setSeriesTotal(e.target.value)}
+                          placeholder="12"
+                          className="input"
+                        />
+                        <span className="field-hint">
+                          Total books in series if known
+                        </span>
+                      </Field>
+                    </div>
+                  )}
 
                   {previewName && (
                     <p className="text-xs" style={{ color: "var(--muted)" }}>
@@ -1439,6 +1479,15 @@ export default function Home() {
                       <p className="field-hint mb-2" style={{ marginTop: 0 }}>ASIN / ISBN</p>
                       <p className="text-sm font-mono">{asin || "—"}</p>
                     </div>
+                    {seriesName && (
+                      <div>
+                        <p className="field-hint mb-2" style={{ marginTop: 0 }}>Series</p>
+                        <p className="text-sm font-semibold">{seriesName}</p>
+                        {seriesOrder && (
+                          <p className="text-xs" style={{ color: "var(--muted)" }}>Book {seriesOrder}{seriesTotal ? ` of ${seriesTotal}` : ""}</p>
+                        )}
+                      </div>
+                    )}
                     <div>
                       <p className="field-hint mb-2" style={{ marginTop: 0 }}>Marketplace</p>
                       <p className="text-sm">{marketplace}</p>

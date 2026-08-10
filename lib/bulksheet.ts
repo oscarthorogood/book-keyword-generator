@@ -81,6 +81,9 @@ export interface BulksheetInput {
   asin: string;
   author?: string;
   bookTitle?: string;
+  seriesName?: string;
+  seriesOrder?: number;
+  seriesTotal?: number;
   dailyBudget: number;
   startDate: string;
   endDate?: string;
@@ -199,6 +202,8 @@ function addMetadataSheet(workbook: ExcelJS.Workbook, input: BulksheetInput): vo
     ["Campaign Name", input.campaignName],
     ["Book Title", input.bookTitle || "—"],
     ["Author", input.author || "—"],
+    ...(input.seriesName ? [["Series Name", input.seriesName]] : []),
+    ...(input.seriesOrder ? [["Series Book #", `Book ${input.seriesOrder}${input.seriesTotal ? ` of ${input.seriesTotal}` : ""}`]] : []),
     ["ASIN", input.asin],
     ["Created", new Date().toISOString()],
     ["Daily Budget", `$${input.dailyBudget}`],

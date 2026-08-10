@@ -148,6 +148,8 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
   }
 
   const seriesName = typeof b.seriesName === "string" && b.seriesName.trim() ? b.seriesName.trim() : undefined;
+  const seriesOrder = typeof b.seriesOrder === "number" && Number.isInteger(b.seriesOrder) && b.seriesOrder > 0 ? b.seriesOrder : undefined;
+  const seriesTotal = typeof b.seriesTotal === "number" && Number.isInteger(b.seriesTotal) && b.seriesTotal > 0 ? b.seriesTotal : undefined;
   const variant =
     typeof b.variant === "number" && Number.isInteger(b.variant) && b.variant > 0 ? b.variant : 1;
 
@@ -241,6 +243,8 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
       authorName: b.authorName.trim(),
       bookTitle: b.bookTitle.trim(),
       seriesName,
+      seriesOrder,
+      seriesTotal,
       variant,
       dailyBudget: b.dailyBudget,
       startDate: b.startDate,
@@ -843,6 +847,9 @@ export async function POST(req: NextRequest) {
     asin: request.asin,
     author: request.authorName,
     bookTitle: request.bookTitle,
+    seriesName: request.seriesName,
+    seriesOrder: request.seriesOrder,
+    seriesTotal: request.seriesTotal,
     dailyBudget: request.dailyBudget,
     startDate: request.startDate,
     endDate: request.endDate,

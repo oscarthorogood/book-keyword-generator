@@ -32,6 +32,9 @@ export interface BidEconomics {
 export interface GenerateRequest extends CampaignIdentity {
   dailyBudget: number;
   startDate: string; // YYYY-MM-DD
+  endDate?: string; // YYYY-MM-DD
+  seriesOrder?: number; // Book position in series (1-based)
+  seriesTotal?: number; // Total books in series
   matchTypes: MatchType[];
   bidEconomics?: BidEconomics;
   /** Manual fallback/override when bid economics aren't supplied. */
