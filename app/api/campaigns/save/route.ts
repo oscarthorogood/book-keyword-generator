@@ -1,4 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { currentUser } from "@/lib/supabaseServer";
+import { supabaseServer } from "@/lib/supabaseServer";
 
 /**
  * POST /api/campaigns/save - Save campaign for a book
@@ -15,26 +16,17 @@ export async function POST(request: Request) {
       return Response.json({ error: "Missing required fields: bookId, campaignName" }, { status: 400 });
     }
 
-    // Get user from auth
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader) {
+    // Get authenticated user
+    const user = await currentUser();
+    if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        auth: { persistSession: false, autoRefreshToken: false },
-      }
-    );
-
-    // For now, use a placeholder user ID - in production this would come from auth
-    const userId = "placeholder-user-id";
+    const supabase = await supabaseServer();
 
     // Create campaign record linked to book
     const { error: insertError } = await supabase.from("campaigns").insert({
-      user_id: userId,
+      user_id: user.id,
       book_id: bookId,
       name: campaignName,
       variant: variant || 1,

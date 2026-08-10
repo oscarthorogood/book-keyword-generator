@@ -1,4 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { currentUser } from "@/lib/supabaseServer";
+import { supabaseServer } from "@/lib/supabaseServer";
 
 /**
  * GET /api/books/list
@@ -6,21 +7,13 @@ import { createClient } from "@supabase/supabase-js";
  */
 export async function GET(request: Request) {
   try {
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader) {
+    // Get authenticated user
+    const user = await currentUser();
+    if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        auth: { persistSession: false, autoRefreshToken: false },
-      }
-    );
-
-    // Placeholder user ID
-    const userId = "placeholder-user-id";
+    const supabase = await supabaseServer();
 
     const { data: books, error } = await supabase
       .from("books")
@@ -37,7 +30,7 @@ export async function GET(request: Request) {
         metadata_json
       `
       )
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .order("created_at", { ascending: false });
 
     if (error) {

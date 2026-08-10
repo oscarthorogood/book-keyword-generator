@@ -1,4 +1,5 @@
-import { createClient } from "@supabase/supabase-js";
+import { currentUser } from "@/lib/supabaseServer";
+import { supabaseServer } from "@/lib/supabaseServer";
 
 /**
  * GET /api/books/[id]
@@ -10,21 +11,14 @@ export async function GET(
 ) {
   try {
     const { id } = await params;
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader) {
+
+    // Get authenticated user
+    const user = await currentUser();
+    if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        auth: { persistSession: false, autoRefreshToken: false },
-      }
-    );
-
-    // Placeholder user ID
-    const userId = "placeholder-user-id";
+    const supabase = await supabaseServer();
 
     // Get book with campaigns
     const { data: book, error: bookError } = await supabase
@@ -56,7 +50,7 @@ export async function GET(
       `
       )
       .eq("id", id)
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .single();
 
     if (bookError || !book) {

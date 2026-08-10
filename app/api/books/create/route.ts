@@ -1,6 +1,7 @@
-import { createClient } from "@supabase/supabase-js";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { fetchAmazonBookMetadata } from "@/lib/amazonLookup";
+import { currentUser } from "@/lib/supabaseServer";
+import { supabaseServer } from "@/lib/supabaseServer";
 
 /**
  * POST /api/books/create
@@ -26,23 +27,14 @@ export async function POST(request: Request) {
       );
     }
 
-    // Get auth header for user context
-    const authHeader = request.headers.get("authorization");
-    if (!authHeader) {
+    // Get authenticated user
+    const user = await currentUser();
+    if (!user) {
       return Response.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     // Create Supabase client
-    const supabase = createClient(
-      process.env.NEXT_PUBLIC_SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!,
-      {
-        auth: { persistSession: false, autoRefreshToken: false },
-      }
-    );
-
-    // Placeholder user ID - in production this comes from auth
-    const userId = "placeholder-user-id";
+    const supabase = await supabaseServer();
 
     // Fetch book metadata from Amazon and other sources
     let bookData;
@@ -95,7 +87,7 @@ export async function POST(request: Request) {
     const { data: existingBook } = await supabase
       .from("books")
       .select("id")
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .eq("asin", normalizedAsin)
       .eq("marketplace", marketplace)
       .single();
@@ -115,7 +107,7 @@ export async function POST(request: Request) {
     const { data: newBook, error: insertError } = await supabase
       .from("books")
       .insert({
-        user_id: userId,
+        user_id: user.id,
         asin: normalizedAsin,
         marketplace,
         title: bookData.title,
