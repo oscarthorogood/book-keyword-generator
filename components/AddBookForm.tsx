@@ -184,34 +184,53 @@ export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
           </div>
 
           {metadata && (
-            <div className="bg-blue-50 border border-blue-200 rounded-lg p-6 mb-6">
-              <p className="text-xs text-blue-600 font-medium mb-4">FETCHED METADATA</p>
+            <div className={`border rounded-lg p-6 mb-6 ${
+              (bookTitle === "Unknown Title" || bookTitle === "") && (bookAuthor === "Unknown Author" || bookAuthor === "")
+                ? "bg-yellow-50 border-yellow-200"
+                : "bg-blue-50 border-blue-200"
+            }`}>
+              <p className={`text-xs font-medium mb-4 ${
+                (bookTitle === "Unknown Title" || bookTitle === "") && (bookAuthor === "Unknown Author" || bookAuthor === "")
+                  ? "text-yellow-600"
+                  : "text-blue-600"
+              }`}>
+                {(bookTitle === "Unknown Title" || bookTitle === "") && (bookAuthor === "Unknown Author" || bookAuthor === "")
+                  ? "MANUAL ENTRY REQUIRED"
+                  : "FETCHED METADATA"}
+              </p>
+              {(bookTitle === "Unknown Title" || bookTitle === "") && (bookAuthor === "Unknown Author" || bookAuthor === "") && (
+                <p className="text-xs text-yellow-700 mb-4">
+                  We couldn't fetch the book details from Amazon. Please enter the title and author manually.
+                </p>
+              )}
               <div className="space-y-4">
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-1.5">
-                    Title
+                    Title {(bookTitle === "Unknown Title" || bookTitle === "") && <span className="text-red-600">*</span>}
                   </label>
                   <input
                     type="text"
-                    value={bookTitle}
+                    value={bookTitle === "Unknown Title" ? "" : bookTitle}
                     onChange={(e) => setBookTitle(e.target.value)}
+                    placeholder="Enter book title"
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
                   />
                 </div>
 
                 <div>
                   <label className="block text-sm font-medium text-gray-900 mb-1.5">
-                    Author
+                    Author {(bookAuthor === "Unknown Author" || bookAuthor === "") && <span className="text-red-600">*</span>}
                   </label>
                   <input
                     type="text"
-                    value={bookAuthor}
+                    value={bookAuthor === "Unknown Author" ? "" : bookAuthor}
                     onChange={(e) => setBookAuthor(e.target.value)}
+                    placeholder="Enter author name"
                     className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
                   />
                 </div>
 
-                {metadata.price && (
+                {metadata.price && metadata.price > 0 && (
                   <div>
                     <label className="block text-sm font-medium text-gray-900 mb-1.5">
                       Price

@@ -80,37 +80,57 @@ export async function scrapeAmazonBook(asin: string, marketplace: keyof typeof M
 
     const data: Partial<AmazonBookData> = { asin };
 
-    // Title
-    const titleElement = $("h1 span#productTitle").text().trim();
+    // Title - try multiple selectors as Amazon structure varies
+    let titleElement = $("h1 span#productTitle").text().trim();
+    if (!titleElement) titleElement = $("h1[data-feature-name='title']").text().trim();
+    if (!titleElement) titleElement = $("span#productTitle").text().trim();
+    if (!titleElement) {
+      const h1Text = $("h1").text().trim();
+      if (h1Text && h1Text.length > 0 && h1Text.length < 500) titleElement = h1Text;
+    }
     if (titleElement) data.title = titleElement;
 
-    // Author - look for author link in byline
-    const authorElement = $("a.a-link-normal.contributorNameID").first().text().trim();
+    // Author - try multiple selectors
+    let authorElement = $("a.a-link-normal.contributorNameID").first().text().trim();
+    if (!authorElement) authorElement = $("span.author").first().text().trim();
+    if (!authorElement) authorElement = $("a[data-a-target='author-link']").first().text().trim();
+    if (!authorElement) {
+      // Try to find author in byline section
+      const bylineText = $("[data-feature-name='bylineInfo']").text().trim();
+      if (bylineText) authorElement = bylineText.split(" by ").pop() || "";
+    }
     if (authorElement) data.author = authorElement;
 
-    // Price
-    const priceText = $(".a-price.a-text-price.a-size-medium.apexPriceToPay").first().text().trim();
+    // Price - try multiple selectors
+    let priceText = $(".a-price.a-text-price.a-size-medium.apexPriceToPay").first().text().trim();
+    if (!priceText) priceText = $(".a-price-whole").first().text().trim();
+    if (!priceText) priceText = $("span.a-price-whole").first().text().trim();
     if (priceText) {
       const priceMatch = priceText.match(/[\d,]+\.?\d*/);
       if (priceMatch) data.price = parseFloat(priceMatch[0].replace(/,/g, ""));
     }
 
-    // Rating
-    const ratingText = $(".a-icon-star.a-star-small.a-star-mine").text().trim();
+    // Rating - try multiple selectors
+    let ratingText = $(".a-icon-star.a-star-small.a-star-mine").text().trim();
+    if (!ratingText) ratingText = $("[data-feature-name='acUserReviewsSummary'] .a-star span").first().text().trim();
+    if (!ratingText) ratingText = $("span.a-icon-star span").first().text().trim();
     if (ratingText) {
       const ratingMatch = ratingText.match(/[\d.]+/);
       if (ratingMatch) data.rating = parseFloat(ratingMatch[0]);
     }
 
     // Review count
-    const reviewCountText = $("#acrCustomerReviewText").text().trim();
+    let reviewCountText = $("#acrCustomerReviewText").text().trim();
+    if (!reviewCountText) reviewCountText = $("span[data-hook='total-review-count']").text().trim();
     if (reviewCountText) {
       const countMatch = reviewCountText.match(/[\d,]+/);
       if (countMatch) data.reviewCount = parseInt(countMatch[0].replace(/,/g, ""));
     }
 
-    // Description
-    const description = $("#feature-bullets .a-list-item").first().text().trim();
+    // Description - try multiple selectors
+    let description = $("#feature-bullets .a-list-item").first().text().trim();
+    if (!description) description = $("div[data-feature-name='featurebullets'] .a-list-item").first().text().trim();
+    if (!description) description = $("[data-feature-name='featurebullets'] li").first().text().trim();
     if (description) data.description = description;
 
     // Product information (ISBN, publisher, etc.)
@@ -207,11 +227,14 @@ export async function fetchAmazonBookMetadata(
 
   let amazonData: Partial<AmazonBookData> = { asin: normalized };
 
-  // Try to scrape Amazon — works for both ASINs and ISBNs
-  // Amazon product pages can be accessed via /dp/ASIN or via ISBN lookups
-  amazonData = await scrapeAmazonBook(normalized, marketplace);
+  // If it's an ASIN, scrape Amazon directly (Amazon /dp/ URLs only work with ASINs)
+  if (isAsin) {
+    amazonData = await scrapeAmazonBook(normalized, marketplace);
+  }
 
   // Enrich with metadata from other sources
+  // For ISBNs, this will lookup Google Books/Open Library using the ISBN
+  // For ASINs that didn't return full data, enrich with additional sources
   const enrichment = await enrichBookMetadata({
     isbn10: isIsbn && normalized.length === 10 ? normalized : amazonData.isbn10,
     isbn13: isIsbn && normalized.length === 13 ? normalized : amazonData.isbn13,
