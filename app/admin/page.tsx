@@ -1,5 +1,6 @@
 import { notFound } from "next/navigation";
 import { AccessManager } from "@/components/AccessManager";
+import AppShell from "@/components/AppShell";
 import { listAccessRequests, normalizeEmail } from "@/lib/accessRequests";
 import { isAdminEmail } from "@/lib/admin";
 import { currentUserEmail } from "@/lib/supabaseServer";
@@ -18,8 +19,8 @@ export default async function AdminPage() {
   }
 
   return (
-    <main className="flex-1 bg-white">
-      <div className="mx-auto w-full" style={{ maxWidth: "var(--container-max)" }}>
+    <AppShell active="access">
+      <div className="flex min-h-screen flex-col bg-white">
         <header className="page-header">
           <h1 className="page-title">Access</h1>
           <p className="page-subtitle mt-1 max-w-2xl">
@@ -28,13 +29,13 @@ export default async function AdminPage() {
           </p>
         </header>
 
-        <div className="page-body">
+        <div className="page-body flex-1">
           <AccessManager
             adminEmail={normalizeEmail(email)}
             initialRequests={await listAccessRequests()}
           />
         </div>
       </div>
-    </main>
+    </AppShell>
   );
 }

@@ -2,8 +2,6 @@ import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Inter, Roboto_Mono } from "next/font/google";
 import { SpeedInsights } from "@vercel/speed-insights/next";
-import { Header } from "@/components/Header";
-import { isCurrentUserAdmin } from "@/lib/admin";
 import "./globals.css";
 
 type RootLayoutProps = {
@@ -40,24 +38,13 @@ export const viewport = {
   colorScheme: "light",
 };
 
-export default async function RootLayout({ children }: RootLayoutProps) {
-  // Resolved here so every page gets the same nav without a client round-trip.
-  // Never throw out of the layout: on /login there is no session yet, and a
-  // misconfigured deployment should still be able to render the login page.
-  let isAdmin = false;
-  try {
-    isAdmin = await isCurrentUserAdmin();
-  } catch {
-    isAdmin = false;
-  }
-
+export default function RootLayout({ children }: RootLayoutProps) {
   return (
     <html
       lang="en"
       className={`${inter.variable} ${robotoMono.variable} h-full antialiased`}
     >
       <body className="min-h-full flex flex-col bg-white">
-        <Header isAdmin={isAdmin} />
         {children}
         <SpeedInsights />
       </body>

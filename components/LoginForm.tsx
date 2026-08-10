@@ -65,7 +65,7 @@ export function LoginForm() {
             <Clock size={20} className="mt-0.5 shrink-0" />
           )}
           <div>
-            <p className="alert-title">{sent ? "Check your inbox" : "Awaiting approval"}</p>
+            <p className="alert-title">{sent ? "Sign-in link sent" : "Awaiting approval"}</p>
             <p className="mt-1">{outcome.message}</p>
           </div>
         </div>

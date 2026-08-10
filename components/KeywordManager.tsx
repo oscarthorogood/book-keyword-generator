@@ -289,6 +289,18 @@ export default function KeywordManager({
     }
   }
 
+  /**
+   * Every filter change runs through here. Selection is scoped to what's on
+   * screen: selecting rows on one tab and then switching tabs would otherwise
+   * leave a bulk action armed against rows the user can no longer see — and
+   * "Delete" would take them all.
+   */
+  function changeFilters(apply: () => void) {
+    apply();
+    setVisibleCount(PAGE_SIZE);
+    setSelected(new Set());
+  }
+
   const sources = useMemo(
     () => Array.from(new Set(keywords.map((k) => k.source).filter((s): s is string => !!s))).sort(),
     [keywords]
@@ -556,10 +568,7 @@ export default function KeywordManager({
           <button
             role="tab"
             aria-selected={statusFilter === "all"}
-            onClick={() => {
-              setStatusFilter("all");
-              setVisibleCount(PAGE_SIZE);
-            }}
+            onClick={() => changeFilters(() => setStatusFilter("all"))}
             className={`tab ${statusFilter === "all" ? "tab-active" : ""}`}
           >
             All ({keptCount})
@@ -569,10 +578,7 @@ export default function KeywordManager({
               key={status}
               role="tab"
               aria-selected={statusFilter === status}
-              onClick={() => {
-                setStatusFilter(status);
-                setVisibleCount(PAGE_SIZE);
-              }}
+              onClick={() => changeFilters(() => setStatusFilter(status))}
               className={`tab ${statusFilter === status ? "tab-active" : ""}`}
             >
               {STATUS_LABELS[status]} ({keywords.filter((k) => k.status === status).length})
@@ -592,10 +598,7 @@ export default function KeywordManager({
             id="keyword-search"
             type="search"
             value={search}
-            onChange={(e) => {
-              setSearch(e.target.value);
-              setVisibleCount(PAGE_SIZE);
-            }}
+            onChange={(e) => changeFilters(() => setSearch(e.target.value))}
             placeholder="Search keywords"
             className="input input-with-icon"
           />
@@ -603,10 +606,7 @@ export default function KeywordManager({
 
         <select
           value={sourceFilter}
-          onChange={(e) => {
-            setSourceFilter(e.target.value);
-            setVisibleCount(PAGE_SIZE);
-          }}
+          onChange={(e) => changeFilters(() => setSourceFilter(e.target.value))}
           className="input w-auto"
           aria-label="Filter by source"
         >
@@ -621,10 +621,7 @@ export default function KeywordManager({
         {rejectingFilters.length > 0 && (
           <select
             value={filterFilter}
-            onChange={(e) => {
-              setFilterFilter(e.target.value);
-              setVisibleCount(PAGE_SIZE);
-            }}
+            onChange={(e) => changeFilters(() => setFilterFilter(e.target.value))}
             className="input w-auto"
             aria-label="Filter by rejecting filter"
           >
@@ -690,12 +687,14 @@ export default function KeywordManager({
             </button>
           ) : (
             <button
-              onClick={() => {
-                setSearch("");
-                setStatusFilter("all");
-                setSourceFilter("all");
-                setFilterFilter("all");
-              }}
+              onClick={() =>
+                changeFilters(() => {
+                  setSearch("");
+                  setStatusFilter("all");
+                  setSourceFilter("all");
+                  setFilterFilter("all");
+                })
+              }
               className="btn btn-secondary"
             >
               Clear filters
