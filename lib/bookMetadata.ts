@@ -170,11 +170,16 @@ export async function lookupOpenLibrary(
         const entry = json[`ISBN:${isbn}`];
         const subjects = entry?.subjects?.map((s) => s.name) ?? [];
         if (entry) {
+          const description = typeof entry.description === "string"
+            ? entry.description
+            : (typeof entry.description === "object" && entry.description?.value)
+            ? entry.description.value
+            : undefined;
           return {
             subjects,
             title: entry.title,
             author: entry.authors?.[0]?.name,
-            description: entry.description,
+            description,
             isbn10: entry.isbn_10?.[0],
             isbn13: entry.isbn_13?.[0],
             publisherName: entry.publishers?.[0]?.name,
