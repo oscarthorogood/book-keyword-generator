@@ -1,6 +1,7 @@
+import { cleanTaxonomyTerms, isCategoryNoise } from "./genre";
 import { expandSynonyms } from "./synonyms";
 import { extractKeyPhrases } from "./textExtract";
-import { BookMetadata, KeywordCandidate, KeywordSource, ProductPageData, RelatedCompetitor } from "./types";
+import { BookMetadata, KeywordCandidate, KeywordSource, MatchType, RelatedCompetitor } from "./types";
 
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
 
@@ -89,6 +90,11 @@ export function isUsableKeyword(text: string): boolean {
   if (/https?:\/\//.test(text)) return false;
   if (/^\d+$/.test(text)) return false;
   if (GENERIC_STANDALONE_TERMS.has(text)) return false;
+  // Amazon store scaffolding ("kindle store", "kindle ebooks", "best
+  // sellers") reaches the candidate pool from breadcrumbs and category lists
+  // on every source, not just the genre one — nobody searches for these, and
+  // templating over them produced keywords like "best kindle store books".
+  if (isCategoryNoise(text)) return false;
   if (looksLikeAsin(text)) return false; // route to product targeting instead, see lib/productTargets.ts
   if (isScrapedBoilerplate(text)) return false;
   if (isGarbledText(text)) return false;
@@ -97,13 +103,13 @@ export function isUsableKeyword(text: string): boolean {
 
 /**
  * Splits combined category strings like "Fiction / Fantasy / Epic" or
- * "Fiction, Fantasy, Epic" into individual thematic keyword candidates.
+ * "Mystery, Thriller & Suspense" into individual thematic keyword candidates.
+ * Shares the taxonomy cleaner with genre resolution so a breadcrumb node is
+ * broken up the same way wherever it enters the pipeline — bidding on
+ * "mystery, thriller & suspense" as one phrase matches nothing a reader types.
  */
 function splitCategoryString(raw: string): string[] {
-  return raw
-    .split(/\/|,|>/)
-    .map((s) => normalize(s))
-    .filter(isUsableKeyword);
+  return cleanTaxonomyTerms(raw).filter(isUsableKeyword);
 }
 
 export function buildCategoryCandidates(
@@ -150,7 +156,10 @@ export function buildBookContentCandidates(commonTerms: string[]): KeywordCandid
  * thematic ("comp-title" — tropes/themes bucket). See
  * lib/keywordMerge.ts#splitKeywordsByCategory for where that split gets used.
  */
-export function buildCompTitleCandidates(productPage: ProductPageData): KeywordCandidate[] {
+export function buildCompTitleCandidates(productPage: {
+  compTitles: string[];
+  categories: string[];
+}): KeywordCandidate[] {
   const titleTexts = new Set<string>();
   for (const title of productPage.compTitles) {
     const normalized = normalize(title);
@@ -484,24 +493,15 @@ export function buildDescriptionPhraseCandidates(description: string | undefined
   return buildTextMiningCandidates([description], "book-description");
 }
 
+/**
+ * Mines the questions shoppers asked on the product page. When there are no
+ * questions there are no candidates — an empty Q&A section says nothing about
+ * the book, so there is nothing to fall back to. (This used to emit "what
+ * is" / "how to" / "can you" as literal keywords, which shipped bare
+ * question stems into the keyword list for every book with a quiet Q&A tab.)
+ */
 export function buildQnaCandidates(questions: string[]): KeywordCandidate[] {
-  const candidates = buildTextMiningCandidates(questions, "customer-qna");
-
-  // Fallback: If no Q&A questions were found or too few, generate common Q&A patterns
-  if (candidates.length === 0 && questions.length === 0) {
-    const commonQuestions = [
-      "what is",
-      "how to",
-      "can you",
-      "is this",
-      "where to find",
-      "similar to",
-      "comparable to",
-    ];
-    return commonQuestions.slice(0, 3).map((text) => ({ text, sources: ["customer-qna" as const] }));
-  }
-
-  return candidates;
+  return buildTextMiningCandidates(questions, "customer-qna");
 }
 
 /**
@@ -822,6 +822,69 @@ export const RECOMMENDED_MAX_KEYWORDS = 50;
 // above since they're two separate ad groups now, not one shared budget.
 export const COMP_NAME_MAX_KEYWORDS = 40;
 
+// The caps above size a single *ad group*. A book's keyword library in the
+// keyword manager is research output, not an ad group: the user reviews it,
+// keeps what fits, and pauses or deletes the rest, so cutting the list to 50
+// throws away the long tail that the 20-plus sources exist to find. These are
+// the caps the book pipeline uses.
+export const BOOK_KEYWORD_MAX = 300;
+export const BOOK_COMP_NAME_MAX = 120;
+
+// Sources whose candidates are bare comparable author/title names — high
+// purchase intent, so they run as exact match rather than phrase.
+const COMP_NAME_SOURCES: KeywordSource[] = ["comp-name", "amazon-recs"];
+
+/**
+ * Match type per keyword, rather than one type for the whole batch:
+ *  - comparable author/title names run exact (a bare name in broad or phrase
+ *    match pulls in every book that mentions it),
+ *  - specific 3+ word phrases run phrase (the long tail is already narrow),
+ *  - short generic terms run broad (they need Amazon's expansion to find
+ *    real queries, and they'd match almost nothing on their own as exact).
+ */
+export function pickMatchType(candidate: KeywordCandidate): MatchType {
+  if (candidate.sources.some((source) => COMP_NAME_SOURCES.includes(source))) return "exact";
+  return candidate.text.trim().split(/\s+/).length >= 3 ? "phrase" : "broad";
+}
+
+// Ordered by how much the source tells you about *why* the keyword is here,
+// so the single `source` column stored per keyword names the most meaningful
+// contributor rather than whichever source happened to be merged first.
+const SOURCE_PRIORITY: KeywordSource[] = [
+  "ads-api",
+  "key-trope",
+  "manual",
+  "user-tag",
+  "comp-name",
+  "amazon-recs",
+  "goodreads-tags",
+  "review-language",
+  "customer-qna",
+  "genre-metadata",
+  "book-description",
+  "book-content",
+  "autocomplete",
+  "google-autocomplete",
+  "youtube-autocomplete",
+  "duckduckgo-autocomplete",
+  "buyer-intent",
+  "comp-title",
+  "author-catalog",
+  "wikipedia",
+  "wikidata",
+  "loc-subjects",
+  "firecrawl",
+  "synonym",
+];
+
+/** The most informative source backing a candidate — what gets stored on the keyword row. */
+export function primaryKeywordSource(candidate: KeywordCandidate): KeywordSource {
+  for (const source of SOURCE_PRIORITY) {
+    if (candidate.sources.includes(source)) return source;
+  }
+  return candidate.sources[0] ?? "manual";
+}
+
 /**
  * Boosts scores for keywords from high-quality competitor books (bestsellers,
  * high ratings, many reviews). Used for "comp-name" keywords sourced from the
@@ -911,146 +974,125 @@ export function finalizeKeywords(
 }
 
 /**
- * Fallback: Extract genre/theme keywords from product description and bullet points
- * when Google Books or Open Library don't have rich metadata.
+ * Reader-vocabulary phrases that describe *any* book — kept separate from the
+ * per-genre theme lists in lib/genre.ts so the recogniser below works for a
+ * cookbook as well as a crime novel. Nothing here is invented: a phrase only
+ * becomes a keyword when it literally appears in the book's own copy.
  */
-export function buildDescriptionMetadataCandidates(description?: string, bulletPoints?: string[]): KeywordCandidate[] {
+const UNIVERSAL_THEME_TERMS = [
+  "page turner",
+  "fast paced",
+  "character driven",
+  "thought provoking",
+  "heartwarming",
+  "laugh out loud",
+  "beautifully written",
+  "gripping",
+  "atmospheric",
+  "immersive",
+  "unputdownable",
+  "best seller",
+  "award winning",
+  "beginner friendly",
+  "step by step",
+  "illustrated",
+  "large print",
+  "for beginners",
+];
+
+/**
+ * Recognises theme phrases that actually occur in the book's description or
+ * bullets. `themeTerms` should be the genre-family theme vocabulary for this
+ * book (lib/genre.ts) — the list used to be thriller-only, so every book got
+ * checked for "domestic suspense" and none for "enemies to lovers" or "meal
+ * prep".
+ */
+export function buildDescriptionMetadataCandidates(
+  description?: string,
+  bulletPoints?: string[],
+  themeTerms: string[] = []
+): KeywordCandidate[] {
   const fullText = [description, ...(bulletPoints ?? [])].filter(Boolean).join(" ").toLowerCase();
   if (!fullText) return [];
 
-  // Common book descriptors and themes to look for
-  const themePatterns = [
-    "psychological thriller",
-    "dark mystery",
-    "gripping suspense",
-    "fast paced",
-    "page turner",
-    "twisty plot",
-    "unreliable narrator",
-    "domestic suspense",
-    "crime thriller",
-    "murder mystery",
-    "detective story",
-    "family secrets",
-    "shocking twist",
-    "edge of your seat",
-    "can't put it down",
-    "atmospheric",
-    "thought provoking",
-    "emotional",
-    "character driven",
-    "complex characters",
-    "morally gray",
-    "slow burn",
-    "intense",
-    "chilling",
-    "suspenseful",
-    "addictive",
-  ];
-
   const candidates: KeywordCandidate[] = [];
   const found = new Set<string>();
 
-  for (const pattern of themePatterns) {
-    if (fullText.includes(pattern) && !found.has(pattern)) {
-      found.add(pattern);
-      candidates.push({ text: pattern, sources: ["book-description" as const] });
-    }
+  for (const term of [...themeTerms, ...UNIVERSAL_THEME_TERMS]) {
+    const normalized = normalize(term);
+    if (found.has(normalized) || !fullText.includes(normalized)) continue;
+    if (!isUsableKeyword(normalized)) continue;
+    found.add(normalized);
+    candidates.push({ text: normalized, sources: ["book-description" as const] });
   }
 
   return candidates;
 }
 
 /**
- * Fallback: Extract review-based genre indicators when review language mining
- * doesn't produce enough results. Looks for common descriptive phrases in reviews.
+ * Genre/theme indicators recognised in review text, for when n-gram mining
+ * (lib/reviewMining.ts) comes back thin. Reader phrasing is mapped to the
+ * phrase a shopper would actually search ("couldn't put it down" is how a
+ * review puts it; "page turner" is what gets typed into the search box).
  */
-export function buildReviewGenreIndicators(reviewSnippets: string[]): KeywordCandidate[] {
+const REVIEW_INDICATORS: Array<[string, string]> = [
+  ["couldn't put it down", "page turner"],
+  ["could not put it down", "page turner"],
+  ["page turner", "page turner"],
+  ["keep you guessing", "twisty read"],
+  ["didn't see it coming", "plot twist"],
+  ["edge of your seat", "suspenseful read"],
+  ["made me cry", "emotional read"],
+  ["laughed out loud", "funny book"],
+  ["easy to follow", "easy to follow guide"],
+  ["well researched", "well researched book"],
+  ["beautifully written", "beautifully written novel"],
+  ["comfort read", "comfort read"],
+  ["binge read", "binge read"],
+];
+
+/**
+ * Turns recurring review phrasing into search-shaped candidates. Genre-family
+ * theme terms are folded in so the indicators match the book at hand rather
+ * than a fixed thriller vocabulary.
+ */
+export function buildReviewGenreIndicators(
+  reviewSnippets: string[],
+  themeTerms: string[] = []
+): KeywordCandidate[] {
   const text = reviewSnippets.join(" ").toLowerCase();
   if (!text) return [];
 
-  // Commonly used review phrases that indicate genre/themes
-  const reviewIndicators = new Map([
-    ["couldn't put it down", "addictive read"],
-    ["page turner", "page turner"],
-    ["keep you guessing", "surprising twist"],
-    ["didn't see it coming", "plot twist"],
-    ["psychological", "psychological thriller"],
-    ["twisted", "twisted plot"],
-    ["suspenseful", "suspenseful"],
-    ["fast-paced", "fast-paced"],
-    ["gripping", "gripping"],
-    ["intense", "intense"],
-    ["edge of your seat", "suspense"],
-    ["dark", "dark mystery"],
-  ]);
-
   const candidates: KeywordCandidate[] = [];
   const found = new Set<string>();
+  const consider = (phrase: string, keyword: string) => {
+    const normalized = normalize(keyword);
+    if (found.has(normalized) || !text.includes(phrase)) return;
+    if (!isUsableKeyword(normalized)) return;
+    found.add(normalized);
+    candidates.push({ text: normalized, sources: ["review-language" as const] });
+  };
 
-  for (const [phrase, indicator] of reviewIndicators) {
-    if (text.includes(phrase) && !found.has(indicator)) {
-      found.add(indicator);
-      if (isUsableKeyword(indicator)) {
-        candidates.push({ text: indicator, sources: ["review-language" as const] });
-      }
-    }
-  }
+  for (const [phrase, keyword] of REVIEW_INDICATORS) consider(phrase, keyword);
+  for (const term of themeTerms) consider(normalize(term), term);
 
   return candidates;
 }
 
 /**
- * Fallback: When Wikidata/Wikipedia/LoC don't return results, generate synthetic
- * genre keywords based on common patterns for mystery/thriller/suspense books.
+ * The book's genre vocabulary as keyword candidates: its own resolved genre
+ * terms plus the curated search phrases for the families it belongs to (see
+ * lib/genre.ts). Replaces a hardcoded mystery/thriller generator that fired
+ * on any book whose blurb happened to contain the word "secrets".
  */
-export function buildSyntheticGenreKeywords(title: string, bookDescription?: string): KeywordCandidate[] {
-  const fullText = `${title} ${bookDescription || ""}`.toLowerCase();
-  const candidates: KeywordCandidate[] = [];
-  const found = new Set<string>();
-
-  // Detect book type from keywords in title/description
-  const isThrillerLike = /thriller|suspense|mystery|crime|murder|detective|investigation/.test(fullText);
-  const isDark = /dark|twisted|sinister|gritty|noir|moody/.test(fullText);
-  const isEmotional = /emotional|heartfelt|touching|moving|profound|deep/.test(fullText);
-  const isTwisty = /twist|shocking|unexpected|revelatory|secrets/.test(fullText);
-
-  // Generate relevant keywords based on detected characteristics
-  if (isThrillerLike) {
-    for (const term of ["mystery thriller", "crime fiction", "suspense novel", "detective story"]) {
-      if (!found.has(term)) {
-        found.add(term);
-        candidates.push({ text: term, sources: ["genre-metadata" as const] });
-      }
-    }
+export function buildGenreFamilyCandidates(
+  genreTerms: string[],
+  familySearchTerms: string[]
+): KeywordCandidate[] {
+  const texts = new Set<string>();
+  for (const term of [...genreTerms, ...familySearchTerms]) {
+    const normalized = normalize(term);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
   }
-
-  if (isDark) {
-    for (const term of ["dark fiction", "psychological", "noir", "gritty"]) {
-      if (!found.has(term)) {
-        found.add(term);
-        candidates.push({ text: term, sources: ["genre-metadata" as const] });
-      }
-    }
-  }
-
-  if (isTwisty) {
-    for (const term of ["twist ending", "plot twist", "unreliable narrator", "shocking ending"]) {
-      if (!found.has(term)) {
-        found.add(term);
-        candidates.push({ text: term, sources: ["genre-metadata" as const] });
-      }
-    }
-  }
-
-  if (isEmotional) {
-    for (const term of ["character driven", "emotional journey", "literary"]) {
-      if (!found.has(term)) {
-        found.add(term);
-        candidates.push({ text: term, sources: ["genre-metadata" as const] });
-      }
-    }
-  }
-
-  return candidates;
+  return Array.from(texts).map((text) => ({ text, sources: ["genre-metadata" as const] }));
 }

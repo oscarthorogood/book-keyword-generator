@@ -210,6 +210,38 @@ export async function rankKeywordsWithAi(
 }
 
 /**
+ * Relevance pass that refines an order instead of replacing it. The AI sees a
+ * long list and reliably omits some of it, so anything it doesn't mention
+ * keeps its heuristic position at the back of the list rather than being
+ * silently dropped — only an explicit "drop" verdict removes a candidate.
+ * Use this when the goal is a full research list; use mergeAiRanking when the
+ * goal is a small, strictly AI-chosen shortlist.
+ */
+export function applyAiRelevance(
+  pool: KeywordCandidate[],
+  ranked: AiRankedKeyword[]
+): KeywordCandidate[] {
+  const verdicts = new Map(ranked.map((r) => [r.text, r]));
+
+  const judged: KeywordCandidate[] = [];
+  const unjudged: KeywordCandidate[] = [];
+
+  for (const candidate of pool) {
+    const verdict = verdicts.get(candidate.text);
+    if (!verdict) {
+      unjudged.push(candidate);
+      continue;
+    }
+    if (verdict.category === "drop") continue;
+    judged.push({ ...candidate, score: verdict.score });
+  }
+
+  judged.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  unjudged.sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
+  return [...judged, ...unjudged];
+}
+
+/**
  * Maps the AI's category/score decisions back onto the original
  * KeywordCandidate objects (preserving sources/suggestedBid — the AI judges
  * relevance, it doesn't invent bid data), sorts by AI score, and caps.

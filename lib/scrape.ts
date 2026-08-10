@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import { extractAmazonMetadata, isFirecrawlConfigured, type AmazonPageMetadata } from "./firecrawl";
+import { type AmazonPageMetadata } from "./firecrawl";
 import { fetchAmazonProductViaSerpApi, isSerpApiConfigured } from "./serpApi";
 import { KeywordCandidate, Marketplace, ProductPageData, RelatedCompetitor, RelatedCompetitorCrawl } from "./types";
 
@@ -121,18 +121,6 @@ const AUTOCOMPLETE_MODIFIERS = [
   "new release",
 ];
 
-// Common book genres to try as autocomplete seed variations
-const COMMON_GENRES = [
-  "thriller",
-  "mystery",
-  "suspense",
-  "crime",
-  "drama",
-  "literary fiction",
-  "psychological",
-  "detective",
-];
-
 // Format-specific search queries
 const SEARCH_FORMATS = [
   "ebook",
@@ -143,76 +131,51 @@ const SEARCH_FORMATS = [
   "complete",
 ];
 const ALPHABET = "abcdefghijklmnopqrstuvwxyz".split("");
-// Suffix sweep (title + a..z) + prefix sweep (a..z + title) both cost a
-// letter each, plus title/modifiers/author — see buildAutocompleteSeeds.
-const MAX_AUTOCOMPLETE_SEEDS = 65;
+// Suffix sweep (title + a..z) plus title/genre/modifier/author seeds — see
+// buildAutocompleteSeeds. The sweep is added last, so this cap decides how
+// much of the alphabet actually gets swept.
+const MAX_AUTOCOMPLETE_SEEDS = 80;
 const MAX_GOOGLE_SUGGEST_SEEDS = 20;
 const AUTOCOMPLETE_CONCURRENCY = 15;
 
 /**
- * Generate additional keyword seeds from Firecrawl-extracted metadata
- * (categories, features, keywords) to improve autocomplete coverage.
- * These seeds target category-specific and feature-based searches.
- * Falls back to empty seeds/metadata if Firecrawl is not configured.
+ * Extra autocomplete seeds derived from Firecrawl's structured extraction
+ * (categories, marketing features, the genre/trope phrases it surfaces), for
+ * category- and feature-specific searches the title sweep never reaches.
  *
- * Returns the raw extraction alongside the seeds so callers can also mine the
- * terms directly (buildFirecrawlCandidates in lib/keywordMerge.ts) without
- * paying for a second extraction call.
+ * Pure: the extraction itself is fetched once during snapshot capture
+ * (lib/bookSnapshot.ts) and passed in, rather than each consumer paying for
+ * its own Firecrawl call.
  */
-export async function buildMetadataSeeds(
-  asin: string,
-  marketplace: Marketplace
-): Promise<{ seeds: string[]; metadata: AmazonPageMetadata }> {
-  if (!isFirecrawlConfigured()) return { seeds: [], metadata: {} };
+export function buildSeedsFromMetadata(metadata: AmazonPageMetadata): string[] {
+  const seeds = new Set<string>();
 
-  try {
-    const url = getProductPageUrl(asin, marketplace);
-    const metadata = await extractAmazonMetadata(url);
-
-    const seeds = new Set<string>();
-
-    // Add category-based seeds
-    if (metadata.categories && metadata.categories.length > 0) {
-      const mainCategory = metadata.categories[0];
-      seeds.add(mainCategory);
-      if (metadata.title) {
-        const combined = `${metadata.title} ${mainCategory}`.slice(0, 100);
-        seeds.add(combined);
-      }
-    }
-
-    // Add feature-based seeds (product features often become search queries)
-    if (metadata.features && metadata.features.length > 0) {
-      // Extract key words from features (skip very long ones)
-      for (const feature of metadata.features.slice(0, 3)) {
-        const words = feature.split(/\s+/).filter(w => w.length > 3);
-        if (words.length > 0 && words.length <= 3) {
-          seeds.add(words.join(" "));
-        }
-      }
-    }
-
-    // Add pre-extracted keywords if available
-    if (metadata.keywords && metadata.keywords.length > 0) {
-      for (const keyword of metadata.keywords.slice(0, 5)) {
-        if (keyword.length > 2 && keyword.length < 50) {
-          seeds.add(keyword);
-        }
-      }
-    }
-
-    // Add language-specific seeds if not English
-    if (metadata.language && metadata.language.toLowerCase() !== "english" && metadata.title) {
-      seeds.add(`${metadata.title} ${metadata.language}`);
-    }
-
-    return {
-      seeds: Array.from(seeds).filter((s) => s.length > 2 && s.length < 100),
-      metadata,
-    };
-  } catch {
-    return { seeds: [], metadata: {} };
+  if (metadata.categories && metadata.categories.length > 0) {
+    const mainCategory = metadata.categories[metadata.categories.length - 1];
+    seeds.add(mainCategory);
+    if (metadata.title) seeds.add(`${metadata.title} ${mainCategory}`.slice(0, 100));
   }
+
+  // Marketing bullets are sentences; only the short ones read like a query.
+  for (const feature of (metadata.features ?? []).slice(0, 3)) {
+    const words = feature.split(/\s+/).filter((w) => w.length > 3);
+    if (words.length > 0 && words.length <= 3) seeds.add(words.join(" "));
+  }
+
+  for (const keyword of (metadata.keywords ?? []).slice(0, 8)) {
+    if (keyword.length > 2 && keyword.length < 50) seeds.add(keyword);
+  }
+
+  if (metadata.series) {
+    seeds.add(metadata.series);
+    seeds.add(`${metadata.series} series`);
+  }
+
+  if (metadata.language && metadata.language.toLowerCase() !== "english" && metadata.title) {
+    seeds.add(`${metadata.title} ${metadata.language}`);
+  }
+
+  return Array.from(seeds).filter((s) => s.length > 2 && s.length < 100);
 }
 
 /**
@@ -220,66 +183,79 @@ export async function buildMetadataSeeds(
  * character typed, so sweeping a-z after the title ("<title> a", "<title>
  * b", ...) harvests far more real suggestions than the bare title alone — a
  * well-known free technique for multiplying yield from the same endpoint.
- * Also sweeps the *reverse* order ("a <title>", "b <title>", ...), which
- * catches modifier words that appear before the phrase instead of after it
- * (e.g. "dark sci fi romance") — a query shape the suffix sweep alone can't
- * reach. See the manual keyword research blueprint, section 2.
+ * See the manual keyword research blueprint, section 2.
  *
- * Enhanced to also generate seeds from title fragments and author names
- * to improve coverage for books with long or compound titles.
+ * Genre seeds come from the book's own resolved genre vocabulary
+ * (lib/genre.ts, captured in the book snapshot), not from a fixed list. The
+ * fixed list used to be thriller/mystery/crime/detective, which meant every
+ * romance, cookbook and memoir in the library got seeded with
+ * "<title> thriller" and then generated thriller keywords off the back of
+ * whatever Amazon suggested for it.
  */
-export function buildAutocompleteSeeds(title: string, author?: string): string[] {
-  const cleanTitle = title.trim();
-  if (!cleanTitle) return [];
+export function buildAutocompleteSeeds(params: {
+  title: string;
+  author?: string;
+  genreTerms?: string[];
+  seriesName?: string;
+}): string[] {
+  const cleanTitle = params.title.trim();
+  const author = params.author?.trim();
+  const genreTerms = (params.genreTerms ?? []).filter(Boolean);
+  if (!cleanTitle && genreTerms.length === 0) return [];
 
   const seeds = new Set<string>();
-  seeds.add(cleanTitle);
+  const add = (seed: string) => {
+    const trimmed = seed.trim();
+    if (trimmed.length > 2) seeds.add(trimmed);
+  };
 
-  // Add seeds from title fragments (first/last few words)
-  const titleWords = cleanTitle.split(/\s+/).filter(w => w.length > 2);
+  if (cleanTitle) add(cleanTitle);
+
+  // Title fragments — long or compound titles rarely autocomplete in full.
+  const titleWords = cleanTitle.split(/\s+/).filter((w) => w.length > 2);
   if (titleWords.length > 1) {
-    seeds.add(titleWords.slice(0, Math.min(3, titleWords.length)).join(" "));
-    seeds.add(titleWords.slice(-Math.min(3, titleWords.length)).join(" "));
+    add(titleWords.slice(0, Math.min(3, titleWords.length)).join(" "));
+    add(titleWords.slice(-Math.min(3, titleWords.length)).join(" "));
   }
 
-  // Add modifier combinations
-  for (const modifier of AUTOCOMPLETE_MODIFIERS) {
-    seeds.add(`${cleanTitle} ${modifier}`);
+  // Format / series-order / recency modifiers on the title.
+  if (cleanTitle) {
+    for (const modifier of AUTOCOMPLETE_MODIFIERS) add(`${cleanTitle} ${modifier}`);
+    for (const format of SEARCH_FORMATS) add(`${cleanTitle} ${format}`);
   }
 
-  // Add genre-based variations (helps with short titles like "Never Lie")
-  for (const genre of COMMON_GENRES) {
-    seeds.add(`${cleanTitle} ${genre}`);
-    if (author) {
-      seeds.add(`${author} ${genre}`);
-    }
+  // The book's real genres, on their own and crossed with title/author. Genre
+  // seeds alone are what surface category-level demand ("cozy mystery series"),
+  // which the title-only sweep never reaches.
+  for (const genre of genreTerms) {
+    add(genre);
+    add(`${genre} books`);
+    if (cleanTitle) add(`${cleanTitle} ${genre}`);
+    if (author) add(`${author} ${genre}`);
   }
 
-  // Add format-specific searches
-  for (const format of SEARCH_FORMATS) {
-    seeds.add(`${cleanTitle} ${format}`);
+  if (params.seriesName) {
+    add(params.seriesName);
+    add(`${params.seriesName} series`);
+    add(`${params.seriesName} books in order`);
   }
 
-  // Add author-based seeds for better targeting
   if (author) {
-    seeds.add(`${cleanTitle} ${author}`);
-    seeds.add(author);
-    seeds.add(`${author} books`);
-    seeds.add(`${author} thriller`);
-    seeds.add(`${author} mystery`);
-
-    // Author name variations (first name only if available)
+    add(author);
+    add(`${author} books`);
+    add(`${author} books in order`);
+    if (cleanTitle) add(`${cleanTitle} ${author}`);
     const authorWords = author.split(/\s+/);
     if (authorWords.length > 1) {
-      seeds.add(authorWords[0]); // First name
-      seeds.add(`${authorWords[0]} books`);
+      add(authorWords[0]);
+      add(`${authorWords[0]} books`);
     }
   }
 
-  // Alphabet sweeps for exhaustive coverage (more selective now)
-  const selectedLetters = "abcmnopstux".split(""); // Focus on common starting letters
-  for (const letter of selectedLetters) {
-    seeds.add(`${cleanTitle} ${letter}`);
+  // Full a-z suffix sweep last: whatever budget is left after the targeted
+  // seeds above goes to exhaustive coverage.
+  if (cleanTitle) {
+    for (const letter of ALPHABET) add(`${cleanTitle} ${letter}`);
   }
 
   return Array.from(seeds).slice(0, MAX_AUTOCOMPLETE_SEEDS);
@@ -950,11 +926,9 @@ function extractLanguages($: cheerio.CheerioAPI): string[] {
 function extractDiscountInfo($: cheerio.CheerioAPI): { originalPrice?: number; discountPercentage?: number } {
   const result: { originalPrice?: number; discountPercentage?: number } = {};
 
-  const strikeText = $(".a-price.a-text-strike .a-offscreen").text();
-  if (strikeText) {
-    const match = strikeText.match(/[\d,]+\.\d{2}/);
-    if (match) result.originalPrice = parseFloat(match[0].replace(/,/g, ""));
-  }
+  // Shares the multi-selector strike-through lookup rather than repeating a
+  // single-selector copy of it here.
+  result.originalPrice = extractOriginalPrice($);
 
   const discountText = $(".savingsPercent").text();
   if (discountText) {

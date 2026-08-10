@@ -86,95 +86,128 @@
 
 ---
 
-## Campaign Generation Endpoints
+## Book & Keyword Endpoints
 
-### POST /api/generate
+### POST /api/books/create
 
-**Purpose:** Generate campaign keywords and bulksheet
+**Purpose:** Add a book. One identifier is all the caller supplies — everything
+else is captured server-side.
 
 **Request:**
 ```json
 {
-  "asin": "B0BBL2ZW73",
-  "authorName": "Freida McFadden",
-  "seriesName": "Haven's End Series",
-  "bookTitle": "Never Lie",
-  "marketplace": "US",
-  "matchTypeStrategy": "phrase-exact",  // "phrase-only" | "phrase-exact" | "all"
-  "dailyBudget": 5.00,
-  "sources": {
-    "tropesKeywords": true,
-    "competitorNames": true,
-    "productTargets": true,
-    // ... other sources
-  }
+  "input": "https://www.amazon.co.uk/dp/B0BBL2ZW73",
+  "marketplace": "US"
 }
 ```
 
-**Authentication:** Required (user session or magic link)
+`input` accepts an Amazon product link, a bare ASIN, or an ISBN-10/13
+(converted to the ISBN-10 Amazon uses as the ASIN for print books). `asin` is
+accepted as an alias. `marketplace` is only read when the input is *not* a
+link — a link states its own marketplace, and that wins.
+
+**Side effects:** captures the book's full metadata snapshot (see
+`lib/bookSnapshot.ts`) and stores it on `books.metadata_json`. This is the
+single Amazon read per book; keyword generation reuses it.
 
 **Response:**
 ```json
 {
   "success": true,
-  "summary": {
-    "tropesCount": 25,
-    "competitorNamesCount": 15,
-    "productTargetCount": 10,
-    "totalRows": 150,
-    "generatedAt": "2024-08-10T10:30:00Z",
-    "downloadUrl": "https://...(signed URL)",
-    "expiresAt": "2024-08-10T11:30:00Z"
-  },
-  "metadata": {
-    "campaignName": "PB_FM_B0BBL2ZW73_Freida_McFadden_Never_Lie_US_SPM_1",
-    "estimatedDailySpend": 2.50
-  }
+  "book": { "id": "uuid", "asin": "B0BBL2ZW73", "title": "…", "author": "…" },
+  "captureOk": true,
+  "warning": null
 }
 ```
 
 **Error codes:**
-- 400: Invalid request (missing fields, invalid ASIN, etc.)
-- 401: Not authenticated
-- 500: Generation failed (logs error details)
+- 400: input missing or not a recognisable link/ASIN/ISBN
+- 401: not authenticated
+- 409: book already in the library (response carries `bookId` — the client
+  navigates to it rather than treating this as an error)
 
-**Side effects:**
-- Generates Excel bulksheet
-- Archives to Supabase Storage (best-effort, doesn't block)
-- Creates signed download URL (1 hour TTL)
-
-**Implementation:** `app/api/generate/route.ts`
+**Implementation:** `app/api/books/create/route.ts`
 
 ---
 
-### GET /api/lookup
+### POST /api/books/[id]/refresh
 
-**Purpose:** Metadata lookup (book details, competitor info, etc.)
+**Purpose:** Re-capture the book's Amazon metadata, replacing the stored
+snapshot. Used when the first capture hit a bot check, or the listing changed.
 
-**Query Parameters:**
-- `asin` (required): Product ASIN
-- `marketplace` (optional): Market code (default: "US")
+**Response:** `{ success, book, captureOk, warning }`
+
+**Implementation:** `app/api/books/[id]/refresh/route.ts`
+
+---
+
+### POST /api/books/[id]/keywords/generate
+
+**Purpose:** Run the book's stored snapshot through every keyword source and
+write the results into its keyword list.
+
+**Request (all fields optional):**
+```json
+{
+  "keyTropes": ["enemies to lovers", "small town"],
+  "knownTags": ["cozy"],
+  "keywordCategories": ["core-genre", "comp-titles"],
+  "sources": ["autocomplete", "comp-name"],
+  "defaultBid": 0.5
+}
+```
+
+Snapshot-backed sources (comparable titles, reviews, Q&A, author catalogue,
+genre metadata, Goodreads/Open Library/Google Books/Wikipedia/Wikidata/LoC)
+read the stored capture. Live sources per run: the four autocomplete engines,
+Datamuse synonyms, and the Ads API when configured. A snapshot that is missing
+or stale is re-captured first.
 
 **Response:**
 ```json
 {
-  "asin": "B0BBL2ZW73",
-  "title": "Never Lie",
-  "author": "Freida McFadden",
-  "marketplaceData": {
-    "price": 14.99,
-    "rating": 4.5,
-    "reviews": 8234
-  }
+  "success": true,
+  "generatedCount": 312,
+  "insertedCount": 289,
+  "alreadyPresentCount": 23,
+  "contributingSources": ["autocomplete", "comp-name", "genre-metadata"],
+  "bySource": { "autocomplete": 140 },
+  "byCategory": { "core-genre": 12 },
+  "byMatchType": { "phrase": 200, "broad": 60, "exact": 52 },
+  "genreTerms": ["cozy mystery", "british detectives"],
+  "aiRanked": false
 }
 ```
 
 **Error codes:**
-- 400: Invalid ASIN
-- 404: Book not found
-- 500: Lookup service error
+- 401: not authenticated
+- 404: book not found
+- 422: the book's metadata couldn't be read, so there's nothing to generate
+  from (`needsRefresh: true` — re-fetch the metadata first)
+- 502: every source came back empty
 
-**Implementation:** `app/api/lookup/route.ts`
+**Implementation:** `app/api/books/[id]/keywords/generate/route.ts`
+
+---
+
+### GET/POST/PATCH/DELETE /api/books/[id]/keywords
+
+**Purpose:** List, add, bulk-update and bulk-delete a book's keywords.
+
+- `GET` — the book's keyword list.
+- `POST` — `{ text, matchType? }` or `{ keywords: [{ text, matchType? }] }`.
+- `PATCH` — `{ ids: string[], status?, matchType? }` for a bulk review pass.
+- `DELETE` — `{ ids: string[] }`, or `{ all: true }` to clear the list.
+
+**Implementation:** `app/api/books/[id]/keywords/route.ts`
+
+---
+
+### PATCH/DELETE /api/keywords/[id]
+
+**Purpose:** Update or delete one keyword (status, match type, category, bid, text).
+
+**Implementation:** `app/api/keywords/[id]/route.ts`
 
 ---
 
@@ -284,8 +317,9 @@ Current implementation has no built-in rate limiting. For production, add:
 ```typescript
 // Suggested limits
 '/api/auth/magic-link': 5 per minute per IP
-'/api/generate': 10 per day per user
-'/api/lookup': 100 per day per user
+'/api/books/create': 30 per day per user      // each call is a full metadata capture
+'/api/books/[id]/refresh': 10 per day per user
+'/api/books/[id]/keywords/generate': 50 per day per user
 ```
 
 ---
@@ -304,21 +338,20 @@ Cache-Control: no-cache, no-store
 
 ## Example cURL Commands
 
-### Generate Campaign
+### Add a Book
 ```bash
-curl -X POST http://localhost:3000/api/generate \
+curl -X POST http://localhost:3000/api/books/create \
   -H "Content-Type: application/json" \
   -H "Cookie: auth-token=..." \
-  -d '{
-    "asin": "B0BBL2ZW73",
-    "authorName": "Freida McFadden",
-    "seriesName": "Haven'"'"'s End",
-    "bookTitle": "Never Lie",
-    "marketplace": "US",
-    "matchTypeStrategy": "phrase-exact",
-    "dailyBudget": 5.00,
-    "sources": { "tropesKeywords": true }
-  }'
+  -d '{ "input": "https://www.amazon.com/dp/B0BBL2ZW73" }'
+```
+
+### Generate Keywords for a Book
+```bash
+curl -X POST http://localhost:3000/api/books/<book-id>/keywords/generate \
+  -H "Content-Type: application/json" \
+  -H "Cookie: auth-token=..." \
+  -d '{ "keyTropes": ["unreliable narrator"] }'
 ```
 
 ### Request Sign-In
