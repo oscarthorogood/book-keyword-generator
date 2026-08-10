@@ -1,44 +1,44 @@
 "use client";
 
 import { Plus } from "lucide-react";
+import { useEffect, useState } from "react";
+import { createBrowserClient } from "@supabase/ssr";
 
 interface Campaign {
   id: string;
   name: string;
-  bookTitle: string;
-  author: string;
   asin: string;
   marketplace: string;
-  dailyBudget: number;
-  startDate: string;
-  tropesKeywordCount: number;
-  compNameKeywordCount: number;
-  productTargetCount: number;
-  createdAt: string;
-  status: "draft" | "uploaded" | "active";
+  daily_budget: number;
+  tropes_keyword_count: number;
+  comp_names_keyword_count: number;
+  product_target_count: number;
+  created_at: string;
+  status: "draft" | "uploaded" | "active" | "archived";
 }
 
 interface CampaignsDashboardProps {
   onCreateNew: () => void;
 }
 
-// Mock data for now — will be replaced with real data from Supabase
-const MOCK_CAMPAIGNS: Campaign[] = [];
-
 function CampaignCard({ campaign }: { campaign: Campaign }) {
-  const totalKeywords = campaign.tropesKeywordCount + campaign.compNameKeywordCount;
+  // Extract book title from campaign name if available
+  const campaignNameParts = campaign.name.split("_");
+  const bookTitle = campaignNameParts.slice(3, -2).join(" ") || campaign.name;
+  const totalKeywords = campaign.tropes_keyword_count + campaign.comp_names_keyword_count;
   const statusColors = {
     draft: "bg-yellow-100 text-yellow-800",
     uploaded: "bg-blue-100 text-blue-800",
     active: "bg-green-100 text-green-800",
+    archived: "bg-gray-100 text-gray-800",
   };
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6 hover:shadow-md transition-shadow">
       <div className="flex justify-between items-start mb-4">
         <div className="flex-1">
-          <h3 className="font-semibold text-gray-900 text-lg mb-1">{campaign.bookTitle}</h3>
-          <p className="text-sm text-gray-600">{campaign.author}</p>
+          <h3 className="font-semibold text-gray-900 text-lg mb-1">{bookTitle}</h3>
+          <p className="text-sm text-gray-600 font-mono">{campaign.asin}</p>
         </div>
         <span className={`px-2 py-1 rounded text-xs font-medium ${statusColors[campaign.status]}`}>
           {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
@@ -47,35 +47,31 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
 
       <div className="grid grid-cols-2 gap-4 mb-4 text-sm">
         <div>
-          <p className="text-gray-600">ASIN</p>
-          <p className="font-mono text-gray-900">{campaign.asin}</p>
-        </div>
-        <div>
           <p className="text-gray-600">Marketplace</p>
           <p className="font-semibold text-gray-900">{campaign.marketplace}</p>
         </div>
         <div>
           <p className="text-gray-600">Daily Budget</p>
-          <p className="font-semibold text-gray-900">${campaign.dailyBudget.toFixed(2)}</p>
+          <p className="font-semibold text-gray-900">${campaign.daily_budget?.toFixed(2) || "0.00"}</p>
         </div>
-        <div>
-          <p className="text-gray-600">Start Date</p>
-          <p className="font-semibold text-gray-900">{new Date(campaign.startDate).toLocaleDateString()}</p>
+        <div className="col-span-2">
+          <p className="text-gray-600">Generated</p>
+          <p className="font-semibold text-gray-900">{new Date(campaign.created_at).toLocaleDateString()}</p>
         </div>
       </div>
 
       <div className="grid grid-cols-3 gap-2 pt-4 border-t border-gray-200">
         <div className="text-center">
-          <p className="text-lg font-semibold text-blue-600">{campaign.tropesKeywordCount}</p>
-          <p className="text-xs text-gray-600">Tropes Keywords</p>
+          <p className="text-lg font-semibold text-blue-600">{campaign.tropes_keyword_count}</p>
+          <p className="text-xs text-gray-600">Tropes</p>
         </div>
         <div className="text-center">
-          <p className="text-lg font-semibold text-blue-600">{campaign.compNameKeywordCount}</p>
+          <p className="text-lg font-semibold text-blue-600">{campaign.comp_names_keyword_count}</p>
           <p className="text-xs text-gray-600">Comp Names</p>
         </div>
         <div className="text-center">
-          <p className="text-lg font-semibold text-blue-600">{campaign.productTargetCount}</p>
-          <p className="text-xs text-gray-600">Product Targets</p>
+          <p className="text-lg font-semibold text-blue-600">{campaign.product_target_count}</p>
+          <p className="text-xs text-gray-600">Targets</p>
         </div>
       </div>
 
@@ -87,7 +83,42 @@ function CampaignCard({ campaign }: { campaign: Campaign }) {
 }
 
 export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardProps) {
-  const campaigns = MOCK_CAMPAIGNS;
+  const [campaigns, setCampaigns] = useState<Campaign[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    async function loadCampaigns() {
+      try {
+        setLoading(true);
+        const supabase = createBrowserClient(
+          process.env.NEXT_PUBLIC_SUPABASE_URL!,
+          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+        );
+
+        const { data, error: err } = await supabase
+          .from("campaigns")
+          .select("*")
+          .order("created_at", { ascending: false });
+
+        if (err) {
+          console.warn("Could not load campaigns:", err.message);
+          // Not an error if the table doesn't exist yet
+          setCampaigns([]);
+        } else {
+          setCampaigns(data || []);
+        }
+      } catch (err) {
+        console.warn("Failed to load campaigns:", err);
+        setCampaigns([]);
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadCampaigns();
+  }, []);
+
   const isEmpty = campaigns.length === 0;
 
   return (
@@ -113,7 +144,14 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
 
       {/* Content */}
       <div className="max-w-7xl mx-auto px-6 py-12">
-        {isEmpty ? (
+        {loading ? (
+          <div className="flex items-center justify-center min-h-96">
+            <div className="text-center">
+              <div className="animate-spin w-12 h-12 border-4 border-blue-200 border-t-blue-600 rounded-full mx-auto mb-4"></div>
+              <p className="text-gray-600">Loading campaigns...</p>
+            </div>
+          </div>
+        ) : isEmpty ? (
           <div className="space-y-6">
             <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-12 text-center">
               <div className="mb-6">

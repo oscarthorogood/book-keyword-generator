@@ -12,6 +12,7 @@ import {
 import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
 import { archiveBulksheet } from "@/lib/supabaseStorage";
 import { currentUser } from "@/lib/supabaseServer";
+import { saveCampaign } from "@/lib/campaignPersistence";
 import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
 import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
@@ -950,6 +951,32 @@ export async function POST(req: NextRequest) {
   // Best-effort copy to Supabase Storage. Returns null when Storage isn't
   // configured or the upload fails — the email is still sent either way.
   const archived = await archiveBulksheet(buffer, campaignName, user.id);
+
+  // Save campaign to database for history and re-running (Phase 3)
+  await saveCampaign({
+    userId: user.id,
+    asin: request.asin,
+    campaignName,
+    marketplace: request.marketplace,
+    tropesCount: finalTropesCount,
+    compNamesCount: finalCompNameCount,
+    productTargetCount: finalProductTargetCount,
+    matchTypeStrategy: request.matchTypeStrategy || "phrase-only",
+    dailyBudget: request.dailyBudget || 0,
+    bulksheetPath: archived?.path,
+    bulksheetDownloadUrl: archived?.signedUrl,
+    configJson: {
+      asin: request.asin,
+      authorName: request.authorName,
+      bookTitle: request.bookTitle,
+      seriesName: request.seriesName,
+      marketplace: request.marketplace,
+      matchTypeStrategy: request.matchTypeStrategy,
+      dailyBudget: request.dailyBudget,
+      startDate: request.startDate,
+      endDate: request.endDate,
+    },
+  });
 
   // Email the bulksheet instead of streaming to browser
   const { sendBulksheetEmail } = await import("@/lib/email");
