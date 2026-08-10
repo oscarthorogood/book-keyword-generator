@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { isValidProductAsin } from "./asinValidation";
 import { MATCH_TYPE_BID_MULTIPLIER } from "./bidding";
 import { KeywordCandidate, MatchType, ProductTargetCandidate } from "./types";
 
@@ -170,6 +171,14 @@ export async function buildBulksheet(input: BulksheetInput): Promise<Buffer> {
     }
 
     for (const target of adGroup.productTargets ?? []) {
+      // Validate ASIN before shipping to bulksheet (§2.2)
+      if (!isValidProductAsin(target.asin)) {
+        console.warn(
+          `[buildBulksheet] Skipping invalid product target ASIN: "${target.asin}"`
+        );
+        continue;
+      }
+
       rows.push({
         Product: "Sponsored Products",
         Entity: "Product Targeting",
