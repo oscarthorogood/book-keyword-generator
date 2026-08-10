@@ -30,7 +30,7 @@ export default function Home() {
       {/* Sidebar */}
       <div
         className={`${
-          sidebarOpen ? "w-72" : "w-20"
+          sidebarOpen ? "w-64" : "w-16"
         } bg-white border-r border-gray-200 transition-all duration-300 flex flex-col fixed h-screen left-0 top-0 z-40`}
       >
         {/* Logo/Header */}
@@ -90,7 +90,7 @@ export default function Home() {
       </div>
 
       {/* Main Content */}
-      <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-72" : "ml-20"}`}>
+      <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-64" : "ml-16"}`}>
         {currentPage === "dashboard" ? (
           <CampaignsDashboard onCreateNew={() => setCurrentPage("form")} />
         ) : (
