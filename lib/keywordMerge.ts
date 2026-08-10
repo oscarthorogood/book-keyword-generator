@@ -889,3 +889,148 @@ export function finalizeKeywords(
   const scored = scoreAndTierBids(collapsed, defaultBid);
   return scored.slice(0, maxResults);
 }
+
+/**
+ * Fallback: Extract genre/theme keywords from product description and bullet points
+ * when Google Books or Open Library don't have rich metadata.
+ */
+export function buildDescriptionMetadataCandidates(description?: string, bulletPoints?: string[]): KeywordCandidate[] {
+  const fullText = [description, ...(bulletPoints ?? [])].filter(Boolean).join(" ").toLowerCase();
+  if (!fullText) return [];
+
+  // Common book descriptors and themes to look for
+  const themePatterns = [
+    "psychological thriller",
+    "dark mystery",
+    "gripping suspense",
+    "fast paced",
+    "page turner",
+    "twisty plot",
+    "unreliable narrator",
+    "domestic suspense",
+    "crime thriller",
+    "murder mystery",
+    "detective story",
+    "family secrets",
+    "shocking twist",
+    "edge of your seat",
+    "can't put it down",
+    "atmospheric",
+    "thought provoking",
+    "emotional",
+    "character driven",
+    "complex characters",
+    "morally gray",
+    "slow burn",
+    "intense",
+    "chilling",
+    "suspenseful",
+    "addictive",
+  ];
+
+  const candidates: KeywordCandidate[] = [];
+  const found = new Set<string>();
+
+  for (const pattern of themePatterns) {
+    if (fullText.includes(pattern) && !found.has(pattern)) {
+      found.add(pattern);
+      candidates.push({ text: pattern, sources: ["book-description" as const] });
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Fallback: Extract review-based genre indicators when review language mining
+ * doesn't produce enough results. Looks for common descriptive phrases in reviews.
+ */
+export function buildReviewGenreIndicators(reviewSnippets: string[]): KeywordCandidate[] {
+  const text = reviewSnippets.join(" ").toLowerCase();
+  if (!text) return [];
+
+  // Commonly used review phrases that indicate genre/themes
+  const reviewIndicators = new Map([
+    ("couldn't put it down", "addictive read"),
+    ("page turner", "page turner"),
+    ("keep you guessing", "surprising twist"),
+    ("didn't see it coming", "plot twist"),
+    ("psychological", "psychological thriller"),
+    ("twisted", "twisted plot"),
+    ("suspenseful", "suspenseful"),
+    ("fast-paced", "fast-paced"),
+    ("gripping", "gripping"),
+    ("intense", "intense"),
+    ("edge of your seat", "suspense"),
+    ("dark", "dark mystery"),
+  ]);
+
+  const candidates: KeywordCandidate[] = [];
+  const found = new Set<string>();
+
+  for (const [phrase, indicator] of reviewIndicators) {
+    if (text.includes(phrase) && !found.has(indicator)) {
+      found.add(indicator);
+      if (isUsableKeyword(indicator)) {
+        candidates.push({ text: indicator, sources: ["review-language" as const] });
+      }
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Fallback: When Wikidata/Wikipedia/LoC don't return results, generate synthetic
+ * genre keywords based on common patterns for mystery/thriller/suspense books.
+ */
+export function buildSyntheticGenreKeywords(title: string, bookDescription?: string): KeywordCandidate[] {
+  const fullText = `${title} ${bookDescription || ""}`.toLowerCase();
+  const candidates: KeywordCandidate[] = [];
+  const found = new Set<string>();
+
+  // Detect book type from keywords in title/description
+  const isThrillerLike = /thriller|suspense|mystery|crime|murder|detective|investigation/.test(fullText);
+  const isDark = /dark|twisted|sinister|gritty|noir|moody/.test(fullText);
+  const isEmotional = /emotional|heartfelt|touching|moving|profound|deep/.test(fullText);
+  const isTwisty = /twist|shocking|unexpected|revelatory|secrets/.test(fullText);
+
+  // Generate relevant keywords based on detected characteristics
+  if (isThrillerLike) {
+    for (const term of ["mystery thriller", "crime fiction", "suspense novel", "detective story"]) {
+      if (!found.has(term)) {
+        found.add(term);
+        candidates.push({ text: term, sources: ["genre-metadata" as const] });
+      }
+    }
+  }
+
+  if (isDark) {
+    for (const term of ["dark fiction", "psychological", "noir", "gritty"]) {
+      if (!found.has(term)) {
+        found.add(term);
+        candidates.push({ text: term, sources: ["genre-metadata" as const] });
+      }
+    }
+  }
+
+  if (isTwisty) {
+    for (const term of ["twist ending", "plot twist", "unreliable narrator", "shocking ending"]) {
+      if (!found.has(term)) {
+        found.add(term);
+        candidates.push({ text: term, sources: ["genre-metadata" as const] });
+      }
+    }
+  }
+
+  if (isEmotional) {
+    for (const term of ["character driven", "emotional journey", "literary"]) {
+      if (!found.has(term)) {
+        found.add(term);
+        candidates.push({ text: term, sources: ["genre-metadata" as const] });
+      }
+    }
+  }
+
+  return candidates;
+}

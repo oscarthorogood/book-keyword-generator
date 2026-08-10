@@ -42,6 +42,9 @@ import {
   RECOMMENDED_MIN_KEYWORDS,
   scoreAndTierBids,
   splitKeywordsByCategory,
+  buildDescriptionMetadataCandidates,
+  buildReviewGenreIndicators,
+  buildSyntheticGenreKeywords,
 } from "@/lib/keywordMerge";
 import { boostScoresByDescriptionQuality } from "@/lib/descriptionQuality";
 import { validateFinalKeywords } from "@/lib/keywordValidation";
@@ -423,8 +426,21 @@ export async function POST(req: NextRequest) {
     mergedGoogleAutocompleteResult
   );
 
-  const genreMetadataCandidates = buildGenreMetadataCandidates(bookMetadata);
-  const bookContentCandidates = buildBookContentCandidates(bookMetadata.commonTerms);
+  let genreMetadataCandidates = buildGenreMetadataCandidates(bookMetadata);
+  // Fallback: If Google Books/OpenLibrary metadata is sparse, extract from product description
+  if (genreMetadataCandidates.length === 0) {
+    genreMetadataCandidates = [
+      ...buildDescriptionMetadataCandidates(productPage.description, productPage.bulletPoints),
+      ...buildSyntheticGenreKeywords(request.bookTitle, productPage.description),
+    ];
+  }
+
+  let bookContentCandidates = buildBookContentCandidates(bookMetadata.commonTerms);
+  // Fallback: If Google Books full-text mining fails, use description and reviews
+  if (bookContentCandidates.length === 0) {
+    bookContentCandidates = buildDescriptionMetadataCandidates(productPage.description, productPage.bulletPoints);
+  }
+
   // Mixed source tags: the comp titles' own titles are "comp-name" (bare
   // name, high intent), their category placement is "comp-title" (thematic).
   const compTitleCandidates = buildCompTitleCandidates(productPage);
@@ -464,18 +480,40 @@ export async function POST(req: NextRequest) {
   ];
   // Real reader Q&A phrasing — a natural-language buyer register distinct
   // from both review text and autocomplete.
-  const qnaCandidates = buildQnaCandidates(qnaQuestions);
+  let qnaCandidates = buildQnaCandidates(qnaQuestions);
+  // Fallback: If product page has no Q&A section, use review snippets instead
+  if (qnaCandidates.length === 0 && productPage.reviewSnippets.length > 0) {
+    qnaCandidates = buildReviewGenreIndicators(productPage.reviewSnippets);
+  }
+
   // Pools review text across the seed book's embedded snippets, every
   // deep-crawled comp title, *and* the seed book's own dedicated reviews
   // page (richer/fuller bodies than what's embedded on the product page).
-  const reviewLanguageCandidates = mineReviewLanguage([
+  let reviewLanguageCandidates = mineReviewLanguage([
     ...productPage.reviewSnippets,
     ...relatedCompetitors.reviewSnippets,
     ...reviewBodies,
   ]);
-  const wikipediaCandidates = buildWikipediaCandidates(wikipediaCategories);
-  const wikidataCandidates = buildWikidataCandidates(wikidataGenres);
-  const locCandidates = buildLocCandidates(locSubjects);
+  // Fallback: If review mining doesn't find recurring phrases, use review genre indicators
+  if (reviewLanguageCandidates.length === 0 && productPage.reviewSnippets.length > 0) {
+    reviewLanguageCandidates = buildReviewGenreIndicators(productPage.reviewSnippets);
+  }
+
+  let wikipediaCandidates = buildWikipediaCandidates(wikipediaCategories);
+  let wikidataCandidates = buildWikidataCandidates(wikidataGenres);
+  // Fallback: If Wikipedia/Wikidata don't have data, use synthetic genre keywords
+  if (wikipediaCandidates.length === 0 && wikidataCandidates.length === 0) {
+    const syntheticGenres = buildSyntheticGenreKeywords(request.bookTitle, productPage.description);
+    if (syntheticGenres.length > 0) {
+      wikidataCandidates = syntheticGenres;
+    }
+  }
+
+  let locCandidates = buildLocCandidates(locSubjects);
+  // Fallback: If LoC doesn't have subjects, use genre metadata as alternative
+  if (locCandidates.length === 0) {
+    locCandidates = buildSyntheticGenreKeywords(request.bookTitle, productPage.description).slice(0, 5);
+  }
 
   // More free, low-risk sources: Datamuse (a real API, no scraping risk) and
   // a curated book-genre thesaurus (lib/synonyms.ts, fully offline) for
@@ -489,7 +527,11 @@ export async function POST(req: NextRequest) {
     getGoodreadsTags(productPage.isbn10, request.bookTitle, request.authorName),
   ]);
   const synonymCandidates = [...datamuseSynonymCandidates, ...buildCuratedSynonymCandidates(genreSeedTerms)];
-  const goodreadsTagCandidates = buildGoodreadsTagCandidates(goodreadsTags);
+  let goodreadsTagCandidates = buildGoodreadsTagCandidates(goodreadsTags);
+  // Fallback: If Goodreads lookup fails, use review genre indicators
+  if (goodreadsTagCandidates.length === 0 && productPage.reviewSnippets.length > 0) {
+    goodreadsTagCandidates = buildReviewGenreIndicators(productPage.reviewSnippets).slice(0, 5);
+  }
 
   sourceStatuses.push({
     source: "comp-title",
