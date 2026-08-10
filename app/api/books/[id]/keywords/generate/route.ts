@@ -54,6 +54,12 @@ import { KeywordCandidate, KeywordCategory, KeywordSource } from "@/lib/types";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
+// How many keywords per bucket the AI relevance pass judges. Its whole design
+// is a small, fast call over a pre-filtered shortlist (see lib/aiRanker.ts) —
+// handing it the full research list makes one slow call that comes back
+// partial regardless.
+const AI_REVIEW_LIMIT = 80;
+
 /**
  * The sources the pipeline draws on. Everything scraped from Amazon (product
  * page, competitors, reviews, Q&A, author catalog) comes from the snapshot
@@ -350,11 +356,18 @@ export async function POST(
       compDataHealth
     ).slice(0, BOOK_COMP_NAME_MAX);
 
-    // Optional relevance pass. It reorders and drops off-topic candidates but
-    // never truncates the list — an AI that only mentions half the keywords
-    // shouldn't cost the user the other half.
+    // Optional relevance pass over the top of each list. The AI judges a
+    // shortlist, not the whole research list: sending hundreds of candidates
+    // makes one slow call that returns a partial answer anyway. It reorders
+    // and drops off-topic candidates within that slice — everything below it
+    // keeps its heuristic position rather than being lost.
     let aiRanked = false;
     if (isAiRankingConfigured()) {
+      const tropesHead = tropesKeywords.slice(0, AI_REVIEW_LIMIT);
+      const tropesTail = tropesKeywords.slice(AI_REVIEW_LIMIT);
+      const compHead = compNameKeywords.slice(0, AI_REVIEW_LIMIT);
+      const compTail = compNameKeywords.slice(AI_REVIEW_LIMIT);
+
       const ranked = await rankKeywordsWithAi(
         {
           title: snapshot.title,
@@ -364,13 +377,13 @@ export async function POST(
           description: snapshot.description,
           pageMarkdown: snapshot.pageMarkdownExcerpt,
         },
-        tropesKeywords,
-        compNameKeywords
+        tropesHead,
+        compHead
       );
       if (ranked) {
         aiRanked = true;
-        tropesKeywords = applyAiRelevance(tropesKeywords, ranked);
-        compNameKeywords = applyAiRelevance(compNameKeywords, ranked);
+        tropesKeywords = [...applyAiRelevance(tropesHead, ranked), ...tropesTail];
+        compNameKeywords = [...applyAiRelevance(compHead, ranked), ...compTail];
       }
     }
 

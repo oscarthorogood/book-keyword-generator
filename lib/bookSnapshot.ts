@@ -267,19 +267,28 @@ export async function captureBookSnapshot(
   // Comparable titles: Amazon's carousels via the direct scrape, plus whatever
   // Firecrawl read off the rendered page (which is often all there is when the
   // direct scrape was bot-checked).
-  const compTitles = dedupe([...productPage.compTitles, ...(firecrawl.comparableTitles ?? [])], 25);
+  const firecrawlComps = (firecrawl.comparableBooks ?? []).filter((book) => !!book?.title);
+  const compTitles = dedupe(
+    [...productPage.compTitles, ...firecrawlComps.map((book) => book.title)],
+    25
+  );
+
   const competitors: RelatedCompetitor[] = [...competitorCrawl.competitors];
-  const knownCompetitorTitles = new Set(competitors.map((c) => c.title?.toLowerCase()).filter(Boolean));
-  (firecrawl.comparableTitles ?? []).forEach((compTitle, index) => {
-    if (!compTitle || knownCompetitorTitles.has(compTitle.toLowerCase())) return;
+  const knownCompetitorTitles = new Set(
+    competitors.map((c) => c.title?.toLowerCase()).filter((title): title is string => !!title)
+  );
+  for (const book of firecrawlComps) {
+    const key = book.title!.toLowerCase();
+    if (knownCompetitorTitles.has(key)) continue;
+    knownCompetitorTitles.add(key);
     competitors.push({
       // Firecrawl reads titles and authors off the page, not ASINs — the ASIN
       // is only needed for product targeting, which these don't feed.
       asin: "",
-      title: compTitle,
-      author: firecrawl.comparableAuthors?.[index],
+      title: book.title,
+      author: book.author,
     });
-  });
+  }
 
   const reviewSnippets = dedupe([...productPage.reviewSnippets, ...(firecrawl.reviewSnippets ?? [])], 60);
   const qna = dedupe([...qnaQuestions, ...(firecrawl.customerQuestions ?? [])], 30);

@@ -24,9 +24,14 @@ export interface AmazonPageMetadata {
   features?: string[];
   keywords?: string[];
   description?: string;
-  /** "Customers also bought" / "Frequently bought together" / "Compare with similar" titles. */
-  comparableTitles?: string[];
-  comparableAuthors?: string[];
+  /**
+   * "Customers also bought" / "Frequently bought together" / "Compare with
+   * similar" books. Title and author are extracted as one object per book
+   * rather than two parallel arrays — nothing guarantees an LLM returns two
+   * lists in the same order or at the same length, and pairing them by index
+   * would attach the wrong author to a book the app then bids on by name.
+   */
+  comparableBooks?: Array<{ title?: string; author?: string }>;
   reviewSnippets?: string[];
   customerQuestions?: string[];
   publisher?: string;
@@ -86,16 +91,17 @@ const EXTRACTION_SCHEMA = {
       description: "Genre, trope and theme phrases that describe this book, drawn from the page text",
     },
     description: { type: "string", description: "Full book description / blurb" },
-    comparableTitles: {
+    comparableBooks: {
       type: "array",
-      items: { type: "string" },
       description:
-        "Titles of other books shown on the page: customers also bought, frequently bought together, compare with similar items",
-    },
-    comparableAuthors: {
-      type: "array",
-      items: { type: "string" },
-      description: "Authors of those other books",
+        "Other books shown on the page: customers also bought, frequently bought together, compare with similar items. One entry per book.",
+      items: {
+        type: "object",
+        properties: {
+          title: { type: "string", description: "That book's title" },
+          author: { type: "string", description: "That book's author, if shown" },
+        },
+      },
     },
     reviewSnippets: {
       type: "array",

@@ -383,7 +383,10 @@ export default function KeywordManager({
 
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as "all" | KeywordStatus)}
+          onChange={(e) => {
+            setStatusFilter(e.target.value as "all" | KeywordStatus);
+            setVisibleCount(PAGE_SIZE);
+          }}
           className="input w-auto"
           aria-label="Filter by status"
         >
@@ -397,7 +400,10 @@ export default function KeywordManager({
 
         <select
           value={sourceFilter}
-          onChange={(e) => setSourceFilter(e.target.value)}
+          onChange={(e) => {
+            setSourceFilter(e.target.value);
+            setVisibleCount(PAGE_SIZE);
+          }}
           className="input w-auto"
           aria-label="Filter by source"
         >
