@@ -1517,17 +1517,17 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
                   We'll automatically cap keywords to fit your budget. Here's the estimated max based on your current settings:
                 </p>
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-                  <div className="bg-white rounded p-3 border border-green-100">
+                  <div className="bg-white rounded p-3 border border-gray-200">
                     <p className="text-xs text-gray-600 font-medium">Daily Budget</p>
                     <p className="text-lg font-bold text-gray-900">${dailyBudget}</p>
                   </div>
-                  <div className="bg-white rounded p-3 border border-green-100">
+                  <div className="bg-white rounded p-3 border border-gray-200">
                     <p className="text-xs text-gray-600 font-medium">Strategy</p>
                     <p className="text-sm font-semibold text-gray-900 capitalize">
                       {matchTypeStrategy === "phrase-only" ? "Phrase Only (1x)" : matchTypeStrategy === "phrase-exact" ? "Phrase + Exact (2x)" : matchTypeStrategy === "custom" ? "Custom" : "All Types (3x)"}
                     </p>
                   </div>
-                  <div className="bg-white rounded p-3 border border-green-100">
+                  <div className="bg-white rounded p-3 border border-gray-200">
                     <p className="text-xs text-gray-600 font-medium">Est. Max Keywords</p>
                     <p className="text-lg font-bold text-gray-900">
                       ~{Math.floor((Number(dailyBudget) * 0.5) / (0.15 * (matchTypeStrategy === "phrase-only" ? 1 : matchTypeStrategy === "phrase-exact" ? 2 : 3)))}
@@ -1726,27 +1726,27 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
                 </div>
               </div>
 
-              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-5 max-w-3xl">
-                <p className="font-semibold text-indigo-900 mb-3">✨ What Happens Next</p>
-                <ol className="space-y-2 text-sm text-indigo-800">
+              <div className="bg-gray-50 border border-gray-200 rounded-lg p-5 max-w-3xl">
+                <p className="font-semibold text-gray-900 mb-3">✨ What Happens Next</p>
+                <ol className="space-y-2 text-sm text-gray-700">
                   <li className="flex gap-3">
-                    <span className="font-semibold text-indigo-600 shrink-0">1.</span>
+                    <span className="font-semibold text-gray-600 shrink-0">1.</span>
                     <span>We generate keywords from {selectedSources.length} sources and organize them into {selectedKeywordTypes.length} ad groups</span>
                   </li>
                   <li className="flex gap-3">
-                    <span className="font-semibold text-indigo-600 shrink-0">2.</span>
+                    <span className="font-semibold text-gray-600 shrink-0">2.</span>
                     <span>Apply {matchTypeStrategy === "phrase-only" ? "phrase-only" : matchTypeStrategy === "phrase-exact" ? "phrase + exact" : matchTypeStrategy === "custom" ? "custom" : "all three"} match types for {matchTypeStrategy === "phrase-only" ? "lower cost and focused reach" : matchTypeStrategy === "phrase-exact" ? "balanced coverage" : "maximum coverage"}</span>
                   </li>
                   <li className="flex gap-3">
-                    <span className="font-semibold text-indigo-600 shrink-0">3.</span>
+                    <span className="font-semibold text-gray-600 shrink-0">3.</span>
                     <span>Cap keywords to fit your ${dailyBudget}/day budget using Phase 2.2 budget-aware logic</span>
                   </li>
                   <li className="flex gap-3">
-                    <span className="font-semibold text-indigo-600 shrink-0">4.</span>
+                    <span className="font-semibold text-gray-600 shrink-0">4.</span>
                     <span>Send bulksheet Excel file to your email + provide download link (expires in 1 hour)</span>
                   </li>
                   <li className="flex gap-3">
-                    <span className="font-semibold text-indigo-600 shrink-0">5.</span>
+                    <span className="font-semibold text-gray-600 shrink-0">5.</span>
                     <span>Upload to Amazon Ads using their bulk upload tool — campaigns are immediately live!</span>
                   </li>
                 </ol>
