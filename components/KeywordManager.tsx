@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Sparkles, Download, X } from "lucide-react";
+import { Plus, Trash2, Sparkles, X } from "lucide-react";
 
 type MatchType = "broad" | "phrase" | "exact";
 type KeywordStatus = "active" | "paused" | "negative" | "archived";
@@ -32,16 +32,9 @@ export default function KeywordManager({ bookId }: { bookId: string }) {
   const [adding, setAdding] = useState(false);
   const [filter, setFilter] = useState<"all" | KeywordStatus>("all");
   const [showGenerateForm, setShowGenerateForm] = useState(false);
-  const [showExportForm, setShowExportForm] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [keyTropes, setKeyTropes] = useState("");
-  const [exporting, setExporting] = useState(false);
-  const [exportError, setExportError] = useState<string | null>(null);
-  const [exportSuccess, setExportSuccess] = useState<string | null>(null);
-  const [creatorInitials, setCreatorInitials] = useState("");
-  const [dailyBudget, setDailyBudget] = useState("10");
-  const [startDate, setStartDate] = useState(() => new Date().toISOString().slice(0, 10));
 
   async function loadKeywords() {
     setLoading(true);
@@ -131,34 +124,6 @@ export default function KeywordManager({ bookId }: { bookId: string }) {
     }
   }
 
-  async function exportToCampaign() {
-    setExporting(true);
-    setExportError(null);
-    setExportSuccess(null);
-    try {
-      const res = await fetch(`/api/books/${bookId}/export-campaign`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          creatorInitials,
-          dailyBudget: parseFloat(dailyBudget),
-          startDate,
-        }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setExportError(body.error || "Failed to export campaign.");
-        return;
-      }
-      setExportSuccess(`Campaign "${body.campaignName}" created and emailed to you.`);
-      setShowExportForm(false);
-    } catch (err) {
-      setExportError(err instanceof Error ? err.message : "Failed to export campaign.");
-    } finally {
-      setExporting(false);
-    }
-  }
-
   const visible = keywords.filter((k) => filter === "all" || k.status === filter);
 
   return (
@@ -173,24 +138,8 @@ export default function KeywordManager({ bookId }: { bookId: string }) {
             <Sparkles size={14} />
             Generate new keywords
           </button>
-          <button
-            onClick={() => setShowExportForm(true)}
-            className="btn-pill-dark px-3 py-1.5 text-xs"
-          >
-            <Download size={14} className="inline mr-1.5" />
-            Export to Campaign
-          </button>
         </div>
       </div>
-
-      {exportSuccess && (
-        <div className="mb-4 px-4 py-2 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700 flex items-center justify-between">
-          {exportSuccess}
-          <button onClick={() => setExportSuccess(null)}>
-            <X size={14} />
-          </button>
-        </div>
-      )}
 
       {/* Generate keywords form */}
       {showGenerateForm && (
@@ -222,56 +171,6 @@ export default function KeywordManager({ bookId }: { bookId: string }) {
             className="btn-pill-dark px-4 py-2 text-sm disabled:opacity-50"
           >
             {generating ? "Analysing..." : "Analyse & generate"}
-          </button>
-        </div>
-      )}
-
-      {/* Export to campaign form */}
-      {showExportForm && (
-        <div className="mb-4 p-4 bg-gray-50 border border-gray-200 rounded-lg">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-sm font-medium text-gray-900">Export active keywords to a campaign</p>
-            <button onClick={() => setShowExportForm(false)} className="text-gray-400 hover:text-gray-700">
-              <X size={16} />
-            </button>
-          </div>
-          <div className="grid grid-cols-3 gap-3 mb-3">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Creator initials</label>
-              <input
-                value={creatorInitials}
-                onChange={(e) => setCreatorInitials(e.target.value)}
-                placeholder="e.g. MO"
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Daily budget</label>
-              <input
-                type="number"
-                step="0.01"
-                value={dailyBudget}
-                onChange={(e) => setDailyBudget(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 mb-1">Start date</label>
-              <input
-                type="date"
-                value={startDate}
-                onChange={(e) => setStartDate(e.target.value)}
-                className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm"
-              />
-            </div>
-          </div>
-          {exportError && <p className="text-xs text-red-600 mb-3">{exportError}</p>}
-          <button
-            onClick={exportToCampaign}
-            disabled={exporting}
-            className="btn-pill-dark px-4 py-2 text-sm disabled:opacity-50"
-          >
-            {exporting ? "Building bulksheet..." : "Export to Campaign"}
           </button>
         </div>
       )}

@@ -9,7 +9,6 @@ interface Book {
   title: string;
   author: string;
   marketplace: string;
-  campaign_count: number;
   total_keywords: number;
   created_at: string;
 }
@@ -141,7 +140,6 @@ export default function BooksListDashboard({
                       <th className="text-left px-4 py-3 font-medium">Author</th>
                       <th className="text-left px-4 py-3 font-medium">ASIN</th>
                       <th className="text-left px-4 py-3 font-medium">Marketplace</th>
-                      <th className="text-right px-4 py-3 font-medium">Campaigns</th>
                       <th className="text-right px-4 py-3 font-medium">Keywords</th>
                       <th className="text-right px-4 py-3 font-medium">Added</th>
                     </tr>
@@ -164,9 +162,6 @@ export default function BooksListDashboard({
                         <td className="px-4 py-3 text-gray-600">{book.author}</td>
                         <td className="px-4 py-3 text-gray-500 font-mono text-xs">{book.asin}</td>
                         <td className="px-4 py-3 text-gray-600">{book.marketplace}</td>
-                        <td className="px-4 py-3 text-right text-gray-900 font-medium">
-                          {book.campaign_count}
-                        </td>
                         <td className="px-4 py-3 text-right text-gray-900 font-medium">
                           {book.total_keywords}
                         </td>
