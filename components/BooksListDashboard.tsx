@@ -133,43 +133,53 @@ export default function BooksListDashboard({
                 <p className="text-gray-600">No books found</p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {filteredBooks.map((book) => (
-                  <button
-                    key={book.id}
-                    onClick={() => onSelectBook(book)}
-                    className="w-full flex items-center justify-between p-4 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors group text-left"
-                  >
-                    <div className="flex items-center gap-4 flex-1">
-                      <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                        <BookOpen size={20} className="text-gray-600" />
-                      </div>
-                      <div className="flex-1">
-                        <p className="font-medium text-gray-900">{book.title}</p>
-                        <p className="text-xs text-gray-500">by {book.author} · {book.asin}</p>
-                      </div>
-                    </div>
-
-                    <div className="flex items-center gap-6 text-sm">
-                      <div className="text-center">
-                        <p className="text-gray-900 font-medium">{book.campaign_count}</p>
-                        <p className="text-xs text-gray-500">campaigns</p>
-                      </div>
-                      <div className="text-center">
-                        <p className="text-gray-900 font-medium">{book.total_keywords}</p>
-                        <p className="text-xs text-gray-500">keywords</p>
-                      </div>
-                      <div className="text-center w-24">
-                        <p className="text-gray-500 text-xs">
+              <div className="border border-gray-200 rounded-lg overflow-hidden overflow-x-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
+                    <tr>
+                      <th className="text-left px-4 py-3 font-medium">Title</th>
+                      <th className="text-left px-4 py-3 font-medium">Author</th>
+                      <th className="text-left px-4 py-3 font-medium">ASIN</th>
+                      <th className="text-left px-4 py-3 font-medium">Marketplace</th>
+                      <th className="text-right px-4 py-3 font-medium">Campaigns</th>
+                      <th className="text-right px-4 py-3 font-medium">Keywords</th>
+                      <th className="text-right px-4 py-3 font-medium">Added</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-100">
+                    {filteredBooks.map((book) => (
+                      <tr
+                        key={book.id}
+                        onClick={() => onSelectBook(book)}
+                        className="hover:bg-gray-50 transition-colors cursor-pointer"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center gap-3">
+                            <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <BookOpen size={16} className="text-gray-600" />
+                            </div>
+                            <span className="font-medium text-gray-900">{book.title}</span>
+                          </div>
+                        </td>
+                        <td className="px-4 py-3 text-gray-600">{book.author}</td>
+                        <td className="px-4 py-3 text-gray-500 font-mono text-xs">{book.asin}</td>
+                        <td className="px-4 py-3 text-gray-600">{book.marketplace}</td>
+                        <td className="px-4 py-3 text-right text-gray-900 font-medium">
+                          {book.campaign_count}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-900 font-medium">
+                          {book.total_keywords}
+                        </td>
+                        <td className="px-4 py-3 text-right text-gray-500 text-xs">
                           {new Date(book.created_at).toLocaleDateString("en-US", {
                             month: "short",
                             day: "numeric",
                           })}
-                        </p>
-                      </div>
-                    </div>
-                  </button>
-                ))}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               </div>
             )}
           </>
