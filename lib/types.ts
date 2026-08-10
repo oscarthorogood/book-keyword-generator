@@ -1,5 +1,15 @@
 export type MatchType = "broad" | "phrase" | "exact";
 
+/**
+ * Match-type strategy (Phase 2.1) — determines which match types are included
+ * in the campaign and how many rows are generated.
+ *
+ * - "phrase-only": Single match type (Phrase), 1/3 row count, lower cost
+ * - "phrase-exact": Two match types (Phrase + Exact), 2/3 row count, moderate cost
+ * - "all": All three match types (Broad + Phrase + Exact), 3x row count, highest cost
+ */
+export type MatchTypeStrategy = "phrase-only" | "phrase-exact" | "all";
+
 export type Marketplace = "US" | "UK" | "CA" | "DE" | "FR" | "IT" | "ES";
 
 /**
@@ -35,6 +45,8 @@ export interface GenerateRequest extends CampaignIdentity {
   endDate?: string; // YYYY-MM-DD
   seriesOrder?: number; // Book position in series (1-based)
   seriesTotal?: number; // Total books in series
+  /** Match-type strategy (Phase 2.1): which match types to include. Default: "all" for backward compat. */
+  matchTypeStrategy?: MatchTypeStrategy;
   matchTypes: MatchType[];
   bidEconomics?: BidEconomics;
   /** Manual fallback/override when bid economics aren't supplied. */

@@ -84,6 +84,7 @@ import {
   KeywordSource,
   Marketplace,
   MatchType,
+  MatchTypeStrategy,
   SourceStatus,
 } from "@/lib/types";
 import { getOrCreateAuthorCode } from "@/lib/authorCodeCache";
@@ -93,6 +94,7 @@ import {
   lookupKeywordCache,
   diffKeywordSets,
 } from "@/lib/keywordCache";
+import { resolveStrategy } from "@/lib/matchTypeStrategy";
 
 export const runtime = "nodejs";
 // Give the autocomplete sweeps (dozens of small outbound requests) room to
@@ -163,14 +165,29 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
   const variant =
     typeof b.variant === "number" && Number.isInteger(b.variant) && b.variant > 0 ? b.variant : 1;
 
-  if (
-    !Array.isArray(b.matchTypes) ||
-    b.matchTypes.length === 0 ||
-    !b.matchTypes.every((m) => MATCH_TYPES.includes(m as MatchType))
-  ) {
-    return { error: "Select at least one match type (broad, phrase, exact)." };
+  // Phase 2.1: Match-type strategy
+  // User can provide either matchTypeStrategy (new) or explicit matchTypes (old).
+  // Strategy takes precedence if both provided.
+  let matchTypeStrategy: MatchTypeStrategy | undefined;
+  if (typeof b.matchTypeStrategy === "string" && ["phrase-only", "phrase-exact", "all"].includes(b.matchTypeStrategy)) {
+    matchTypeStrategy = b.matchTypeStrategy as MatchTypeStrategy;
   }
-  const matchTypes = b.matchTypes as MatchType[];
+
+  let matchTypes: MatchType[];
+  if (matchTypeStrategy) {
+    // Resolve strategy to match types
+    matchTypes = resolveStrategy(matchTypeStrategy);
+  } else if (
+    Array.isArray(b.matchTypes) &&
+    b.matchTypes.length > 0 &&
+    b.matchTypes.every((m) => MATCH_TYPES.includes(m as MatchType))
+  ) {
+    // Use explicitly provided match types (backward compat)
+    matchTypes = b.matchTypes as MatchType[];
+  } else {
+    // Default: all match types
+    matchTypes = ["broad", "phrase", "exact"];
+  }
 
   let bidEconomics: BidEconomics | undefined;
   if (b.bidEconomics && typeof b.bidEconomics === "object") {
@@ -259,6 +276,7 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
       dailyBudget: b.dailyBudget,
       startDate: b.startDate,
       endDate,
+      matchTypeStrategy,
       matchTypes,
       bidEconomics,
       defaultBid,

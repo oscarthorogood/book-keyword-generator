@@ -5,7 +5,8 @@ import { ArrowLeft } from "lucide-react";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildCampaignName } from "@/lib/naming";
 import { KEYWORD_CATEGORY_META } from "@/lib/keywordCategories";
-import type { KeywordCategory, KeywordGroupType, KeywordSource } from "@/lib/types";
+import { MATCH_TYPE_STRATEGIES } from "@/lib/matchTypeStrategy";
+import type { KeywordCategory, KeywordGroupType, KeywordSource, MatchTypeStrategy } from "@/lib/types";
 
 interface CampaignGenerationFormProps {
   onBack: () => void;
@@ -83,6 +84,7 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
   const [startDate, setStartDate] = useState(todayIso());
   const [endDate, setEndDate] = useState("");
   const [campaignDuration, setCampaignDuration] = useState<"ongoing" | "limited">("ongoing");
+  const [matchTypeStrategy, setMatchTypeStrategy] = useState<MatchTypeStrategy | "custom">("all");
   const [matchTypes, setMatchTypes] = useState<MatchType[]>(["broad", "phrase", "exact"]);
 
   const [selectedSources, setSelectedSources] = useState<KeywordSource[]>(
@@ -186,7 +188,17 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
     });
   }, [asin, marketplace, creatorInitials, authorName, bookTitle, seriesName, variant]);
 
+  function setStrategy(strategy: MatchTypeStrategy | "custom") {
+    setMatchTypeStrategy(strategy);
+    if (strategy !== "custom") {
+      const strategyConfig = MATCH_TYPE_STRATEGIES[strategy];
+      setMatchTypes(strategyConfig.matchTypes);
+    }
+  }
+
   function toggleMatchType(value: MatchType) {
+    // When user manually toggles a match type, switch to "custom" mode
+    setMatchTypeStrategy("custom");
     setMatchTypes((prev) =>
       prev.includes(value) ? prev.filter((m) => m !== value) : [...prev, value]
     );
@@ -349,6 +361,7 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
         dailyBudget: Number(dailyBudget),
         startDate,
         endDate: campaignDuration === "limited" ? endDate : undefined,
+        matchTypeStrategy: matchTypeStrategy !== "custom" ? matchTypeStrategy : undefined,
         matchTypes,
         knownTags: profileTags,
         sources: selectedSources,
@@ -1348,6 +1361,47 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
 
             {currentPage === 4 && (
             <div className="flex flex-col gap-5 md:gap-6 max-w-4xl">
+              <div className="card">
+                <p className="card-title mb-4">Match-Type Strategy (Phase 2.1)</p>
+                <p className="field-hint mb-4" style={{ marginTop: 0 }}>
+                  Choose a strategy that balances keyword coverage vs. budget impact. Phrase-only is more conservative and costs 1/3 as much.
+                </p>
+                <div className="flex flex-col gap-3">
+                  {(Object.entries(MATCH_TYPE_STRATEGIES) as Array<[MatchTypeStrategy, typeof MATCH_TYPE_STRATEGIES[MatchTypeStrategy]]>).map(
+                    ([value, config]) => (
+                      <label key={value} className="flex items-start gap-3 p-3 border border-gray-200 rounded cursor-pointer hover:bg-gray-50">
+                        <input
+                          type="radio"
+                          name="matchTypeStrategy"
+                          value={value}
+                          checked={matchTypeStrategy === value}
+                          onChange={() => setStrategy(value)}
+                          className="mt-1"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="font-medium text-gray-900">{config.label}</p>
+                          <p className="text-sm text-gray-600 mt-1">{config.description}</p>
+                          <p className="text-xs text-gray-500 mt-2">{config.matchTypes.join(" + ")}</p>
+                        </div>
+                      </label>
+                    )
+                  )}
+                  <label className="flex items-start gap-3 p-3 border border-gray-200 rounded cursor-pointer hover:bg-gray-50">
+                    <input
+                      type="radio"
+                      name="matchTypeStrategy"
+                      checked={matchTypeStrategy === "custom"}
+                      onChange={() => setMatchTypeStrategy("custom")}
+                      className="mt-1"
+                    />
+                    <div className="flex-1 min-w-0">
+                      <p className="font-medium text-gray-900">Custom</p>
+                      <p className="text-sm text-gray-600 mt-1">Choose your own combination below</p>
+                    </div>
+                  </label>
+                </div>
+              </div>
+
               <div className="card">
                 <p className="card-title mb-4">Match Types</p>
                 <p className="field-hint mb-3" style={{ marginTop: 0 }}>
