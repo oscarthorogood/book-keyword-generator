@@ -90,7 +90,9 @@ function todayIso(): string {
 }
 
 export default function CampaignGenerationForm({ onBack, bookId }: CampaignGenerationFormProps) {
-  const [currentPage, setCurrentPage] = useState<FormPage>(1);
+  // Book-centric flow: skip book details page and start at budget/bid
+  const startingPage: FormPage = bookId ? 2 : 1;
+  const [currentPage, setCurrentPage] = useState<FormPage>(startingPage);
 
   const [asin, setAsin] = useState("");
   const [marketplace, setMarketplace] = useState<(typeof MARKETPLACES)[number]>("US");
@@ -511,6 +513,8 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
             <div className="flex items-center justify-between mb-6">
               {Array.from({ length: TOTAL_PAGES }, (_, i) => {
                 const page = (i + 1) as FormPage;
+                // Skip page 1 in book-centric flow
+                if (bookId && page === 1) return null;
                 const isActive = page === currentPage;
                 const isComplete = page < currentPage;
                 return (
@@ -1792,8 +1796,14 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
           <div className="flex gap-3 mt-8 justify-between">
             <button
               type="button"
-              onClick={() => setCurrentPage((p) => (p > 1 ? ((p - 1) as FormPage) : p))}
-              disabled={currentPage === 1}
+              onClick={() => {
+                if (bookId && currentPage === 2) {
+                  onBack();
+                } else {
+                  setCurrentPage((p) => (p > 1 ? ((p - 1) as FormPage) : p));
+                }
+              }}
+              disabled={(!bookId && currentPage === 1) || (bookId && currentPage === 2)}
               className="btn-pill-outline px-6 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ← Previous
