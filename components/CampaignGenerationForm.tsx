@@ -537,6 +537,13 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
             {currentPage === 1 && (
               <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 md:gap-6 items-start">
                 <div className="flex flex-col gap-5 md:gap-6">
+                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4 mb-2">
+                    <p className="text-sm font-semibold text-blue-900 mb-2">📖 Quick Start</p>
+                    <p className="text-xs text-blue-700 leading-relaxed">
+                      Have an ASIN or ISBN? Click "Autofill" to automatically populate book details from Amazon.
+                    </p>
+                  </div>
+
                   <div className="card">
                     <p className="card-title mb-4">Book Lookup</p>
 
@@ -1717,6 +1724,32 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
                     </p>
                   </div>
                 </div>
+              </div>
+
+              <div className="bg-indigo-50 border border-indigo-200 rounded-lg p-5 max-w-3xl">
+                <p className="font-semibold text-indigo-900 mb-3">✨ What Happens Next</p>
+                <ol className="space-y-2 text-sm text-indigo-800">
+                  <li className="flex gap-3">
+                    <span className="font-semibold text-indigo-600 shrink-0">1.</span>
+                    <span>We generate keywords from {selectedSources.length} sources and organize them into {selectedKeywordTypes.length} ad groups</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-semibold text-indigo-600 shrink-0">2.</span>
+                    <span>Apply {matchTypeStrategy === "phrase-only" ? "phrase-only" : matchTypeStrategy === "phrase-exact" ? "phrase + exact" : matchTypeStrategy === "custom" ? "custom" : "all three"} match types for {matchTypeStrategy === "phrase-only" ? "lower cost and focused reach" : matchTypeStrategy === "phrase-exact" ? "balanced coverage" : "maximum coverage"}</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-semibold text-indigo-600 shrink-0">3.</span>
+                    <span>Cap keywords to fit your ${dailyBudget}/day budget using Phase 2.2 budget-aware logic</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-semibold text-indigo-600 shrink-0">4.</span>
+                    <span>Send bulksheet Excel file to your email + provide download link (expires in 1 hour)</span>
+                  </li>
+                  <li className="flex gap-3">
+                    <span className="font-semibold text-indigo-600 shrink-0">5.</span>
+                    <span>Upload to Amazon Ads using their bulk upload tool — campaigns are immediately live!</span>
+                  </li>
+                </ol>
               </div>
             </div>
             )}
