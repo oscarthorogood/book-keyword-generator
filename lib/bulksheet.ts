@@ -110,7 +110,7 @@ export async function buildBulksheet(input: BulksheetInput): Promise<Buffer> {
 
   // Add main Sponsored Products sheet
   const sheet = workbook.addWorksheet("Sponsored Products Campaigns");
-  sheet.columns = COLUMNS.map((header) => ({ header, key: header, width: 24 }});
+  sheet.columns = COLUMNS.map((header) => ({ header, key: header, width: 24 }));
 
   const rows: Row[] = [];
 

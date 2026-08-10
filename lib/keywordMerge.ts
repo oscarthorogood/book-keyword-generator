@@ -967,18 +967,18 @@ export function buildReviewGenreIndicators(reviewSnippets: string[]): KeywordCan
 
   // Commonly used review phrases that indicate genre/themes
   const reviewIndicators = new Map([
-    ("couldn't put it down", "addictive read"),
-    ("page turner", "page turner"),
-    ("keep you guessing", "surprising twist"),
-    ("didn't see it coming", "plot twist"),
-    ("psychological", "psychological thriller"),
-    ("twisted", "twisted plot"),
-    ("suspenseful", "suspenseful"),
-    ("fast-paced", "fast-paced"),
-    ("gripping", "gripping"),
-    ("intense", "intense"),
-    ("edge of your seat", "suspense"),
-    ("dark", "dark mystery"),
+    ["couldn't put it down", "addictive read"],
+    ["page turner", "page turner"],
+    ["keep you guessing", "surprising twist"],
+    ["didn't see it coming", "plot twist"],
+    ["psychological", "psychological thriller"],
+    ["twisted", "twisted plot"],
+    ["suspenseful", "suspenseful"],
+    ["fast-paced", "fast-paced"],
+    ["gripping", "gripping"],
+    ["intense", "intense"],
+    ["edge of your seat", "suspense"],
+    ["dark", "dark mystery"],
   ]);
 
   const candidates: KeywordCandidate[] = [];

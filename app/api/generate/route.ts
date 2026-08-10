@@ -86,6 +86,13 @@ import {
   MatchType,
   SourceStatus,
 } from "@/lib/types";
+import { getOrCreateAuthorCode } from "@/lib/authorCodeCache";
+import {
+  generateRequestFingerprint,
+  cacheKeywords,
+  lookupKeywordCache,
+  diffKeywordSets,
+} from "@/lib/keywordCache";
 
 export const runtime = "nodejs";
 // Give the autocomplete sweeps (dozens of small outbound requests) room to
@@ -297,6 +304,9 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: validated.error }, { status: 400 });
   }
   const request = validated.value;
+
+  // Phase 1.6: Generate deterministic request fingerprint for caching
+  const requestFingerprint = generateRequestFingerprint(request);
 
   const baseBid = request.bidEconomics ? computeMaxCpc(request.bidEconomics) : (request.defaultBid as number);
   const campaignName = buildCampaignName(request);
@@ -883,6 +893,19 @@ export async function POST(req: NextRequest) {
       { status: 502 }
     );
   }
+
+  // Phase 1.6: Cache the generated keywords for idempotent re-runs
+  const allGeneratedKeywords = adGroups
+    .flatMap((g) => g.keywords ?? [])
+    .map((kw) => ({ ...kw })); // Shallow copy to avoid mutating cache
+
+  cacheKeywords({
+    asin: request.asin,
+    marketplace: request.marketplace,
+    generationFingerprint: requestFingerprint,
+    keywords: allGeneratedKeywords,
+    cachedAt: new Date(),
+  });
 
   const buffer = await buildBulksheet({
     campaignName,
