@@ -160,8 +160,13 @@ write the results into its keyword list.
 Snapshot-backed sources (comparable titles, reviews, Q&A, author catalogue,
 genre metadata, Goodreads/Open Library/Google Books/Wikipedia/Wikidata/LoC)
 read the stored capture. Live sources per run: the four autocomplete engines,
-Datamuse synonyms, and the Ads API when configured. A snapshot that is missing
-or stale is re-captured first.
+SerpApi's Amazon Search/Autocomplete APIs (when a key is set), and the Ads API
+when configured. A snapshot that is missing or stale is re-captured first.
+
+Every candidate then goes through the relevance filter pipeline
+(`lib/keywordFilters.ts`) before anything is written as active. Keywords that
+fail are still stored — with `status: paused` or `status: rejected`, the
+deciding filter and its reason — so the manager can show why.
 
 **Response:**
 ```json
@@ -175,6 +180,23 @@ or stale is re-captured first.
   "byCategory": { "core-genre": 12 },
   "byMatchType": { "phrase": 200, "broad": 60, "exact": 52 },
   "genreTerms": ["cozy mystery", "british detectives"],
+  "pausedCount": 24,
+  "rejectedCount": 118,
+  "negativeCount": 12,
+  "filterSummary": {
+    "byVerdict": { "pass": 170, "pause": 24, "reject": 118 },
+    "byFilter": { "anchorRelevance": 42, "offTopicEntity": 31, "singleWord": 18 }
+  },
+  "anchors": {
+    "bookSpecific": ["scars of the past", "jacqueline new", "mcneill"],
+    "genre": ["crime thriller", "police procedural"],
+    "setting": ["scottish", "edinburgh", "scottish crime"],
+    "comps": ["ian rankin"],
+    "primaryGenrePhrase": "crime thriller"
+  },
+  "productTargetCount": 28,
+  "brandTargetCount": 9,
+  "serpApiCreditsUsed": 6,
   "aiRanked": false
 }
 ```
@@ -187,6 +209,52 @@ or stale is re-captured first.
 - 502: every source came back empty
 
 **Implementation:** `app/api/books/[id]/keywords/generate/route.ts`
+
+---
+
+### POST /api/books/[id]/keywords/filter
+
+**Purpose:** Re-run the relevance filter pipeline over the keywords a book
+already has — the one-off migration for lists generated before the pipeline
+existed, and the way to re-apply it after tuning the blocklists or
+re-fetching the book's metadata.
+
+**Body:** `{ "dryRun": true }` reports what would change without writing.
+
+Only `active`, `paused` and `rejected` rows are touched; a keyword a human
+marked negative or archived stays where they put it. A keyword whose
+dangling modifier can be completed is rewritten in place.
+
+**Response:**
+```json
+{
+  "success": true,
+  "examined": 302,
+  "changed": 141,
+  "summary": { "byVerdict": { "pass": 161, "pause": 23, "reject": 118 }, "byFilter": { "uiPollution": 14 } }
+}
+```
+
+**Error codes:** 401 unauthenticated · 404 book not found · 422 metadata
+unreadable (`needsRefresh: true`)
+
+**Implementation:** `app/api/books/[id]/keywords/filter/route.ts`
+
+---
+
+### GET /api/books/[id]/keywords/export
+
+**Purpose:** Amazon Ads bulk-upload CSV for one book.
+
+**Query:** `includePaused=1` to include paused keywords · `defaultBid`
+(default 0.5) · `dailyBudget` (default 10).
+
+Returns `text/csv` as an attachment: a descriptive Broad/Phrase campaign, a
+comparable titles/authors Exact campaign, the book's negative keywords, and
+an ASIN/brand product-targeting campaign built from the competitor crawl.
+Rejected keywords are never exported.
+
+**Implementation:** `app/api/books/[id]/keywords/export/route.ts`
 
 ---
 

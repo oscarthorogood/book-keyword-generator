@@ -6,6 +6,8 @@
  * extracted from it are representative of the book's actual content.
  */
 
+import type { KeywordCandidate, KeywordSource } from "./types";
+
 export interface DescriptionQuality {
   description?: string;
   bulletPoints: string[];
@@ -57,11 +59,11 @@ export function descriptionQualityBoostMultiplier(quality: DescriptionQuality): 
  * Boost keyword scores based on description quality.
  * Keywords mined from rich descriptions are more trustworthy.
  */
-export function boostScoresByDescriptionQuality(
-  candidates: any[],
+export function boostScoresByDescriptionQuality<T extends KeywordCandidate>(
+  candidates: T[],
   quality: DescriptionQuality,
-  descriptionSource: string = "book-description"
-): any[] {
+  descriptionSource: KeywordSource = "book-description"
+): T[] {
   const boost = descriptionQualityBoostMultiplier(quality);
   if (boost <= 0) return candidates;
 

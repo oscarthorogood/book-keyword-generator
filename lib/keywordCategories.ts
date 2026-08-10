@@ -1,4 +1,5 @@
 import { cleanTaxonomyTerms } from "./genre";
+import { completeIfDangling } from "./keywordFilters";
 import { isUsableKeyword, normalize } from "./keywordMerge";
 import { KeywordCandidate, KeywordCategory, KeywordSource, RelatedCompetitor } from "./types";
 
@@ -148,6 +149,14 @@ export interface CategoryContext {
   goodreadsTags: string[];
   reviewLanguagePhrases: string[];
   enabledCategories: Set<KeywordCategory>;
+  /**
+   * The genre phrase modifier templates complete with, from the book's
+   * anchors (lib/keywordAnchors.ts). Without it, `genreTerms[0]` is whatever
+   * the breadcrumb led with — often a nationality ("scottish"), which
+   * templated out to "fast paced scottish", "dark scottish", "christmas
+   * scottish": modifiers with no product noun on the end. See filter 9.
+   */
+  primaryGenrePhrase?: string;
 }
 
 interface Tagged {
@@ -177,6 +186,10 @@ export function buildCategorizedKeywordCandidates(ctx: CategoryContext): Keyword
 
   const topGenre = ctx.genreTerms[0];
   const currentYear = new Date().getFullYear();
+
+  /** "fast paced" + "scottish" -> "fast paced scottish crime thriller", never a dangling "fast paced scottish". */
+  const modified = (modifier: string) =>
+    topGenre ? completeIfDangling(`${modifier} ${topGenre}`, ctx.primaryGenrePhrase) : undefined;
 
   // The breadcrumb as genre phrases rather than store nodes: "Kindle Store >
   // Kindle eBooks > Mystery, Thriller & Suspense > Cozy Mystery" becomes
@@ -239,7 +252,7 @@ export function buildCategorizedKeywordCandidates(ctx: CategoryContext): Keyword
   // 10. Book Format — generic format phrases, plus title/author crossed with format.
   if (has("format")) {
     push("format", "buyer-intent", FORMAT_TERMS);
-    if (topGenre) push("format", "buyer-intent", [`paperback ${topGenre}`, `${topGenre} audiobook`]);
+    if (topGenre) push("format", "buyer-intent", [modified("paperback"), `${topGenre} audiobook`]);
   }
 
   // 11. Target Age Demographic — only generated when Amazon's own breadcrumb
@@ -255,11 +268,11 @@ export function buildCategorizedKeywordCandidates(ctx: CategoryContext): Keyword
 
   // 12. Gift-Giver & Recipient — generic shopper-intent templating off genre + author.
   if (has("gift") && topGenre) {
-    push("gift", "buyer-intent", [
-      `gifts for ${topGenre} readers`,
-      `gifts for ${topGenre} lovers`,
-      `gifts for ${topGenre} fans`,
-    ]);
+    // Templated on the genre phrase, not the leading genre term: "gifts for
+    // scottish lovers" is nationality-fan intent, not book intent, and the
+    // "lovers"/"fans" variants are rejected downstream regardless.
+    const giftGenre = ctx.primaryGenrePhrase ?? topGenre;
+    push("gift", "buyer-intent", [`gifts for ${giftGenre} readers`, `${giftGenre} gift`]);
   }
 
   // 13 & 14. Problem-Solving / Skill & Goal (non-fiction) — mined from the
@@ -272,27 +285,37 @@ export function buildCategorizedKeywordCandidates(ctx: CategoryContext): Keyword
 
   // 15. Mood & Emotional Tone — fixed mood-adjective list crossed with genre.
   if (has("mood-tone") && topGenre) {
-    push("mood-tone", "buyer-intent", MOOD_TERMS.map((m) => `${m} ${topGenre}`));
+    push("mood-tone", "buyer-intent", MOOD_TERMS.map((m) => modified(m)));
   }
 
   // 16. Award & Bestseller Intent.
   if (has("award-bestseller") && topGenre) {
     push("award-bestseller", "buyer-intent", [
-      `award winning ${topGenre}`,
-      `bestselling ${topGenre}`,
+      modified("award winning"),
+      modified("bestselling"),
       `${topGenre} bestsellers ${currentYear}`,
-      `must read ${topGenre}`,
+      modified("must read"),
     ]);
   }
 
   // 19. Synonym & Alternative Phrasing is populated in the generate route by
-  // re-tagging the existing Datamuse synonym candidates (no new logic here —
-  // see the "key-trope"/synonym wiring around buildCategorizedKeywordCandidates).
+  // re-tagging the controlled genre-synonym candidates (lib/synonyms.ts) — no
+  // new logic here.
 
   // 20. Seasonal & Holiday.
   if (has("seasonal-holiday")) {
+    // Seasonal terms only earn a slot when they carry book intent *and* a
+    // genre anchor, so they are templated onto the genre phrase rather than
+    // emitted bare ("christmas" alone is not a book keyword). The seasonal
+    // filter still gates and season-windows whatever survives.
     push("seasonal-holiday", "buyer-intent", SEASONAL_TERMS);
-    if (topGenre) push("seasonal-holiday", "buyer-intent", [`christmas ${topGenre}`, `halloween ${topGenre}`]);
+    if (topGenre) {
+      push("seasonal-holiday", "buyer-intent", [
+        modified("christmas"),
+        modified("halloween"),
+        `${ctx.primaryGenrePhrase ?? topGenre} christmas gift`,
+      ]);
+    }
   }
 
   return out.map(({ text, category, source }) => ({ text, sources: [source], category }));

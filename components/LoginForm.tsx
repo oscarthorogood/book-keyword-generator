@@ -2,6 +2,7 @@
 
 import { FormEvent, useState } from "react";
 import { useSearchParams } from "next/navigation";
+import { AlertCircle, CheckCircle2, Clock, Loader2 } from "lucide-react";
 
 type Outcome = { kind: "sent" | "pending"; message: string };
 
@@ -54,14 +55,19 @@ export function LoginForm() {
   // Once a link is on its way there's nothing more to do here — showing the
   // form again just invites people to hammer the button.
   if (outcome) {
-    const accent = outcome.kind === "sent" ? "var(--accent-green)" : "var(--accent-yellow)";
-    const soft =
-      outcome.kind === "sent" ? "var(--accent-green-soft)" : "var(--accent-yellow-soft)";
+    const sent = outcome.kind === "sent";
     return (
-      <div className="space-y-4">
-        <div className="status-banner" style={{ background: soft, borderColor: accent }}>
-          <span className="status-dot" style={{ background: accent }} />
-          <span style={{ color: accent }}>{outcome.message}</span>
+      <div className="space-y-5">
+        <div className={`alert ${sent ? "alert-success" : "alert-warning"}`} aria-live="polite">
+          {sent ? (
+            <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
+          ) : (
+            <Clock size={20} className="mt-0.5 shrink-0" />
+          )}
+          <div>
+            <p className="alert-title">{sent ? "Sign-in link sent" : "Awaiting approval"}</p>
+            <p className="mt-1">{outcome.message}</p>
+          </div>
         </div>
         <button
           type="button"
@@ -69,7 +75,7 @@ export function LoginForm() {
             setOutcome(null);
             setEmail("");
           }}
-          className="btn-pill-outline w-full py-2.5"
+          className="btn btn-secondary w-full"
         >
           Use a different email
         </button>
@@ -78,7 +84,7 @@ export function LoginForm() {
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} className="space-y-5">
       <div>
         <label htmlFor="email" className="field-label">
           Email
@@ -89,29 +95,24 @@ export function LoginForm() {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="you@example.com"
-          className="input"
+          className={`input ${error ? "input-error" : ""}`}
           disabled={isLoading}
           autoComplete="email"
           autoFocus
           required
+          aria-invalid={error ? true : undefined}
         />
       </div>
 
       {error && (
-        <div
-          className="status-banner"
-          style={{ background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }}
-        >
-          <span className="status-dot" style={{ background: "var(--accent-red)" }} />
-          <span style={{ color: "var(--accent-red)" }}>{error}</span>
+        <div className="alert alert-error" role="alert">
+          <AlertCircle size={20} className="mt-0.5 shrink-0" />
+          <p>{error}</p>
         </div>
       )}
 
-      <button
-        type="submit"
-        disabled={isLoading || !email}
-        className="btn-pill-dark w-full py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
-      >
+      <button type="submit" disabled={isLoading || !email} className="btn btn-primary w-full">
+        {isLoading && <Loader2 size={20} className="animate-spin" />}
         {isLoading ? "Sending…" : "Email me a sign-in link"}
       </button>
     </form>

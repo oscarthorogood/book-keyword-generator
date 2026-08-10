@@ -1,0 +1,679 @@
+/**
+ * Post-generation keyword filter pipeline.
+ *
+ * The generator is source-led: every source adds what it found, and until
+ * now nothing validated the result against the book before it was written to
+ * the keyword list. That is why a Scottish crime thriller came out of the
+ * pipeline bidding on "scottish fold cat", "felon books", "his team was put"
+ * and "264 pages" — each individually explicable, none of them a query a
+ * reader of that book would type.
+ *
+ * This module is the shared validation layer that was missing. It runs after
+ * generation and before persistence/activation, as an ordered pipeline where
+ * each filter returns:
+ *
+ *   reject — never bid on this; stored with the rejecting filter + reason
+ *   pause  — plausible but unproven; stored, not activated
+ *   pass   — continue to the next filter
+ *
+ * `pause` and `reject` are both terminal: the first filter with an opinion
+ * owns the outcome, so the reason recorded on the keyword is the reason a
+ * human would give. Everything book-specific comes from the anchors derived
+ * at scrape time (lib/keywordAnchors.ts); everything tunable lives in
+ * lib/keywordFilterConfig.ts.
+ */
+
+import { buildBookAnchors, qualifyingAnchors, type AnchorInput, type BookAnchors } from "./keywordAnchors";
+import {
+  ALLOWED_GENRE_SYNONYMS,
+  ALLOWLISTED_MODIFIER_PHRASES,
+  BAD_SYNONYM_TERMS,
+  BOOK_DOMAIN_WORDS,
+  BOOK_INTENT_WORDS,
+  DEMONYM_TERMS,
+  DESCRIPTION_VERB_TOKENS,
+  FORMAT_PATTERNS,
+  GIFT_AUDIENCE_PAUSE_WORDS,
+  GIFT_AUDIENCE_REJECT_WORDS,
+  KINDLE_UNLIMITED_PATTERN,
+  MARKET_LANGUAGES,
+  METADATA_LABEL_TERMS,
+  NON_MARKET_LANGUAGES,
+  OFF_TOPIC_ENTITY_TERMS,
+  REVIEW_FILLER_FRAGMENTS,
+  REVIEW_STOPWORDS,
+  SEASONAL_TERMS,
+  SEASON_WINDOWS,
+  SELF_ANCHORED_SOURCES,
+  SINGLE_WORD_PAUSE_TERMS,
+  UI_POLLUTION_TERMS,
+  WEAK_CONNECTORS,
+  WEB_AUTOCOMPLETE_SOURCES,
+} from "./keywordFilterConfig";
+import type { KeywordCandidate, Marketplace, MatchType } from "./types";
+
+export type FilterVerdict = "pass" | "pause" | "reject";
+
+export interface FilterResult {
+  verdict: FilterVerdict;
+  reason?: string;
+  /** Set by phraseShape when a dangling modifier can be completed instead of dropped. */
+  rewriteTo?: string;
+  /** Set by the description-shaping filter: these are long-tail phrases, never Broad. */
+  matchTypeCeiling?: MatchType;
+}
+
+export interface FilterableKeyword {
+  text: string;
+  /** Candidate sources (generation time) or the single stored source column (migration time). */
+  sources?: string[];
+  source?: string | null;
+}
+
+export interface FilterContext {
+  anchors: BookAnchors;
+  marketplace: Marketplace;
+  /** The listing's own language, when the scrape captured one. */
+  language?: string;
+  /** Formats confirmed available on the ASIN or its sibling editions ("kindle", "paperback", …). */
+  formats: string[];
+  isKindleUnlimited: boolean;
+  /** Set when the scrape found a translated edition, which re-opens the language filter. */
+  hasTranslationEdition?: boolean;
+  /** Injectable for tests and for judging season windows deterministically. */
+  now: Date;
+}
+
+export type KeywordFilter = (keyword: string, context: FilterContext, sources: string[]) => FilterResult;
+
+const PASS: FilterResult = { verdict: "pass" };
+
+// --- text helpers ---------------------------------------------------------
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+/**
+ * lowercase, trim, collapse whitespace, drop punctuation noise. Hyphens and
+ * apostrophes survive ("law-breaking", "don't"); colons, commas and stray
+ * symbols become spaces so scraped labels normalise into plain words.
+ */
+export function normalizeKeyword(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9'\-\s]/g, " ")
+    .replace(/\s+/g, " ")
+    .replace(/^[-'\s]+|[-'\s]+$/g, "")
+    .trim();
+}
+
+/** Word-boundary containment — "pages" must not match "page turner", "open" must not match "opening". */
+export function containsTerm(text: string, term: string): boolean {
+  return new RegExp(`(^|[^a-z0-9])${escapeRegExp(term)}([^a-z0-9]|$)`, "i").test(text);
+}
+
+function words(text: string): string[] {
+  return text.split(/\s+/).filter(Boolean);
+}
+
+function firstMatch(text: string, terms: string[]): string | undefined {
+  return terms.find((term) => containsTerm(text, term));
+}
+
+function hasAnyAnchor(text: string, anchors: string[]): string | undefined {
+  return anchors.find((anchor) => anchor.length >= 3 && containsTerm(text, anchor));
+}
+
+/** Blocklist terms that are part of what this book *is* are not blocklist terms for this book. */
+function withoutAnchoredTerms(terms: string[], context: FilterContext): string[] {
+  const anchors = qualifyingAnchors(context.anchors);
+  return terms.filter((term) => !anchors.some((anchor) => containsTerm(anchor, term)));
+}
+
+function isWebAutocomplete(sources: string[]): boolean {
+  return sources.some((source) => WEB_AUTOCOMPLETE_SOURCES.includes(source));
+}
+
+// --- 1. UI / metadata pollution -------------------------------------------
+
+/**
+ * Amazon page chrome and admin-UI labels. Runs first: "264 pages" and
+ * "see top 100 in kindle store" are never keywords, whatever else is true
+ * about them, and killing them here stops every later filter from having to
+ * reason about scrape artifacts.
+ */
+export const uiPollutionFilter: KeywordFilter = (keyword) => {
+  const term = firstMatch(keyword, UI_POLLUTION_TERMS);
+  if (term) return { verdict: "reject", reason: `page/UI chrome: "${term}"` };
+
+  // Detail-table labels: only when the keyword *leads* with one, so
+  // "sign language books" and "best rating books" survive while
+  // "language english" and "publisher bookouture" do not.
+  const label = METADATA_LABEL_TERMS.find((candidate) => new RegExp(`^${escapeRegExp(candidate)}\\b`).test(keyword));
+  if (label) return { verdict: "reject", reason: `listing metadata label: "${label}"` };
+
+  // A bare number, or a number followed by a unit, is a detail row rather
+  // than a query ("264", "1,024 kb"). A number in front of real words is
+  // left to the filters that understand the source it came from.
+  if (/^[\d,.]+$/.test(keyword) || /^\d[\d,]*\s*(kb|mb|gb|hours?|minutes?|mins?|words?)\b/.test(keyword)) {
+    return { verdict: "reject", reason: "listing measurement, not a query" };
+  }
+
+  return PASS;
+};
+
+// --- 2. Language & marketplace --------------------------------------------
+
+/**
+ * A UK English listing has no reason to bid on "crime thriller books
+ * malayalam" — those searches want a translation that does not exist.
+ * Languages the book is actually set in/about are exempt (they're anchors),
+ * and the marketplace's own language pauses instead of rejecting: "crime
+ * thriller books in english" is valid, just low value.
+ */
+export const languageMarketFilter: KeywordFilter = (keyword, context) => {
+  const marketLanguage = MARKET_LANGUAGES[context.marketplace] ?? "english";
+  const listingLanguage = context.language?.toLowerCase();
+  if (listingLanguage && !listingLanguage.includes(marketLanguage)) return PASS;
+  if (context.hasTranslationEdition) return PASS;
+
+  const foreign = firstMatch(
+    keyword,
+    withoutAnchoredTerms(
+      NON_MARKET_LANGUAGES.filter((language) => language !== marketLanguage),
+      context
+    )
+  );
+  if (foreign) return { verdict: "reject", reason: `non-market language: "${foreign}"` };
+
+  // Naming the marketplace's own language is valid but low value — *if* the
+  // keyword is otherwise about this book. "crime thriller books in english"
+  // pauses; "english books" is not a language keyword at all, and is left to
+  // the filters that judge it as the over-broad term it is.
+  if (containsTerm(keyword, marketLanguage) && hasAnyAnchor(keyword, qualifyingAnchors(context.anchors))) {
+    return { verdict: "pause", reason: `names the marketplace's own language ("${marketLanguage}")` };
+  }
+
+  return PASS;
+};
+
+// --- 3. Off-topic entities (autocomplete drift) ---------------------------
+
+/**
+ * Autocomplete engines expand a seed into whatever else shares its prefix:
+ * "scottish" reaches "scottish fold cat" and "scottish premier league
+ * fixtures", "scars of the past" reaches a World of Warcraft quest. Two
+ * rules — a blocklist of the domains it drifts into, and a requirement that
+ * anything from a general-web engine still look like a book search.
+ */
+export const offTopicEntityFilter: KeywordFilter = (keyword, context, sources) => {
+  const term = firstMatch(keyword, withoutAnchoredTerms(OFF_TOPIC_ENTITY_TERMS, context));
+  if (term) return { verdict: "reject", reason: `off-topic entity: "${term}"` };
+
+  if (isWebAutocomplete(sources)) {
+    const hasDomainWord = !!firstMatch(keyword, BOOK_DOMAIN_WORDS);
+    const hasBookAnchor = !!hasAnyAnchor(keyword, context.anchors.bookSpecific);
+    if (!hasDomainWord && !hasBookAnchor) {
+      return { verdict: "reject", reason: "autocomplete suggestion with no book-domain word" };
+    }
+  }
+
+  return PASS;
+};
+
+// --- 4. Review n-gram quality ---------------------------------------------
+
+/**
+ * Raw n-grams off review prose are not search queries. Readers write "his
+ * team was put together"; nobody types it. Applies only to the review
+ * source — the same phrase arriving from the blurb or a category is judged
+ * by its own filter.
+ *
+ * The better generation strategy (comparable-author mentions and
+ * sentiment+genre pairs rather than raw n-grams) lives in
+ * lib/reviewMining.ts; this is the backstop.
+ */
+export const reviewFragmentFilter: KeywordFilter = (keyword, context, sources) => {
+  if (!sources.includes("review-language")) return PASS;
+
+  const fragment = firstMatch(keyword, REVIEW_FILLER_FRAGMENTS);
+  if (fragment) return { verdict: "reject", reason: `review filler: "${fragment}"` };
+
+  const tokens = words(keyword);
+  if (WEAK_CONNECTORS.includes(tokens[0]) || WEAK_CONNECTORS.includes(tokens[tokens.length - 1])) {
+    return { verdict: "reject", reason: "starts or ends on a connector" };
+  }
+  if (tokens.some((token) => /^\d+$/.test(token))) {
+    return { verdict: "reject", reason: "bare numeral from review prose" };
+  }
+  if (tokens.length < 3) {
+    return { verdict: "reject", reason: "review fragment shorter than 3 words" };
+  }
+  const stopwordRatio = tokens.filter((token) => REVIEW_STOPWORDS.has(token)).length / tokens.length;
+  if (stopwordRatio > 0.4) {
+    return { verdict: "reject", reason: `${Math.round(stopwordRatio * 100)}% stopwords` };
+  }
+  if (!hasAnyAnchor(keyword, qualifyingAnchors(context.anchors))) {
+    return { verdict: "pause", reason: "reader phrasing with no genre/series anchor" };
+  }
+
+  return PASS;
+};
+
+// --- 5. Synonym expansion quality -----------------------------------------
+
+/**
+ * A general-purpose thesaurus answers "crime" with "law-breaking" and
+ * "scottish" with "erse". Neither is a book search. Synonym-sourced
+ * candidates have to come from the controlled genre map (or already touch
+ * the book's own vocabulary) to survive.
+ */
+export const synonymQualityFilter: KeywordFilter = (keyword, context, sources) => {
+  if (!sources.includes("synonym")) return PASS;
+
+  const bad = firstMatch(keyword, withoutAnchoredTerms(BAD_SYNONYM_TERMS, context));
+  if (bad) return { verdict: "reject", reason: `thesaurus artifact: "${bad}"` };
+
+  const allowed = [
+    ...Object.keys(ALLOWED_GENRE_SYNONYMS),
+    ...Object.values(ALLOWED_GENRE_SYNONYMS).flat(),
+  ];
+  const matchedSynonym = firstMatch(keyword, allowed);
+  const matchedAnchor = hasAnyAnchor(keyword, qualifyingAnchors(context.anchors));
+  if (!matchedSynonym && !matchedAnchor) {
+    return { verdict: "reject", reason: "synonym outside the controlled genre map" };
+  }
+
+  // A bare genre noun plus a book-intent word ("suspense books") is plausible
+  // but far too broad to switch on unreviewed.
+  const remaining = words(keyword).filter((token) => !BOOK_INTENT_WORDS.includes(token));
+  if (remaining.length === 1 && context.anchors.genre.includes(remaining[0])) {
+    return { verdict: "pause", reason: "single broad genre term plus book intent" };
+  }
+
+  return PASS;
+};
+
+// --- 6. Description shaping -----------------------------------------------
+
+/**
+ * Blurb prose yields noun phrases worth keeping ("celtic symbols", "dr clio
+ * wray") and verb fragments that are not queries ("killer leaves", "case
+ * spirals"). Survivors are long-tail: specific enough for Phrase/Exact,
+ * far too thin for Broad.
+ */
+export const descriptionShapeFilter: KeywordFilter = (keyword, _context, sources) => {
+  if (!sources.includes("book-description")) return PASS;
+
+  const tokens = words(keyword);
+  const verb = tokens.find((token) => DESCRIPTION_VERB_TOKENS.includes(token));
+  if (verb) {
+    return tokens.length <= 2
+      ? { verdict: "reject", reason: `verb fragment: "${verb}"` }
+      : { verdict: "pause", reason: `reads as a sentence fragment ("${verb}")` };
+  }
+  if (WEAK_CONNECTORS.includes(tokens[tokens.length - 1])) {
+    return { verdict: "reject", reason: "ends on a connector" };
+  }
+
+  return { verdict: "pass", matchTypeCeiling: "phrase" };
+};
+
+// --- 7. Format availability -----------------------------------------------
+
+/**
+ * Only bid on a format the ASIN (or a sibling edition) actually has.
+ * "jacqueline new hardcover" for a Kindle-only title sends readers to a page
+ * that cannot sell them what they searched for.
+ */
+export const formatAvailabilityFilter: KeywordFilter = (keyword, context) => {
+  for (const { format, pattern } of FORMAT_PATTERNS) {
+    if (!pattern.test(keyword)) continue;
+    if (!context.formats.includes(format)) {
+      return { verdict: "reject", reason: `no ${format} edition on this listing` };
+    }
+  }
+  if (KINDLE_UNLIMITED_PATTERN.test(keyword) && !context.isKindleUnlimited) {
+    return { verdict: "reject", reason: "not enrolled in Kindle Unlimited" };
+  }
+  return PASS;
+};
+
+// --- 8. Seasonal & gift ---------------------------------------------------
+
+const SEASONAL_INTENT_WORDS = [...BOOK_INTENT_WORDS, "gift", "gifts", "present", "presents"];
+
+function inSeasonWindow(term: string, now: Date): boolean {
+  const window = SEASON_WINDOWS[term];
+  if (!window) return true;
+  const today = `${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+  // Windows that wrap the year end (winter) compare as a union of two ranges.
+  return window.start <= window.end
+    ? today >= window.start && today <= window.end
+    : today >= window.start || today <= window.end;
+}
+
+/**
+ * "christmas" and "halloween" are not book keywords; "crime thriller
+ * christmas gift" is. A seasonal or gift term needs a buying-intent word and
+ * a real anchor, and outside its season it is created paused rather than
+ * spending budget in March.
+ */
+export const seasonalGiftFilter: KeywordFilter = (keyword, context) => {
+  const seasonal = firstMatch(keyword, withoutAnchoredTerms(SEASONAL_TERMS, context));
+  if (!seasonal) return PASS;
+
+  const hasIntent = !!firstMatch(keyword, SEASONAL_INTENT_WORDS);
+  if (!hasIntent) {
+    return { verdict: "reject", reason: `seasonal term "${seasonal}" with no book/gift intent` };
+  }
+
+  const audienceReject = firstMatch(keyword, GIFT_AUDIENCE_REJECT_WORDS);
+  if (audienceReject) {
+    return { verdict: "reject", reason: `fan-of-a-place intent, not book intent ("${audienceReject}")` };
+  }
+
+  const anchor = hasAnyAnchor(keyword, qualifyingAnchors(context.anchors));
+  if (!anchor) {
+    return { verdict: "pause", reason: `seasonal phrase with no genre/author anchor ("${seasonal}")` };
+  }
+
+  const audiencePause = firstMatch(keyword, GIFT_AUDIENCE_PAUSE_WORDS);
+  if (audiencePause) {
+    return { verdict: "pause", reason: `gift-audience phrasing ("${audiencePause}")` };
+  }
+
+  if (!inSeasonWindow(seasonal, context.now)) {
+    return { verdict: "pause", reason: `outside the ${seasonal} window` };
+  }
+
+  return PASS;
+};
+
+// --- 9. Single word -------------------------------------------------------
+
+/**
+ * One word is almost never a keyword: "scottish", "detective" and "heart"
+ * match everything and convert on nothing. The exceptions are names — an
+ * author or a distinctive series token ("mcneill") is a high-intent query on
+ * its own — and a short pause list of place/genre nouns worth reviewing.
+ */
+export const singleWordFilter: KeywordFilter = (keyword, context) => {
+  if (words(keyword).length !== 1) return PASS;
+
+  const isName = context.anchors.bookSpecific.includes(keyword) || context.anchors.comps.includes(keyword);
+  if (isName) return PASS;
+
+  if (SINGLE_WORD_PAUSE_TERMS.includes(keyword)) {
+    return { verdict: "pause", reason: "single distinctive genre term" };
+  }
+  // Place names pause (a reader searching "edinburgh" might be browsing);
+  // the nationality adjective form never does.
+  if (context.anchors.setting.includes(keyword) && !DEMONYM_TERMS.includes(keyword)) {
+    return { verdict: "pause", reason: "single setting term" };
+  }
+
+  return { verdict: "reject", reason: "single-word keyword, too broad to bid on" };
+};
+
+// --- 10. Phrase shape (dangling modifiers) --------------------------------
+
+/** Endings that leave the phrase without a head noun ("fast paced scottish"). */
+const DANGLING_ENDINGS = [...DEMONYM_TERMS, "crime"];
+
+/**
+ * Completes a dangling modifier with the book's primary genre phrase rather
+ * than dropping the keyword: "fast paced scottish" is a real reader
+ * sentiment, it just needs the product noun on the end. Exported so the
+ * buyer-intent generator can fix its own templates before they ever reach
+ * the pipeline.
+ */
+export function endsOnBareModifier(keyword: string): boolean {
+  const tokens = words(normalizeKeyword(keyword));
+  return tokens.length >= 2 && DANGLING_ENDINGS.includes(tokens[tokens.length - 1]);
+}
+
+/**
+ * Completes `keyword` when it ends on a bare modifier, and returns it
+ * unchanged when it doesn't — the form a generator wants when templating.
+ */
+export function completeIfDangling(keyword: string, primaryGenrePhrase: string | undefined): string {
+  if (!primaryGenrePhrase || !endsOnBareModifier(keyword)) return keyword;
+  return completeDanglingModifier(keyword, primaryGenrePhrase) ?? keyword;
+}
+
+export function completeDanglingModifier(keyword: string, primaryGenrePhrase: string): string | undefined {
+  if (!primaryGenrePhrase) return undefined;
+  const tokens = words(keyword);
+  const phraseTokens = words(primaryGenrePhrase);
+  // Don't repeat a word the modifier already carries ("scottish crime" +
+  // "crime thriller" → "scottish crime thriller").
+  const additions = phraseTokens.filter((token) => !tokens.includes(token));
+  if (additions.length === 0) return undefined;
+  return [...tokens, ...additions].join(" ");
+}
+
+export const phraseShapeFilter: KeywordFilter = (keyword, context) => {
+  const tokens = words(keyword);
+  if (tokens.length < 2) return PASS;
+
+  const lastToken = tokens[tokens.length - 1];
+  if (!DANGLING_ENDINGS.includes(lastToken)) return PASS;
+
+  const allowlist = [...ALLOWLISTED_MODIFIER_PHRASES, ...context.anchors.setting, ...context.anchors.genre];
+  if (allowlist.includes(keyword)) return PASS;
+
+  const completed = completeDanglingModifier(keyword, context.anchors.primaryGenrePhrase);
+  if (completed) {
+    return { verdict: "pass", rewriteTo: completed, reason: "completed a dangling modifier" };
+  }
+  return { verdict: "reject", reason: `ends on a bare modifier ("${lastToken}")` };
+};
+
+// --- 11. Anchor relevance (final gate) ------------------------------------
+
+/**
+ * The gate every keyword has to clear: it must name something about *this*
+ * book — its title/author/series/characters, its genre, its setting, or a
+ * comparable author. Generic book-intent words never qualify on their own,
+ * which is the whole difference between "english books" (out) and "scottish
+ * crime books" (in).
+ *
+ * Sources whose text is lifted verbatim from the book's own metadata are
+ * exempt: a phrase out of this book's blurb is relevant to this book by
+ * construction, and gating it on a genre vocabulary would drop exactly the
+ * distinctive long-tail the blurb exists to provide.
+ */
+export const anchorRelevanceFilter: KeywordFilter = (keyword, context, sources) => {
+  if (sources.some((source) => SELF_ANCHORED_SOURCES.includes(source))) return PASS;
+
+  const anchor = hasAnyAnchor(keyword, qualifyingAnchors(context.anchors));
+  if (anchor) return PASS;
+
+  const intent = firstMatch(keyword, context.anchors.bookIntent);
+  return {
+    verdict: "reject",
+    reason: intent
+      ? `only generic book intent ("${intent}"), nothing specific to this book`
+      : "no relevance anchor for this book",
+  };
+};
+
+/** The pipeline, in order. Each filter's name is stored on the keyword it stops. */
+export const KEYWORD_FILTER_PIPELINE: Array<{ name: string; filter: KeywordFilter }> = [
+  { name: "uiPollution", filter: uiPollutionFilter },
+  { name: "languageMarket", filter: languageMarketFilter },
+  { name: "offTopicEntity", filter: offTopicEntityFilter },
+  { name: "reviewFragment", filter: reviewFragmentFilter },
+  { name: "synonymQuality", filter: synonymQualityFilter },
+  { name: "descriptionShape", filter: descriptionShapeFilter },
+  { name: "formatAvailability", filter: formatAvailabilityFilter },
+  { name: "seasonalGift", filter: seasonalGiftFilter },
+  { name: "singleWord", filter: singleWordFilter },
+  { name: "phraseShape", filter: phraseShapeFilter },
+  { name: "anchorRelevance", filter: anchorRelevanceFilter },
+];
+
+export interface FilteredKeyword {
+  /** Normalised text, after any rewrite. */
+  text: string;
+  /** What the generator produced, kept so a rewrite is visible in the UI. */
+  originalText: string;
+  verdict: FilterVerdict;
+  /** Which filter decided, when the verdict isn't a plain pass. */
+  filter?: string;
+  reason?: string;
+  rewritten: boolean;
+  /** Set when the deciding source caps how broadly the keyword may run. */
+  matchTypeCeiling?: MatchType;
+}
+
+function sourcesOf(keyword: FilterableKeyword): string[] {
+  const sources = [...(keyword.sources ?? [])];
+  if (keyword.source) sources.push(keyword.source);
+  return sources;
+}
+
+/**
+ * Runs one keyword through the pipeline. A rewrite restarts the remaining
+ * filters against the rewritten text, so a completed phrase still has to
+ * clear the relevance gate on its own merits.
+ */
+export function runKeywordFilters(keyword: FilterableKeyword, context: FilterContext): FilteredKeyword {
+  const originalText = keyword.text;
+  const sources = sourcesOf(keyword);
+  let text = normalizeKeyword(originalText);
+  let rewritten = false;
+  let matchTypeCeiling: MatchType | undefined;
+
+  if (!text) {
+    return { text: "", originalText, verdict: "reject", filter: "normalise", reason: "empty after normalisation", rewritten: false };
+  }
+
+  for (const { name, filter } of KEYWORD_FILTER_PIPELINE) {
+    const result = filter(text, context, sources);
+
+    if (result.verdict !== "pass") {
+      return { text, originalText, verdict: result.verdict, filter: name, reason: result.reason, rewritten, matchTypeCeiling };
+    }
+    if (result.rewriteTo) {
+      text = normalizeKeyword(result.rewriteTo);
+      rewritten = true;
+    }
+    if (result.matchTypeCeiling) {
+      matchTypeCeiling = result.matchTypeCeiling;
+    }
+  }
+
+  return { text, originalText, verdict: "pass", rewritten, matchTypeCeiling };
+}
+
+export interface FilterRunSummary {
+  /** Verdict counts across the batch. */
+  byVerdict: Record<FilterVerdict, number>;
+  /** Rejections/pauses per filter, for tuning the blocklists. */
+  byFilter: Record<string, number>;
+}
+
+export interface FilterRunOutput {
+  results: FilteredKeyword[];
+  summary: FilterRunSummary;
+}
+
+/**
+ * Runs a whole batch, deduping on the post-rewrite text (two dangling
+ * modifiers can complete to the same phrase) and keeping the best verdict
+ * when they collide.
+ */
+export function filterKeywords(keywords: FilterableKeyword[], context: FilterContext): FilterRunOutput {
+  const byText = new Map<string, FilteredKeyword>();
+  const summary: FilterRunSummary = {
+    byVerdict: { pass: 0, pause: 0, reject: 0 },
+    byFilter: {},
+  };
+
+  const rank: Record<FilterVerdict, number> = { pass: 2, pause: 1, reject: 0 };
+
+  for (const keyword of keywords) {
+    const result = runKeywordFilters(keyword, context);
+    if (!result.text) continue;
+    const existing = byText.get(result.text);
+    if (existing && rank[existing.verdict] >= rank[result.verdict]) continue;
+    byText.set(result.text, result);
+  }
+
+  const results = Array.from(byText.values());
+  for (const result of results) {
+    summary.byVerdict[result.verdict] += 1;
+    if (result.filter) {
+      summary.byFilter[result.filter] = (summary.byFilter[result.filter] ?? 0) + 1;
+    }
+  }
+
+  return { results, summary };
+}
+
+/** Book fields the pipeline needs beyond the anchors themselves. */
+export interface FilterContextInput extends AnchorInput {
+  marketplace: Marketplace;
+  language?: string;
+  formats: string[];
+  isKindleUnlimited: boolean;
+  hasTranslationEdition?: boolean;
+  now?: Date;
+}
+
+/** One call from a stored snapshot to a ready-to-use pipeline context. */
+export function buildFilterContext(input: FilterContextInput): FilterContext {
+  return {
+    anchors: buildBookAnchors(input),
+    marketplace: input.marketplace,
+    language: input.language,
+    formats: input.formats,
+    isKindleUnlimited: input.isKindleUnlimited,
+    hasTranslationEdition: input.hasTranslationEdition,
+    now: input.now ?? new Date(),
+  };
+}
+
+/**
+ * Applies the pipeline to scored candidates, returning the survivors (with
+ * any rewrite applied) alongside the paused and rejected rows so the caller
+ * can persist all three. Candidate order — and therefore scoring order — is
+ * preserved.
+ */
+export function applyFiltersToCandidates(
+  candidates: KeywordCandidate[],
+  context: FilterContext
+): {
+  passed: Array<KeywordCandidate & { matchTypeCeiling?: MatchType }>;
+  paused: Array<KeywordCandidate & { filter?: string; reason?: string }>;
+  rejected: Array<KeywordCandidate & { filter?: string; reason?: string }>;
+  /** The raw per-keyword verdicts, for callers that need them (negative keyword building). */
+  results: FilteredKeyword[];
+  summary: FilterRunSummary;
+} {
+  const byText = new Map<string, KeywordCandidate>();
+  for (const candidate of candidates) byText.set(normalizeKeyword(candidate.text), candidate);
+
+  const { results, summary } = filterKeywords(candidates, context);
+
+  const passed: Array<KeywordCandidate & { matchTypeCeiling?: MatchType }> = [];
+  const paused: Array<KeywordCandidate & { filter?: string; reason?: string }> = [];
+  const rejected: Array<KeywordCandidate & { filter?: string; reason?: string }> = [];
+
+  for (const result of results) {
+    const source = byText.get(normalizeKeyword(result.originalText)) ?? {
+      text: result.text,
+      sources: [],
+    };
+    const candidate: KeywordCandidate = { ...source, text: result.text };
+
+    if (result.verdict === "pass") passed.push({ ...candidate, matchTypeCeiling: result.matchTypeCeiling });
+    else if (result.verdict === "pause") paused.push({ ...candidate, filter: result.filter, reason: result.reason });
+    else rejected.push({ ...candidate, filter: result.filter, reason: result.reason });
+  }
+
+  return { passed, paused, rejected, results, summary };
+}

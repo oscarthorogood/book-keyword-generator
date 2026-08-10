@@ -265,8 +265,8 @@ export function buildFirecrawlCandidates(metadata: {
  * subgenre from Amazon's category breadcrumb, Google Books categories, Open
  * Library subjects, Goodreads shelves — see /api/lookup) get folded straight
  * into the tropes candidate pool as their own high-trust source, and also
- * seed buyer-intent templating and Datamuse synonym expansion in the
- * generate route. A human already vetted these, so they skip the usual
+ * seed buyer-intent templating and the controlled genre-synonym expansion
+ * in the generate route. A human already vetted these, so they skip the usual
  * generic-term filtering that would otherwise drop a short tag like "cozy".
  */
 export function buildKnownTagCandidates(tags: string[]): KeywordCandidate[] {
@@ -386,7 +386,19 @@ export function splitKeywordsByCategory(keywords: KeywordCandidate[]): {
 // Increased from 6 to 10 to use more genre terms for buyer-intent templating.
 // Most books have 5-8 genres, so 10 is safe without dilution.
 const BUYER_INTENT_GENRE_LIMIT = 10;
-const FORMAT_MODIFIERS = ["hardcover", "paperback", "hard back", "kindle books"];
+
+// Format modifiers are only templated for formats the listing actually has
+// (lib/listingMetadata.ts reads them off the swatch strip). Templating all
+// four regardless is where "jacqueline new hardcover" came from for a
+// Kindle-only book — a search that lands readers on a page which can't sell
+// them what they asked for.
+const FORMAT_MODIFIERS: Record<string, string[]> = {
+  hardcover: ["hardcover", "hard back"],
+  paperback: ["paperback"],
+  kindle: ["kindle books"],
+  audiobook: ["audiobook"],
+  "large print": ["large print"],
+};
 
 /**
  * Crosses the top genre/subject terms already extracted from metadata with
@@ -398,9 +410,9 @@ const FORMAT_MODIFIERS = ["hardcover", "paperback", "hard back", "kindle books"]
  */
 export function buildBuyerIntentCandidates(
   genreTerms: string[],
-  params: { title?: string; author?: string; seriesName?: string } = {}
+  params: { title?: string; author?: string; seriesName?: string; formats?: string[] } = {}
 ): KeywordCandidate[] {
-  const { title, author, seriesName } = params;
+  const { title, author, seriesName, formats = [] } = params;
   const texts = new Set<string>();
   const currentYear = new Date().getFullYear();
 
@@ -412,9 +424,11 @@ export function buildBuyerIntentCandidates(
     texts.add(`best selling ${genre} books`);
   }
 
-  for (const format of FORMAT_MODIFIERS) {
-    if (title) texts.add(`${title} ${format}`);
-    if (author) texts.add(`${author} ${format}`);
+  for (const available of formats) {
+    for (const format of FORMAT_MODIFIERS[available] ?? []) {
+      if (title) texts.add(`${title} ${format}`);
+      if (author) texts.add(`${author} ${format}`);
+    }
   }
 
   if (title) {
@@ -507,9 +521,10 @@ export function buildQnaCandidates(questions: string[]): KeywordCandidate[] {
 /**
  * Local, offline expansion of already-extracted genre terms into related
  * buyer-search phrasing via the curated book-genre thesaurus in
- * lib/synonyms.ts — a complementary signal to the Datamuse-based synonym
- * expansion (lib/datamuse.ts), which the generate route merges into the
- * same "synonym" bucket.
+ * lib/synonyms.ts. Expansion is allowlist-only: a genre phrase maps to
+ * other genre phrases readers search, or it does not expand at all. The
+ * open-ended thesaurus lookup this replaced is what produced "felon books"
+ * and "erse books".
  */
 export function buildCuratedSynonymCandidates(genreTerms: string[]): KeywordCandidate[] {
   const expanded = expandSynonyms(genreTerms);

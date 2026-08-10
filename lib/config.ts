@@ -54,6 +54,10 @@ export const KEYWORD_CONFIG = {
     "key-trope", // User-provided tropes/themes/settings from the form
     "amazon-recs", // "Frequently bought together" / "Compare with similar items"
     "firecrawl", // LLM-extracted categories/keywords/features from the product page
+    "listing-metadata", // <title>, meta keywords, URL slug, variation swatches
+    "serpapi-related", // Amazon's own "related searches" for a seed term
+    "serpapi-organic", // Competitor titles/authors ranking for a seed term
+    "serpapi-autocomplete", // Amazon search-bar suggestions via SerpApi
   ] as const,
   ALL_KEYWORD_GROUP_TYPES: ["tropes", "comp-names", "product-targeting"] as const,
 };

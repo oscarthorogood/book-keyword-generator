@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, BookOpen, Search, AlertTriangle } from "lucide-react";
+import { AlertTriangle, BookOpen, Plus, Search } from "lucide-react";
 
 interface Book {
   id: string;
@@ -62,140 +62,194 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
     );
   }, [books, searchTerm]);
 
+  const totalKeywords = useMemo(
+    () => books.reduce((sum, book) => sum + (book.total_keywords ?? 0), 0),
+    [books]
+  );
+
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: "var(--bg-mid)" }}>
-      <header className="border-b px-8 py-6 flex items-center justify-between gap-4">
+    <div className="flex min-h-screen flex-col bg-white">
+      <header className="page-header flex flex-wrap items-center justify-between gap-4">
         <div>
-          <p className="eyebrow mb-1">Library</p>
-          <h1 className="text-2xl font-bold" style={{ color: "var(--ink)" }}>
-            Books
-          </h1>
+          <h1 className="page-title">Books</h1>
+          <p className="page-subtitle mt-1">
+            {books.length} book{books.length === 1 ? "" : "s"} · {totalKeywords} keyword
+            {totalKeywords === 1 ? "" : "s"} researched
+          </p>
         </div>
-        <button onClick={onAddBook} className="btn-pill-dark">
-          <Plus size={16} />
+        <button onClick={onAddBook} className="btn btn-primary">
+          <Plus size={20} />
           Add book
         </button>
       </header>
 
-      <div className="flex-1 px-8 py-8">
+      <div className="page-body flex-1">
         {loadError ? (
-          <div
-            className="status-banner"
-            style={{ background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }}
-          >
-            <AlertTriangle size={16} className="mt-0.5" style={{ color: "var(--accent-red)" }} />
+          <div className="alert alert-error" role="alert">
+            <AlertTriangle size={20} className="mt-0.5 shrink-0" />
             <div>
-              <p className="font-medium" style={{ color: "var(--ink)" }}>
-                Couldn&apos;t load your books
-              </p>
-              <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
-                {loadError}
-              </p>
+              <p className="alert-title">Couldn&apos;t load your books</p>
+              <p className="mt-1">{loadError}</p>
             </div>
           </div>
         ) : loading ? (
-          <p className="text-center py-16 text-sm" style={{ color: "var(--muted)" }}>
-            Loading books…
-          </p>
+          <div className="table-wrap" aria-busy="true" aria-label="Loading books">
+            <div className="divide-y" style={{ borderColor: "var(--line)" }}>
+              {[0, 1, 2].map((row) => (
+                <div key={row} className="flex items-center gap-4 p-4">
+                  <div className="skeleton h-14 w-10 shrink-0" />
+                  <div className="flex-1 space-y-2">
+                    <div className="skeleton h-4 w-1/3" />
+                    <div className="skeleton h-3 w-1/4" />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
         ) : books.length === 0 ? (
-          <div className="text-center py-16 rounded-2xl border" style={{ background: "var(--panel-muted)" }}>
-            <BookOpen size={40} className="mx-auto mb-4" style={{ color: "var(--muted)" }} />
-            <p className="text-sm mb-4" style={{ color: "var(--muted)" }}>
-              No books yet. Paste an Amazon link to add your first one.
-            </p>
-            <button onClick={onAddBook} className="btn-pill-dark">
-              <Plus size={16} />
+          <div className="empty-state">
+            <span className="icon-tile icon-tile-lg icon-tile-dark">
+              <BookOpen size={24} />
+            </span>
+            <div className="space-y-1">
+              <p className="empty-state-title">No books yet</p>
+              <p className="empty-state-body">
+                Paste an Amazon product link to capture a book&apos;s metadata. Every keyword you generate
+                later is built from that one capture.
+              </p>
+            </div>
+            <button onClick={onAddBook} className="btn btn-primary">
+              <Plus size={20} />
               Add book
             </button>
           </div>
         ) : (
           <>
-            <div className="flex items-center justify-between gap-4 mb-6">
-              <p className="text-sm" style={{ color: "var(--muted)" }}>
-                {filteredBooks.length} book{filteredBooks.length === 1 ? "" : "s"}
+            <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                Showing {filteredBooks.length} of {books.length}
               </p>
-              <div className="relative w-72">
-                <Search size={16} className="absolute left-3 top-2.5" style={{ color: "var(--muted)" }} />
+              <div className="relative w-full sm:w-80">
+                <Search size={20} className="input-icon" aria-hidden="true" />
+                <label className="sr-only" htmlFor="book-search">
+                  Search books
+                </label>
                 <input
-                  type="text"
-                  placeholder="Search title, author or ASIN…"
+                  id="book-search"
+                  type="search"
+                  placeholder="Search title, author or ASIN"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="input pl-9"
+                  className="input input-with-icon"
                 />
               </div>
             </div>
 
             {filteredBooks.length === 0 ? (
-              <div className="text-center py-16 rounded-2xl border" style={{ background: "var(--panel-muted)" }}>
-                <p className="text-sm" style={{ color: "var(--muted)" }}>
-                  No books match that search.
-                </p>
+              <div className="empty-state">
+                <span className="icon-tile icon-tile-lg">
+                  <Search size={24} style={{ color: "var(--icon-default)" }} />
+                </span>
+                <div className="space-y-1">
+                  <p className="empty-state-title">No matches</p>
+                  <p className="empty-state-body">
+                    No book matches “{searchTerm}”. Try the author, or the ASIN from the product URL.
+                  </p>
+                </div>
+                <button onClick={() => setSearchTerm("")} className="btn btn-secondary">
+                  Clear search
+                </button>
               </div>
             ) : (
-              <div className="grid gap-3">
-                {filteredBooks.map((book) => {
-                  const snapshot = book.metadata_json ?? {};
-                  const captureFailed = snapshot.capture ? !snapshot.capture.ok || snapshot.capture.blocked : false;
-                  return (
-                    <button
-                      key={book.id}
-                      onClick={() => onSelectBook(book.id)}
-                      className="card flex items-center gap-4 text-left w-full hover:opacity-90 transition-opacity"
-                      style={{ padding: "1rem 1.25rem" }}
-                    >
-                      {snapshot.coverImageUrl ? (
-                        // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
-                        <img
-                          src={snapshot.coverImageUrl}
-                          alt=""
-                          className="w-10 h-14 object-contain rounded flex-shrink-0"
-                        />
-                      ) : (
-                        <div
-                          className="w-10 h-14 rounded flex items-center justify-center flex-shrink-0"
-                          style={{ background: "var(--panel-muted)" }}
+              <div className="table-wrap overflow-x-auto">
+                <table className="table">
+                  <thead>
+                    <tr>
+                      <th scope="col">Book</th>
+                      <th scope="col" className="hidden md:table-cell">
+                        Marketplace
+                      </th>
+                      <th scope="col" className="hidden lg:table-cell">
+                        Genre vocabulary
+                      </th>
+                      <th scope="col">Keywords</th>
+                      <th scope="col">
+                        <span className="sr-only">Status</span>
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {filteredBooks.map((book) => {
+                      const snapshot = book.metadata_json ?? {};
+                      const captureFailed = snapshot.capture
+                        ? !snapshot.capture.ok || snapshot.capture.blocked
+                        : false;
+                      return (
+                        <tr
+                          key={book.id}
+                          onClick={() => onSelectBook(book.id)}
+                          className="cursor-pointer"
+                          tabIndex={0}
+                          role="button"
+                          aria-label={`Open ${book.title}`}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onSelectBook(book.id);
+                            }
+                          }}
                         >
-                          <BookOpen size={16} style={{ color: "var(--muted)" }} />
-                        </div>
-                      )}
-
-                      <div className="flex-1 min-w-0">
-                        <p className="font-medium truncate" style={{ color: "var(--ink)" }}>
-                          {book.title}
-                        </p>
-                        <p className="text-xs truncate" style={{ color: "var(--muted)" }}>
-                          {book.author} · {book.marketplace} · <span className="font-mono">{book.asin}</span>
-                        </p>
-                        {snapshot.genreTerms && snapshot.genreTerms.length > 0 && (
-                          <p className="text-xs mt-1 truncate" style={{ color: "var(--muted)" }}>
-                            {snapshot.genreTerms.slice(0, 4).join(" · ")}
-                          </p>
-                        )}
-                      </div>
-
-                      {captureFailed && (
-                        <span
-                          className="text-xs inline-flex items-center gap-1"
-                          style={{ color: "var(--accent-red)" }}
-                          title="Metadata incomplete — open the book to re-fetch"
-                        >
-                          <AlertTriangle size={13} />
-                          Metadata
-                        </span>
-                      )}
-
-                      <div className="text-right flex-shrink-0">
-                        <p className="text-lg font-bold" style={{ color: "var(--ink)" }}>
-                          {book.total_keywords}
-                        </p>
-                        <p className="text-xs" style={{ color: "var(--muted)" }}>
-                          keywords
-                        </p>
-                      </div>
-                    </button>
-                  );
-                })}
+                          <td>
+                            <div className="flex items-center gap-3">
+                              {snapshot.coverImageUrl ? (
+                                // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
+                                <img
+                                  src={snapshot.coverImageUrl}
+                                  alt=""
+                                  className="h-14 w-10 shrink-0 rounded object-contain"
+                                  style={{ boxShadow: "inset 0 0 0 1px rgba(0,0,0,0.08)" }}
+                                />
+                              ) : (
+                                <span className="icon-tile" style={{ height: 56, width: 40 }}>
+                                  <BookOpen size={20} style={{ color: "var(--icon-default)" }} />
+                                </span>
+                              )}
+                              <div className="min-w-0">
+                                <p className="cell-primary truncate">{book.title}</p>
+                                <p className="meta-line truncate">
+                                  {book.author} · <span className="font-mono">{book.asin}</span>
+                                </p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="hidden md:table-cell">
+                            <span className="badge badge-gray">{book.marketplace}</span>
+                          </td>
+                          <td className="hidden lg:table-cell">
+                            {snapshot.genreTerms && snapshot.genreTerms.length > 0 ? (
+                              <span className="line-clamp-2 max-w-xs">
+                                {snapshot.genreTerms.slice(0, 4).join(" · ")}
+                              </span>
+                            ) : (
+                              <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                            )}
+                          </td>
+                          <td>
+                            <span className="cell-primary">{book.total_keywords}</span>
+                          </td>
+                          <td>
+                            {captureFailed && (
+                              <span className="badge badge-error" title="Metadata incomplete — open the book to re-fetch">
+                                <AlertTriangle size={16} />
+                                Metadata
+                              </span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
               </div>
             )}
           </>

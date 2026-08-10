@@ -66,8 +66,8 @@ Two things this fixes, both of which used to poison whole keyword lists:
 Generating keywords reads the stored snapshot instead of re-scraping Amazon,
 so it's fast, repeatable, and works from exactly the metadata the book page
 shows you. Only the cheap, unblocked endpoints run live per generate: the
-four autocomplete engines (Amazon, Google, YouTube, DuckDuckGo), Datamuse
-synonym expansion, and the Amazon Ads API when configured.
+four autocomplete engines (Amazon, Google, YouTube, DuckDuckGo), SerpApi's
+Amazon Search/Autocomplete APIs, and the Amazon Ads API when configured.
 
 From there it merges every source, filters junk (generic terms, store
 scaffolding, scraped-page boilerplate, garbled queries), collapses
@@ -77,9 +77,71 @@ author/title names run **exact**, specific 3+ word phrases run **phrase**,
 short generic terms run **broad**. An optional AI pass (Google Gemini)
 re-orders the list and drops off-topic candidates — it never truncates it.
 
+Everything then goes through the **relevance filter pipeline** (below),
+which decides what is actually worth bidding on for this book before
+anything is activated.
+
 The result lands in the book's keyword manager as a long list (up to 300
 thematic keywords plus 120 comparable names) to review, filter, re-tier and
-prune.
+prune — with the rejected candidates kept alongside it, each labelled with
+the filter that stopped it and why.
+
+### Relevance filtering
+
+Generation is source-led: every source contributes what it found. Nothing
+used to check that any of it was about *this* book, which is how a Scottish
+crime thriller ended up bidding on `scottish fold cat` (autocomplete drift),
+`felon books` (thesaurus expansion), `his team was put` (a raw review
+n-gram) and `264 pages` (page chrome).
+
+`lib/keywordFilters.ts` is the shared validation layer that was missing. It
+runs after generation and before anything is written as active, as an
+ordered pipeline where each filter returns **reject** (never bid), **pause**
+(keep, don't activate) or **pass** (continue):
+
+| # | Filter | What it stops |
+|---|---|---|
+| 1 | `uiPollution` | Page chrome and detail-table labels — `264 pages`, `learn more`, `language: english` |
+| 2 | `languageMarket` | Languages the listing isn't in — `crime thriller books malayalam` |
+| 3 | `offTopicEntity` | Autocomplete drift — `scottish premier league fixtures`, `scars of the past turtle wow` |
+| 4 | `reviewFragment` | Raw review prose — `credit to a superb`, `written by ian rankin` |
+| 5 | `synonymQuality` | Thesaurus artifacts — `felon books`, `erse books` |
+| 6 | `descriptionShape` | Blurb verb fragments — `killer leaves`, `case spirals` |
+| 7 | `formatAvailability` | Formats the ASIN doesn't have — `jacqueline new hardcover` on a Kindle-only book |
+| 8 | `seasonalGift` | Seasonal terms with no book intent, and out-of-season activation |
+| 9 | `singleWord` | One-word keywords too broad to bid on — `scottish`, `detective` |
+| 10 | `phraseShape` | Dangling modifiers — `fast paced scottish` (rewritten to `fast paced scottish crime thriller`) |
+| 11 | `anchorRelevance` | The final gate: anything that names nothing specific to this book |
+
+The gate at the end is the important one. Each book gets **anchors** derived
+from its own scrape (`lib/keywordAnchors.ts`) — its title/author/series and
+character names, its genre vocabulary, its setting, and its comparable
+authors. A keyword passes only if it contains at least one of those.
+Generic book-intent words (`books`, `kindle`, `read`) never qualify a
+keyword on their own, which is the whole difference between `english books`
+(dropped) and `scottish crime books` (kept).
+
+Rejections are kept, not discarded: they're stored with `status: rejected`,
+the deciding filter and its reason, so the keyword manager can show why —
+and a false positive can be reviewed and put back. The rejections that
+describe a real (unwanted) *search intent* — off-topic entities, wrong
+languages, missing formats — are also turned into **negative keywords**, so
+Amazon can't serve on them through a broader match.
+
+Blocklists live in `lib/keywordFilterConfig.ts` so they can be tuned per
+marketplace or genre; per-filter rejection counts come back with every
+generate run. "Re-run filters" in the keyword manager applies the pipeline
+to a book's existing keywords (`POST /api/books/[id]/keywords/filter`) —
+the migration path for lists generated before it existed.
+
+### Exporting to Amazon Ads
+
+"Export bulksheet" (`GET /api/books/[id]/keywords/export`) writes a
+bulk-upload CSV: a descriptive Broad/Phrase campaign, a comparable
+titles/authors Exact campaign, the negative keywords, and an ASIN/brand
+product-targeting campaign built from the competitor crawl
+(`lib/productTargets.ts`, ranked by best-seller rank and review count).
+Rejected keywords are never exported.
 
 ## Identifiers
 
@@ -139,12 +201,27 @@ better one:
   short (2-8 word) bullets are taken as candidates directly rather than
   n-gram-mined for sub-phrases, since a single blurb doesn't repeat itself
   the way review text does — a frequency filter would zero everything out.
-- **Datamuse synonym expansion** (`getSynonymExpansionCandidates` in
-  `lib/datamuse.ts`) — a free, no-key, no-scraping-risk API
-  ([api.datamuse.com](https://api.datamuse.com)) that expands the top
-  genre/trope terms into related words ("detective" → "sleuth",
-  "investigator", "gumshoe") the alphabet-soup sweep can't reach because
-  they don't share a prefix with anything already seeded.
+- **Controlled genre-synonym expansion** (`expandSynonyms` in
+  `lib/synonyms.ts`) — an allowlist map from genre phrase to genre phrase
+  ("crime fiction" → "detective fiction", "murder mystery", "police
+  procedural", "noir"). This replaced an open-ended thesaurus lookup
+  (Datamuse's "means like") that expanded individual tokens: asked about
+  "crime" it answered "law-breaking", "perpetrator", "felon"; asked about
+  "scottish" it answered "erse", "scotch", "scotia" — none of which anyone
+  types when buying a book. Nationality/setting words and bare emotional
+  tokens are never expanded at all.
+- **Listing HTML metadata** (`buildListingMetadataCandidates` in
+  `lib/listingKeywords.ts`) — Amazon's own `<meta name="keywords">` terms,
+  the `<title>` tag, the canonical URL slug and the variation swatches, plus
+  field-weighted n-grams across all of it (title 3.0, meta keywords 2.5,
+  bullets 2.0, slug 2.0, reviews 1.5, description 1.0) so a phrase in the
+  product title outranks the same phrase buried in the blurb.
+- **SerpApi Amazon Search + Autocomplete** (`lib/serpApiKeywords.ts`) —
+  Amazon's own *related searches* for a seed term (keyword expansions Amazon
+  publishes from real shopper behaviour), the titles/authors ranking for it,
+  and the search-bar suggestions readers see while typing. Licensed access
+  rather than scraping, credit-metered per run, and skipped entirely without
+  a key.
 - **Goodreads trope/shelf tags** (`getGoodreadsTags` in `lib/goodreads.ts`)
   — looks the book up by ISBN (falling back to a title+author search) and
   scrapes its community-tagged genre/trope shelves ("enemies-to-lovers",
@@ -227,7 +304,7 @@ better one:
 With ~10 different free sources feeding the candidate pool (Ads API, Amazon
 + Google autocomplete, Google Books API + web scrape, Open Library, Amazon
 comp-title/comp-name crawling, review-language mining, book description
-mining, Datamuse synonym expansion, Goodreads tags), the harder problem
+mining, genre-synonym expansion, Goodreads tags), the harder problem
 shifts from "find enough keywords" to "which of these hundreds of candidates
 are actually worth testing, and in which ad group." Two ranking stages
 handle that, in order:
@@ -408,8 +485,10 @@ set, `scrapeProductPage`'s fetch — and the Goodreads lookup in
 `lib/goodreads.ts` — route through ScraperAPI's residential/rotating-IP proxy
 (`resolveScraperProxyUrl` in `lib/scrape.ts`) instead of hitting the target
 directly; unset, both fall back to a direct fetch (fine for local dev). This
-is scoped to full-page HTML fetches only — **not** the autocomplete JSON
-endpoints (`getAutocompleteSuggestions`) or the Datamuse API, which run
+is scoped to full-page HTML fetches only (all of which go through the shared
+rate limiter, audit log and CAPTCHA circuit breaker in `lib/fetchLog.ts`) —
+**not** the autocomplete JSON
+endpoints (`getAutocompleteSuggestions`), which run
 dozens of times per generate call and would burn through a proxy's free tier
 fast, and it's unconfirmed whether Amazon blocks the autocomplete endpoint
 the same way it blocks the product page. If you find autocomplete is *also*

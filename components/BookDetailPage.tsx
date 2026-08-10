@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ArrowLeft, AlertTriangle, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, RefreshCw } from "lucide-react";
 import KeywordManager from "./KeywordManager";
 
 /** The slice of the stored snapshot (books.metadata_json) this page renders. */
@@ -32,7 +32,16 @@ export interface BookSnapshotView {
   goodreadsTags?: string[];
   openLibrarySubjects?: string[];
   googleBooksCategories?: string[];
-  capture?: { ok: boolean; blocked: boolean; emptySources?: string[] };
+  /** Editions confirmed on the listing — format keywords are only allowed for these. */
+  formats?: string[];
+  isKindleUnlimited?: boolean;
+  capture?: {
+    ok: boolean;
+    blocked: boolean;
+    emptySources?: string[];
+    /** Share of the tracked ListingRecord fields this capture found, 0-1. */
+    completeness?: number;
+  };
 }
 
 export interface Book {
@@ -116,10 +125,16 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
 
   if (loading) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg-mid)" }}>
-        <div className="text-center">
-          <div className="animate-spin w-10 h-10 border-4 rounded-full mx-auto mb-4 border-t-transparent" />
-          <p style={{ color: "var(--muted)" }}>Loading book…</p>
+      <div className="flex min-h-screen flex-col bg-white">
+        <header className="page-header">
+          <div className="skeleton h-5 w-28" />
+          <div className="skeleton mt-4 h-8 w-64" />
+        </header>
+        <div className="page-body space-y-6" aria-busy="true" aria-label="Loading book">
+          <div className="card space-y-4">
+            <div className="skeleton h-4 w-48" />
+            <div className="skeleton h-24 w-full" />
+          </div>
         </div>
       </div>
     );
@@ -127,15 +142,28 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
 
   if (!book) {
     return (
-      <div className="min-h-screen flex flex-col" style={{ background: "var(--bg-mid)" }}>
-        <header className="border-b px-8 py-6">
-          <button onClick={onBack} className="inline-flex items-center gap-2 text-sm" style={{ color: "var(--muted)" }}>
-            <ArrowLeft size={18} />
+      <div className="flex min-h-screen flex-col bg-white">
+        <header className="page-header">
+          <button onClick={onBack} className="btn-link">
+            <ArrowLeft size={20} />
             Back to books
           </button>
         </header>
-        <div className="flex-1 flex items-center justify-center">
-          <p style={{ color: "var(--muted)" }}>Book not found.</p>
+        <div className="page-body flex-1">
+          <div className="empty-state">
+            <span className="icon-tile icon-tile-lg">
+              <AlertTriangle size={24} style={{ color: "var(--icon-default)" }} />
+            </span>
+            <div className="space-y-1">
+              <p className="empty-state-title">Book not found</p>
+              <p className="empty-state-body">
+                It may have been deleted, or it belongs to another account.
+              </p>
+            </div>
+            <button onClick={onBack} className="btn btn-secondary">
+              Back to books
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -166,6 +194,15 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
     ...(snapshot.rating !== undefined
       ? ([["Rating", `${snapshot.rating} (${snapshot.reviewCount ?? 0} reviews)`]] as Array<[string, string]>)
       : []),
+    ...(snapshot.formats?.length
+      ? ([
+          [
+            "Formats",
+            snapshot.formats.map((f) => f.charAt(0).toUpperCase() + f.slice(1)).join(", ") +
+              (snapshot.isKindleUnlimited ? " · Kindle Unlimited" : ""),
+          ],
+        ] as Array<[string, string]>)
+      : []),
     ...(snapshot.bestSellerRanks?.length
       ? ([["Best seller rank", `#${snapshot.bestSellerRanks[0].rank} in ${snapshot.bestSellerRanks[0].category}`]] as Array<
           [string, string]
@@ -174,105 +211,89 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
   ];
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ background: "var(--bg-mid)" }}>
-      <header className="border-b px-8 py-6">
-        <button
-          onClick={onBack}
-          className="inline-flex items-center gap-2 text-sm mb-4"
-          style={{ color: "var(--muted)" }}
-        >
-          <ArrowLeft size={18} />
+    <div className="flex min-h-screen flex-col bg-white">
+      <header className="page-header">
+        <button onClick={onBack} className="btn-link mb-4">
+          <ArrowLeft size={20} />
           Back to books
         </button>
-        <div className="flex items-start justify-between gap-6">
-          <div>
-            <h1 className="text-2xl font-bold" style={{ color: "var(--ink)" }}>
-              {book.title}
-            </h1>
-            <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
-              by {book.author} · {book.total_keywords} keyword{book.total_keywords === 1 ? "" : "s"}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="page-title">{book.title}</h1>
+            <p className="page-subtitle mt-1">
+              {book.author} · {book.total_keywords} keyword{book.total_keywords === 1 ? "" : "s"}
             </p>
           </div>
-          <button onClick={refreshMetadata} disabled={refreshing} className="btn-pill-outline">
-            <RefreshCw size={14} className={refreshing ? "animate-spin" : undefined} />
+          <button onClick={refreshMetadata} disabled={refreshing} className="btn btn-secondary">
+            <RefreshCw size={20} className={refreshing ? "animate-spin" : undefined} />
             {refreshing ? "Re-fetching…" : "Re-fetch metadata"}
           </button>
         </div>
       </header>
 
-      <div className="flex-1 px-8 py-8 space-y-6">
-        {(captureFailed || notice) && (
-          <div
-            className="status-banner"
-            style={
-              captureFailed
-                ? { background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }
-                : { background: "var(--panel-muted)" }
-            }
-          >
-            {captureFailed ? (
-              <AlertTriangle size={16} className="mt-0.5 flex-shrink-0" style={{ color: "var(--accent-red)" }} />
-            ) : (
-              <span className="status-dot" style={{ background: "var(--accent-green)" }} />
-            )}
+      <div className="page-body flex-1 space-y-6">
+        {captureFailed && (
+          <div className="alert alert-error" role="alert">
+            <AlertTriangle size={20} className="mt-0.5 shrink-0" />
             <div>
-              {captureFailed && (
-                <p className="font-medium" style={{ color: "var(--ink)" }}>
-                  Amazon didn&apos;t return this book&apos;s product page, so the metadata is incomplete.
-                  Keyword generation needs it — re-fetch to try again.
-                </p>
-              )}
-              {notice && (
-                <p className={captureFailed ? "text-xs mt-1" : undefined} style={{ color: "var(--muted)" }}>
-                  {notice}
-                </p>
-              )}
+              <p className="alert-title">Amazon didn&apos;t return this book&apos;s product page</p>
+              <p className="mt-1">
+                The metadata is incomplete and keyword generation needs it — re-fetch to try again.
+              </p>
             </div>
+          </div>
+        )}
+
+        {notice && (
+          <div className="alert alert-success" aria-live="polite">
+            <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
+            <p>{notice}</p>
           </div>
         )}
 
         {/* Captured metadata — the exact input keyword generation runs on. */}
         <section className="card">
-          <div className="flex items-start justify-between gap-4 mb-4">
-            <div>
-              <p className="card-title">Metadata from the ASIN scrape</p>
-              <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
-                Captured {formatDate(snapshot.capturedAt)} · {mineable} data points available to the keyword
-                generator
-              </p>
-            </div>
+          <div className="mb-5">
+            <p className="card-title">Metadata from the ASIN scrape</p>
+            <p className="meta-line mt-1">
+              Captured {formatDate(snapshot.capturedAt)} · {mineable} data points available to the keyword
+              generator
+              {snapshot.capture?.completeness !== undefined &&
+                ` · ${Math.round(snapshot.capture.completeness * 100)}% of listing fields read`}
+            </p>
           </div>
 
-          <div className="flex gap-6 flex-wrap">
+          <div className="flex flex-wrap gap-6">
             {snapshot.coverImageUrl && (
               // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
               <img
                 src={snapshot.coverImageUrl}
                 alt={`${book.title} cover`}
-                className="w-24 rounded-lg border object-contain flex-shrink-0"
+                className="w-24 shrink-0 rounded-md border object-contain"
+                style={{ borderColor: "var(--line)" }}
               />
             )}
 
-            <div className="flex-1 min-w-[260px] space-y-4">
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
+            <div className="min-w-[260px] flex-1 space-y-5">
+              <dl className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-3">
                 {facts.map(([label, value]) => (
                   <div key={label}>
-                    <p className="text-xs" style={{ color: "var(--muted)" }}>
+                    <dt className="text-xs" style={{ color: "var(--text-secondary)" }}>
                       {label}
-                    </p>
-                    <p className="text-sm font-medium" style={{ color: "var(--ink)" }}>
+                    </dt>
+                    <dd className="mt-0.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
                       {value}
-                    </p>
+                    </dd>
                   </div>
                 ))}
-              </div>
+              </dl>
 
               {genreTerms.length > 0 && (
                 <div>
-                  <p className="text-xs mb-2" style={{ color: "var(--muted)" }}>
+                  <p className="mb-2 text-xs" style={{ color: "var(--text-secondary)" }}>
                     Genre vocabulary used to seed keywords
                   </p>
-                  <div className="flex flex-wrap gap-1.5">
+                  <div className="flex flex-wrap gap-2">
                     {genreTerms.slice(0, 14).map((term) => (
                       <span key={term} className="chip-tag">
                         {term}
@@ -284,10 +305,10 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
 
               {snapshot.categoryPath && snapshot.categoryPath.length > 0 && (
                 <div>
-                  <p className="text-xs mb-1" style={{ color: "var(--muted)" }}>
+                  <p className="mb-1 text-xs" style={{ color: "var(--text-secondary)" }}>
                     Amazon category path
                   </p>
-                  <p className="text-sm" style={{ color: "var(--ink)" }}>
+                  <p className="text-sm" style={{ color: "var(--text-ui)" }}>
                     {snapshot.categoryPath.join(" › ")}
                   </p>
                 </div>
@@ -295,10 +316,10 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
 
               {snapshot.description && (
                 <div>
-                  <p className="text-xs mb-1" style={{ color: "var(--muted)" }}>
+                  <p className="mb-1 text-xs" style={{ color: "var(--text-secondary)" }}>
                     Description
                   </p>
-                  <p className="text-sm leading-relaxed line-clamp-4" style={{ color: "var(--ink)" }}>
+                  <p className="line-clamp-4 text-sm" style={{ color: "var(--text-secondary)" }}>
                     {snapshot.description}
                   </p>
                 </div>
