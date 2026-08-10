@@ -15,6 +15,26 @@ interface CampaignGenerationFormProps {
 type FormPage = 1 | 2 | 3 | 4 | 5 | 6;
 const TOTAL_PAGES = 6;
 
+const PAGE_TITLES: Record<FormPage, string> = {
+  1: "Book Details",
+  2: "Budget & Bid",
+  3: "Keywords & Sources",
+  4: "Strategy",
+  5: "Preferences",
+  6: "Review",
+};
+
+// Calculate estimated daily spend based on budget and strategy
+function calculateEstimatedSpend(dailyBudget: number, strategyValue: MatchTypeStrategy | "custom"): { spend: number; multiplier: number } {
+  let multiplier = 1;
+  if (strategyValue === "phrase-exact") multiplier = 2;
+  if (strategyValue === "all") multiplier = 3;
+
+  // 50% utilization rate (not all keywords get clicks daily)
+  const estimatedSpend = Number(dailyBudget) * 0.5;
+  return { spend: estimatedSpend, multiplier };
+}
+
 type MatchType = "broad" | "phrase" | "exact";
 
 const MARKETPLACES = ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const;
@@ -457,32 +477,50 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <span className="text-sm" style={{ color: "var(--muted)" }}>
-                  Page {currentPage} of {TOTAL_PAGES}
-                </span>
-              </div>
-              <div className="flex gap-1">
-                {Array.from({ length: TOTAL_PAGES }, (_, i) => {
-                  const page = (i + 1) as FormPage;
-                  return (
+          <div className="mb-8">
+            {/* Progress Stepper */}
+            <div className="flex items-center justify-between mb-6">
+              {Array.from({ length: TOTAL_PAGES }, (_, i) => {
+                const page = (i + 1) as FormPage;
+                const isActive = page === currentPage;
+                const isComplete = page < currentPage;
+                return (
+                  <div key={page} className="flex items-center flex-1">
                     <button
-                      key={page}
                       type="button"
                       onClick={() => setCurrentPage(page)}
-                      className={`w-2 h-2 rounded-full transition-colors ${
-                        page === currentPage ? "bg-accent-blue" : "bg-line"
-                      }`}
-                      style={{
-                        background: page === currentPage ? "var(--accent-blue)" : "var(--line)",
-                      }}
-                      aria-label={`Go to page ${page}`}
-                    />
-                  );
-                })}
-              </div>
+                      className="flex flex-col items-center flex-1"
+                    >
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center mb-2 transition-all ${
+                          isActive
+                            ? "bg-blue-600 text-white shadow-md"
+                            : isComplete
+                            ? "bg-green-600 text-white"
+                            : "bg-gray-200 text-gray-600"
+                        }`}
+                      >
+                        {isComplete ? "✓" : page}
+                      </div>
+                      <span
+                        className={`text-xs font-medium text-center max-w-16 leading-tight ${
+                          isActive ? "text-blue-600 font-semibold" : "text-gray-600"
+                        }`}
+                      >
+                        {PAGE_TITLES[page]}
+                      </span>
+                    </button>
+                    {page < TOTAL_PAGES && (
+                      <div
+                        className="flex-1 h-0.5 mx-1 transition-all"
+                        style={{
+                          background: isComplete ? "var(--accent-green)" : "var(--line)",
+                        }}
+                      />
+                    )}
+                  </div>
+                );
+              })}
             </div>
             <div className="w-full h-1 bg-line rounded-full overflow-hidden">
               <div
@@ -1301,6 +1339,28 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
                   </Field>
                 </div>
               </div>
+
+              <div className="card bg-gradient-to-br from-blue-50 to-indigo-50 border-blue-200">
+                <p className="card-title mb-3 text-blue-900">Budget Calculator</p>
+                <p className="field-hint mb-4 text-blue-800" style={{ marginTop: 0 }}>
+                  Estimate based on 50% daily utilization (not all keywords get clicks daily).
+                </p>
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between p-3 bg-white rounded border border-blue-100">
+                    <div>
+                      <p className="text-xs text-blue-700 font-medium">Estimated Daily Spend</p>
+                      <p className="text-2xl font-bold text-blue-900">${(Number(dailyBudget) * 0.5).toFixed(2)}</p>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-xs text-blue-700 font-medium">Strategy Impact</p>
+                      <p className="text-lg font-semibold text-blue-900">{matchTypeStrategy === "phrase-only" ? "1x" : matchTypeStrategy === "phrase-exact" ? "2x" : matchTypeStrategy === "custom" ? "Varies" : "3x"}</p>
+                    </div>
+                  </div>
+                  <p className="text-xs text-blue-700">
+                    💡 Tip: Phrase-only strategy costs 1/3 as much and works well for niche books.
+                  </p>
+                </div>
+              </div>
             </div>
             )}
 
@@ -1442,6 +1502,34 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
                     </label>
                   ))}
                 </div>
+              </div>
+
+              <div className="card border-green-200 bg-green-50">
+                <p className="card-title mb-4 text-green-900">Budget Capping Preview (Phase 2.2)</p>
+                <p className="field-hint mb-4 text-green-800" style={{ marginTop: 0 }}>
+                  We'll automatically cap keywords to fit your budget. Here's the estimated max based on your current settings:
+                </p>
+                <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
+                  <div className="bg-white rounded p-3 border border-green-100">
+                    <p className="text-xs text-green-700 font-medium">Daily Budget</p>
+                    <p className="text-lg font-bold text-green-900">${dailyBudget}</p>
+                  </div>
+                  <div className="bg-white rounded p-3 border border-green-100">
+                    <p className="text-xs text-green-700 font-medium">Strategy</p>
+                    <p className="text-sm font-semibold text-green-900 capitalize">
+                      {matchTypeStrategy === "phrase-only" ? "Phrase Only (1x)" : matchTypeStrategy === "phrase-exact" ? "Phrase + Exact (2x)" : matchTypeStrategy === "custom" ? "Custom" : "All Types (3x)"}
+                    </p>
+                  </div>
+                  <div className="bg-white rounded p-3 border border-green-100">
+                    <p className="text-xs text-green-700 font-medium">Est. Max Keywords</p>
+                    <p className="text-lg font-bold text-green-900">
+                      ~{Math.floor((Number(dailyBudget) * 0.5) / (0.15 * (matchTypeStrategy === "phrase-only" ? 1 : matchTypeStrategy === "phrase-exact" ? 2 : 3)))}
+                    </p>
+                  </div>
+                </div>
+                <p className="text-xs text-green-700 mt-3">
+                  💡 Assumes $0.15 avg CPC and 50% daily utilization. Actual cap depends on your bid economics.
+                </p>
               </div>
             </div>
             )}
@@ -1715,26 +1803,49 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
               </p>
             )}
 
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
               <div className="stat-tile tone-purple">
                 <span className="stat-value">{tropesKeywordCount ?? 0}</span>
-                <span className="stat-label">Tropes &amp; Themes</span>
+                <span className="stat-label">Tropes</span>
               </div>
               <div className="stat-tile tone-green">
                 <span className="stat-value">{compNameKeywordCount ?? 0}</span>
-                <span className="stat-label">Comp Authors &amp; Titles</span>
+                <span className="stat-label">Comp Authors</span>
               </div>
               <div className="stat-tile tone-yellow">
                 <span className="stat-value">{productTargetCount ?? 0}</span>
                 <span className="stat-label">Product Targets</span>
               </div>
-              <div className="stat-tile tone-green">
+              <div className="stat-tile tone-blue">
                 <span className="stat-value">{manualKeywordCount ?? 0}</span>
-                <span className="stat-label">Added by You</span>
+                <span className="stat-label">Manual</span>
+              </div>
+              <div className="stat-tile tone-indigo">
+                <span className="stat-value">{((tropesKeywordCount ?? 0) + (compNameKeywordCount ?? 0) + (productTargetCount ?? 0)) * (matchTypeStrategy === "phrase-only" ? 1 : matchTypeStrategy === "phrase-exact" ? 2 : 3)}</span>
+                <span className="stat-label">Total Rows</span>
               </div>
               <div className="stat-tile tone-purple">
                 <span className="stat-value">{aiRankingUsed ? "AI" : "Heuristic"}</span>
-                <span className="stat-label">Ranking Method</span>
+                <span className="stat-label">Ranked By</span>
+              </div>
+            </div>
+
+            <div className="card border-blue-200 bg-blue-50">
+              <p className="card-title mb-4 text-blue-900">Budget Summary</p>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+                <div>
+                  <p className="text-xs text-blue-700 font-medium mb-1">Daily Budget</p>
+                  <p className="text-xl font-bold text-blue-900">${dailyBudget}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-blue-700 font-medium mb-1">Match Strategy</p>
+                  <p className="text-sm font-semibold text-blue-900 capitalize">{matchTypeStrategy === "phrase-only" ? "Phrase Only (1x)" : matchTypeStrategy === "phrase-exact" ? "Phrase + Exact (2x)" : matchTypeStrategy === "custom" ? "Custom" : "All Types (3x)"}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-blue-700 font-medium mb-1">Estimated Spend</p>
+                  <p className="text-xl font-bold text-blue-900">${(Number(dailyBudget) * 0.5).toFixed(2)}</p>
+                  <p className="text-xs text-blue-600">(50% utilization)</p>
+                </div>
               </div>
             </div>
           </div>

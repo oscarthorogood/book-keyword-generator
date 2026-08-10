@@ -114,23 +114,49 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
       {/* Content */}
       <div className="max-w-7xl mx-auto px-6 py-12">
         {isEmpty ? (
-          <div className="bg-white rounded-lg border border-gray-200 p-16 text-center">
-            <div className="mb-6">
-              <div className="inline-flex items-center justify-center w-16 h-16 bg-blue-100 rounded-full mb-4">
-                <Plus size={32} className="text-blue-600" />
+          <div className="space-y-6">
+            <div className="bg-gradient-to-br from-blue-50 to-indigo-50 rounded-lg border border-blue-200 p-12 text-center">
+              <div className="mb-6">
+                <div className="inline-flex items-center justify-center w-20 h-20 bg-blue-100 rounded-full mb-4">
+                  <Plus size={40} className="text-blue-600" />
+                </div>
+              </div>
+              <h2 className="text-3xl font-bold text-gray-900 mb-3">Welcome to Campaign Generator</h2>
+              <p className="text-gray-700 mb-8 max-w-2xl mx-auto text-lg leading-relaxed">
+                Generate optimized Amazon Ads Sponsored Products campaigns in minutes. Simply enter your book's ASIN or ISBN, and we'll harvest keywords from 15+ sources and create a ready-to-upload bulksheet with cost-aware strategies.
+              </p>
+              <button
+                onClick={onCreateNew}
+                className="inline-flex items-center gap-2 px-8 py-4 bg-blue-600 text-white font-semibold rounded-lg hover:bg-blue-700 transition-colors shadow-lg"
+              >
+                <Plus size={24} />
+                Create Your First Campaign
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="w-12 h-12 bg-blue-100 rounded-lg flex items-center justify-center mb-3">
+                  <span className="text-xl font-bold text-blue-600">📚</span>
+                </div>
+                <h3 className="font-semibold text-gray-900 mb-2">Multi-Source Keywords</h3>
+                <p className="text-sm text-gray-600">Pulls from 15+ data sources: Amazon APIs, autocomplete, Google Books, Goodreads, Wikipedia, and more.</p>
+              </div>
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="w-12 h-12 bg-green-100 rounded-lg flex items-center justify-center mb-3">
+                  <span className="text-xl font-bold text-green-600">💰</span>
+                </div>
+                <h3 className="font-semibold text-gray-900 mb-2">Budget Optimization</h3>
+                <p className="text-sm text-gray-600">Choose match-type strategies (phrase-only, balanced, or aggressive) to control costs and keyword coverage.</p>
+              </div>
+              <div className="bg-white rounded-lg border border-gray-200 p-6">
+                <div className="w-12 h-12 bg-purple-100 rounded-lg flex items-center justify-center mb-3">
+                  <span className="text-xl font-bold text-purple-600">📊</span>
+                </div>
+                <h3 className="font-semibold text-gray-900 mb-2">Ready to Upload</h3>
+                <p className="text-sm text-gray-600">Download an Excel bulksheet formatted for Amazon's Sponsored Products bulk upload tool.</p>
               </div>
             </div>
-            <h2 className="text-2xl font-semibold text-gray-900 mb-2">No campaigns yet</h2>
-            <p className="text-gray-600 mb-8 max-w-md mx-auto">
-              Create your first Amazon Ads campaign by entering your book details. We'll generate keywords from 15+ sources and produce a ready-to-upload bulksheet.
-            </p>
-            <button
-              onClick={onCreateNew}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-blue-600 text-white font-medium rounded-lg hover:bg-blue-700 transition-colors"
-            >
-              <Plus size={20} />
-              Create Campaign
-            </button>
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
