@@ -566,59 +566,63 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
             {currentPage === 1 && (
               <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 md:gap-6 items-start">
                 <div className="flex flex-col gap-5 md:gap-6">
-                  <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-2">
-                    <p className="text-sm font-semibold text-gray-900 mb-2">📖 Quick Start</p>
-                    <p className="text-xs text-gray-600 leading-relaxed">
-                      Have an ASIN or ISBN? Click "Autofill" to automatically populate book details from Amazon.
-                    </p>
-                  </div>
-
-                  <div className="card">
-                    <p className="card-title mb-4">Book Lookup</p>
-
-                    <Field label="ASIN or ISBN">
-                      <div className="flex gap-2">
-                        <input
-                          required
-                          value={asin}
-                          onChange={(e) => setAsin(e.target.value)}
-                          placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
-                          maxLength={17}
-                          className="input"
-                        />
-                        <button
-                          type="button"
-                          onClick={handleAutofill}
-                          disabled={autofillStatus === "loading"}
-                          className="btn-pill-outline shrink-0"
-                        >
-                          {autofillStatus === "loading" ? "Looking up…" : "Autofill"}
-                        </button>
+                  {!bookId && (
+                    <>
+                      <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-2">
+                        <p className="text-sm font-semibold text-gray-900 mb-2">📖 Quick Start</p>
+                        <p className="text-xs text-gray-600 leading-relaxed">
+                          Have an ASIN or ISBN? Click "Autofill" to automatically populate book details from Amazon.
+                        </p>
                       </div>
-                      <span className="field-hint">
-                        Scrapes the product page to fill in Author, Title, Series, and RRP.
-                      </span>
-                      {autofillStatus === "error" && autofillError && (
-                        <span className="field-hint" style={{ color: "var(--accent-red)" }}>
-                          {autofillError}
-                        </span>
-                      )}
-                    </Field>
 
-                    <Field label="Marketplace">
-                      <select
-                        value={marketplace}
-                        onChange={(e) => setMarketplace(e.target.value as typeof marketplace)}
-                        className="input"
-                      >
-                        {MARKETPLACES.map((m) => (
-                          <option key={m} value={m}>
-                            {m}
-                          </option>
-                        ))}
-                      </select>
-                    </Field>
-                  </div>
+                      <div className="card">
+                        <p className="card-title mb-4">Book Lookup</p>
+
+                        <Field label="ASIN or ISBN">
+                          <div className="flex gap-2">
+                            <input
+                              required
+                              value={asin}
+                              onChange={(e) => setAsin(e.target.value)}
+                              placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
+                              maxLength={17}
+                              className="input"
+                            />
+                            <button
+                              type="button"
+                              onClick={handleAutofill}
+                              disabled={autofillStatus === "loading"}
+                              className="btn-pill-outline shrink-0"
+                            >
+                              {autofillStatus === "loading" ? "Looking up…" : "Autofill"}
+                            </button>
+                          </div>
+                          <span className="field-hint">
+                            Scrapes the product page to fill in Author, Title, Series, and RRP.
+                          </span>
+                          {autofillStatus === "error" && autofillError && (
+                            <span className="field-hint" style={{ color: "var(--accent-red)" }}>
+                              {autofillError}
+                            </span>
+                          )}
+                        </Field>
+
+                        <Field label="Marketplace">
+                          <select
+                            value={marketplace}
+                            onChange={(e) => setMarketplace(e.target.value as typeof marketplace)}
+                            className="input"
+                          >
+                            {MARKETPLACES.map((m) => (
+                              <option key={m} value={m}>
+                                {m}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      </div>
+                    </>
+                  )}
 
                   {(profileCoverImageUrl ||
                     profileCategoryPath.length > 0 ||
