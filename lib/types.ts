@@ -146,6 +146,9 @@ export interface BookMetadata {
   categories: string[]; // Google Books categories
   subjects: string[]; // Open Library subjects
   commonTerms: string[]; // Google Books "Common terms and phrases" (content-derived, best-effort)
+  publisher?: string; // Open Library publisher
+  publicationDate?: string; // Open Library publication date
+  pageCount?: number; // Open Library page count
 }
 
 export interface ProductPageData {
