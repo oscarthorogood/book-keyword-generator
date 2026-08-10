@@ -127,6 +127,14 @@ export async function scrapeGoogleBooksCommonTerms(volumeId: string | undefined)
 
 interface OpenLibraryBookEntry {
   subjects?: { name: string }[];
+  title?: string;
+  authors?: { name: string }[];
+  description?: string | { value: string };
+  isbn_10?: string[];
+  isbn_13?: string[];
+  publishers?: { name: string }[];
+  publish_date?: string;
+  number_of_pages?: number;
 }
 
 /**

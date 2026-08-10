@@ -1803,7 +1803,7 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
                   setCurrentPage((p) => (p > 1 ? ((p - 1) as FormPage) : p));
                 }
               }}
-              disabled={(!bookId && currentPage === 1) || (bookId && currentPage === 2)}
+              disabled={(!bookId && currentPage === 1) || (!!bookId && currentPage === 2)}
               className="btn-pill-outline px-6 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               ← Previous
