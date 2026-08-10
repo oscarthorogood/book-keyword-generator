@@ -22,14 +22,60 @@ function sanitizeField(value: string): string {
   return value.replace(/_/g, " ").replace(/\s+/g, " ").trim();
 }
 
-export function buildCampaignName(identity: CampaignIdentity): string {
+function abbreviateSeriesName(seriesName: string): string {
+  if (!seriesName) return "";
+
+  const words = seriesName.trim().split(/\s+/);
+  if (words.length <= 2) return seriesName;
+
+  // If series name is very long, use first letter of each word
+  if (seriesName.length > 20) {
+    return words.map((w) => w[0]).join("").toUpperCase();
+  }
+
+  return seriesName;
+}
+
+function abbreviateBookTitle(bookTitle: string, seriesName?: string): string {
+  if (!bookTitle) return "";
+
+  let title = bookTitle;
+
+  // Remove series name and book number information from title if present
+  if (seriesName) {
+    // Remove parenthetical series info like "(The Summer Suspense Mysteries Book 5)"
+    title = title.replace(/\s*\([^)]*Book\s+\d+[^)]*\)/gi, "").trim();
+    // Remove series name if it appears elsewhere
+    title = title.replace(new RegExp(`\\s+${seriesName}`, "gi"), "").trim();
+  }
+
+  // Shorten if still too long
+  if (title.length > 35) {
+    // Try to use text before colon (e.g., "The Lizard: A Summer Suspense Mystery" → "The Lizard")
+    const colonIdx = title.indexOf(":");
+    if (colonIdx > 0 && colonIdx < 30) {
+      title = title.substring(0, colonIdx).trim();
+    } else {
+      // Use first 2-3 words
+      const words = title.split(/\s+/);
+      title = words.slice(0, 3).join(" ");
+    }
+  }
+
+  return title;
+}
+
+export function buildCampaignName(identity: CampaignIdentity, shortenedFormat = true): string {
+  const series = shortenedFormat && identity.seriesName ? abbreviateSeriesName(identity.seriesName) : identity.seriesName;
+  const title = shortenedFormat && identity.bookTitle ? abbreviateBookTitle(identity.bookTitle, identity.seriesName) : identity.bookTitle;
+
   const fields = [
     "PB",
     identity.creatorInitials,
     identity.asin,
     identity.authorName,
-    identity.seriesName,
-    identity.bookTitle,
+    series,
+    title,
     identity.marketplace,
     CAMPAIGN_TYPE_TOKEN,
     String(identity.variant),
