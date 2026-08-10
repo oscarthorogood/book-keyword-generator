@@ -2,7 +2,6 @@
 
 import { useEffect, useState } from "react";
 import { ArrowLeft, Plus, Zap, Target } from "lucide-react";
-import { createBrowserClient } from "@supabase/ssr";
 
 interface Campaign {
   id: string;
@@ -56,49 +55,18 @@ export default function BookDetailPage({
     async function loadBook() {
       try {
         setLoading(true);
-        const supabase = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
+        const res = await fetch(`/api/books/${bookId}`);
+        const body = await res.json().catch(() => ({}));
 
-        const { data, error: err } = await supabase
-          .from("books")
-          .select(
-            `
-            id,
-            asin,
-            title,
-            author,
-            marketplace,
-            description,
-            campaign_count,
-            total_keywords,
-            total_spend,
-            created_at,
-            metadata_json,
-            campaigns (
-              id,
-              name,
-              status,
-              tropes_keyword_count,
-              comp_names_keyword_count,
-              product_target_count,
-              total_rows,
-              daily_budget,
-              created_at
-            )
-          `
-          )
-          .eq("id", bookId)
-          .single();
-
-        if (err) {
-          console.warn("Could not load book:", err.message);
-        } else if (data) {
-          setBook(data as Book);
+        if (!res.ok) {
+          console.warn("Could not load book:", body.error);
+          setBook(null);
+        } else {
+          setBook(body.book as Book);
         }
       } catch (err) {
         console.warn("Failed to load book:", err);
+        setBook(null);
       } finally {
         setLoading(false);
       }

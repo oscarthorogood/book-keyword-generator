@@ -358,7 +358,9 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
 
-    if (!asin || !authorName || !bookTitle) {
+    // Book-centric flow: if bookId provided, create campaign for that book
+    // Otherwise, use legacy flow
+    if (!bookId && (!asin || !authorName || !bookTitle)) {
       setErrorMessage("Please fill in ASIN, Author, and Title");
       return;
     }
@@ -367,8 +369,6 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
     setErrorMessage(null);
 
     try {
-      // Book-centric flow: if bookId provided, create campaign for that book
-      // Otherwise, use legacy flow
       if (bookId) {
         // Create campaign for existing book
         const campaignName = `Campaign ${Number(variant) || 1}`;
@@ -448,68 +448,53 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
   // Simplified form for book-centric flow
   if (bookId) {
     return (
-      <main className="flex-1 flex justify-center px-3 py-6 md:px-6 md:py-10">
-        <div className="w-full max-w-2xl shell p-4 md:p-8">
-          <div className="flex items-center justify-between gap-4 mb-8">
-            <div className="flex items-center gap-3">
-              <button
-                onClick={onBack}
-                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              >
-                <ArrowLeft size={20} className="text-gray-600" />
-              </button>
-              <div className="logo-mark">PB</div>
+      <div className="min-h-screen bg-white flex flex-col">
+        {/* Header */}
+        <div className="bg-white border-b border-gray-200 px-8 py-6">
+          <button
+            onClick={onBack}
+            className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
+          >
+            <ArrowLeft size={20} />
+            Back to Book
+          </button>
+          <h1 className="text-2xl font-bold text-gray-900">Create Campaign</h1>
+          <p className="text-sm text-gray-500 mt-1">
+            Give your new campaign a variant number. You can configure keywords and budget later.
+          </p>
+        </div>
+
+        {/* Main Content */}
+        <div className="flex-1 px-8 py-8">
+          <form onSubmit={handleSubmit} className="max-w-xl">
+            <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6">
+              <p className="text-xs text-gray-600 font-medium mb-4">CAMPAIGN DETAILS</p>
               <div>
-                <p className="brand-title text-base md:text-lg">New Campaign</p>
-                <p className="eyebrow">Create campaign for this book</p>
-              </div>
-            </div>
-          </div>
-
-          <div className="mb-6 md:mb-8">
-            <h1 className="page-heading text-2xl md:text-4xl">Create Campaign</h1>
-            <p className="text-sm mt-3 max-w-2xl leading-relaxed" style={{ color: "var(--muted)" }}>
-              Give your new campaign a name and variant number. You can configure keywords and budget later.
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmit}>
-            <div className="card mb-6">
-              <p className="card-title mb-4">Campaign Details</p>
-              <div className="space-y-4">
-                <div>
-                  <label className="field-label">Campaign Name</label>
-                  <input
-                    required
-                    value={variant}
-                    onChange={(e) => setVariant(e.target.value)}
-                    placeholder="Campaign Variant (e.g., 1, 2, A, etc.)"
-                    className="input"
-                  />
-                  <span className="field-hint">
-                    Enter a variant identifier for this campaign
-                  </span>
-                </div>
+                <label className="block text-sm font-medium text-gray-900 mb-1.5">
+                  Campaign Variant
+                </label>
+                <input
+                  required
+                  value={variant}
+                  onChange={(e) => setVariant(e.target.value)}
+                  placeholder="e.g., 1, 2, A, etc."
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1.5">
+                  Enter a variant identifier for this campaign
+                </p>
               </div>
             </div>
 
             {status === "error" && errorMessage && (
-              <div
-                className="mb-6 status-banner"
-                style={{ background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }}
-              >
-                <span className="status-dot" style={{ background: "var(--accent-red)" }} />
-                <span style={{ color: "var(--accent-red)" }}>{errorMessage}</span>
+              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+                {errorMessage}
               </div>
             )}
 
             {status === "success" && (
-              <div
-                className="mb-6 status-banner"
-                style={{ background: "var(--accent-green-soft)", borderColor: "var(--accent-green)" }}
-              >
-                <span className="status-dot" style={{ background: "var(--accent-green)" }} />
-                <span style={{ color: "var(--accent-green)" }}>Campaign created! Redirecting...</span>
+              <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+                Campaign created! Redirecting...
               </div>
             )}
 
@@ -517,22 +502,22 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
               <button
                 type="button"
                 onClick={onBack}
-                className="btn-pill-outline px-6 py-2.5"
+                className="px-6 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
-                ← Cancel
+                Cancel
               </button>
 
               <button
                 type="submit"
                 disabled={isLoading || !variant}
-                className="btn-pill-dark px-6 py-2.5"
+                className="bg-gray-900 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-colors"
               >
                 {isLoading ? "Creating…" : "Create Campaign"}
               </button>
             </div>
           </form>
         </div>
-      </main>
+      </div>
     );
   }
 

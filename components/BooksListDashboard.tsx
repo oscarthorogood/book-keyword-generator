@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Plus, BookOpen, MoreVertical, Search } from "lucide-react";
-import { createBrowserClient } from "@supabase/ssr";
+import { Plus, BookOpen, Search } from "lucide-react";
 
 interface Book {
   id: string;
@@ -26,30 +25,25 @@ export default function BooksListDashboard({
 }: BooksListDashboardProps) {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
     async function loadBooks() {
       try {
         setLoading(true);
-        const supabase = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
+        setLoadError(null);
+        const res = await fetch("/api/books/list");
+        const body = await res.json().catch(() => ({}));
 
-        const { data, error: err } = await supabase
-          .from("books")
-          .select("*")
-          .order("created_at", { ascending: false });
-
-        if (err) {
-          console.warn("Could not load books:", err.message);
+        if (!res.ok) {
+          setLoadError(body.error || "Could not load books.");
           setBooks([]);
         } else {
-          setBooks(data || []);
+          setBooks(body.books || []);
         }
       } catch (err) {
-        console.warn("Failed to load books:", err);
+        setLoadError(err instanceof Error ? err.message : "Could not load books.");
         setBooks([]);
       } finally {
         setLoading(false);
@@ -78,31 +72,17 @@ export default function BooksListDashboard({
 
       {/* Main Content */}
       <div className="flex-1 px-8 py-8">
-        {/* Quick Action Cards */}
-        <div className="grid grid-cols-3 gap-6 mb-8">
+        {/* Add Book */}
+        <div className="mb-8">
           <button
             onClick={onAddBook}
-            className="group bg-gray-900 rounded-xl p-8 text-white hover:bg-gray-800 transition-all flex flex-col items-center justify-center gap-3 min-h-28"
+            className="group bg-gray-900 rounded-xl px-6 py-4 text-white hover:bg-gray-800 transition-all inline-flex items-center gap-3"
           >
-            <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center group-hover:bg-white/20 transition-colors">
-              <Plus size={24} />
+            <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center group-hover:bg-white/20 transition-colors">
+              <Plus size={18} />
             </div>
-            <span className="text-base font-semibold">Add Book</span>
+            <span className="text-sm font-semibold">Add Book</span>
           </button>
-
-          <div className="bg-gray-50 rounded-xl border border-gray-200 p-8 flex flex-col items-center justify-center gap-3 opacity-50 cursor-not-allowed min-h-28">
-            <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-              <BookOpen size={24} className="text-gray-400" />
-            </div>
-            <span className="text-base font-semibold text-gray-900">Series</span>
-          </div>
-
-          <div className="bg-gray-50 rounded-xl border border-gray-200 p-8 flex flex-col items-center justify-center gap-3 opacity-50 cursor-not-allowed min-h-28">
-            <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
-              <BookOpen size={24} className="text-gray-400" />
-            </div>
-            <span className="text-base font-semibold text-gray-900">Collections</span>
-          </div>
         </div>
 
         {/* Book List */}
@@ -110,7 +90,12 @@ export default function BooksListDashboard({
           <h2 className="text-base font-semibold text-gray-900 mb-4">Your Books</h2>
         </div>
 
-        {isEmpty ? (
+        {loadError ? (
+          <div className="text-center py-16 bg-red-50 rounded-lg border border-red-200">
+            <p className="text-red-700 font-medium">Couldn&apos;t load your books</p>
+            <p className="text-red-600 text-sm mt-1">{loadError}</p>
+          </div>
+        ) : isEmpty && !loading ? (
           <div className="text-center py-16 bg-gray-50 rounded-lg border border-gray-200">
             <BookOpen size={48} className="mx-auto text-gray-300 mb-4" />
             <p className="text-gray-600">No books yet. Add one to get started.</p>
@@ -182,9 +167,6 @@ export default function BooksListDashboard({
                           })}
                         </p>
                       </div>
-                      <button className="text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-all p-2">
-                        <MoreVertical size={18} />
-                      </button>
                     </div>
                   </button>
                 ))}

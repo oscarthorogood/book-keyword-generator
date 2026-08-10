@@ -57,130 +57,106 @@ export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
   }
 
   return (
-    <main className="flex-1 flex justify-center px-3 py-6 md:px-6 md:py-10">
-      <div className="w-full max-w-2xl shell p-4 md:p-8">
-        {/* Topbar */}
-        <div className="flex items-center justify-between gap-4 mb-8">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={onBack}
-              className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              title="Back to books"
-            >
-              <ArrowLeft size={20} className="text-gray-600" />
-            </button>
-            <div className="logo-mark">PB</div>
-            <div>
-              <p className="brand-title text-base md:text-lg">Add Book</p>
-              <p className="eyebrow">Enter ASIN to add a new book</p>
-            </div>
-          </div>
-        </div>
+    <div className="min-h-screen bg-white flex flex-col">
+      {/* Header */}
+      <div className="bg-white border-b border-gray-200 px-8 py-6">
+        <button
+          onClick={onBack}
+          className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
+        >
+          <ArrowLeft size={20} />
+          Back to Books
+        </button>
+        <h1 className="text-2xl font-bold text-gray-900">Add a Book</h1>
+        <p className="text-sm text-gray-500 mt-1">
+          Enter an ASIN or ISBN to add a book to your library. We&apos;ll fetch the metadata automatically.
+        </p>
+      </div>
 
-        {/* Page heading */}
-        <div className="mb-6 md:mb-8">
-          <h1 className="page-heading text-2xl md:text-4xl">Add a Book</h1>
-          <p className="text-sm mt-3 max-w-2xl leading-relaxed" style={{ color: "var(--muted)" }}>
-            Enter an ASIN or ISBN to add a book to your library. We'll fetch the metadata automatically.
-          </p>
-        </div>
+      {/* Main Content */}
+      <div className="flex-1 px-8 py-8">
+        <form onSubmit={handleSubmit} className="max-w-xl">
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6">
+            <p className="text-xs text-gray-600 font-medium mb-4">BOOK LOOKUP</p>
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-1.5">
+                  ASIN or ISBN
+                </label>
+                <input
+                  required
+                  value={asin}
+                  onChange={(e) => setAsin(e.target.value)}
+                  placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
+                  maxLength={17}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
+                />
+                <p className="text-xs text-gray-500 mt-1.5">
+                  Enter an Amazon ASIN (10 chars) or ISBN (13 digits)
+                </p>
+              </div>
 
-        <form onSubmit={handleSubmit}>
-          <div className="space-y-6">
-            {/* ASIN/ISBN Field */}
-            <div className="card">
-              <p className="card-title mb-4">Book Lookup</p>
-              <div className="space-y-4">
-                <div>
-                  <label className="field-label">ASIN or ISBN</label>
-                  <input
-                    required
-                    value={asin}
-                    onChange={(e) => setAsin(e.target.value)}
-                    placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
-                    maxLength={17}
-                    className="input"
-                  />
-                  <span className="field-hint">
-                    Enter an Amazon ASIN (10 chars) or ISBN (13 digits)
-                  </span>
-                </div>
-
-                {/* Marketplace Selection */}
-                <div>
-                  <label className="field-label">Marketplace</label>
-                  <select
-                    value={marketplace}
-                    onChange={(e) =>
-                      setMarketplace(e.target.value as typeof marketplace)
-                    }
-                    className="input"
-                  >
-                    {MARKETPLACES.map((m) => (
-                      <option key={m} value={m}>
-                        {m}
-                      </option>
-                    ))}
-                  </select>
-                  <span className="field-hint">
-                    Select the Amazon marketplace for this book
-                  </span>
-                </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-900 mb-1.5">
+                  Marketplace
+                </label>
+                <select
+                  value={marketplace}
+                  onChange={(e) => setMarketplace(e.target.value as typeof marketplace)}
+                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
+                >
+                  {MARKETPLACES.map((m) => (
+                    <option key={m} value={m}>
+                      {m}
+                    </option>
+                  ))}
+                </select>
+                <p className="text-xs text-gray-500 mt-1.5">
+                  Select the Amazon marketplace for this book
+                </p>
               </div>
             </div>
-
-            {/* Help Text */}
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-4">
-              <p className="text-sm font-semibold text-gray-900 mb-2">📖 Where to find ASIN</p>
-              <p className="text-xs text-gray-600 leading-relaxed">
-                On Amazon product pages, the ASIN is listed in the "Product information" section.
-                It's a 10-character code starting with "B0". ISBNs work too—we'll convert them automatically.
-              </p>
-            </div>
           </div>
 
-          {/* Error Message */}
+          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
+            <p className="text-sm font-semibold text-gray-900 mb-2">📖 Where to find ASIN</p>
+            <p className="text-xs text-gray-600 leading-relaxed">
+              On Amazon product pages, the ASIN is listed in the &quot;Product information&quot; section.
+              It&apos;s a 10-character code starting with &quot;B0&quot;. ISBNs work too—we&apos;ll convert them automatically.
+            </p>
+          </div>
+
           {status === "error" && error && (
-            <div
-              className="mt-6 status-banner"
-              style={{ background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }}
-            >
-              <span className="status-dot" style={{ background: "var(--accent-red)" }} />
-              <span style={{ color: "var(--accent-red)" }}>{error}</span>
+            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+              {error}
             </div>
           )}
 
-          {/* Success Message */}
           {status === "success" && (
-            <div
-              className="mt-6 status-banner"
-              style={{ background: "var(--accent-green-soft)", borderColor: "var(--accent-green)" }}
-            >
-              <span className="status-dot" style={{ background: "var(--accent-green)" }} />
-              <span style={{ color: "var(--accent-green)" }}>Book added successfully! Redirecting...</span>
+            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+              Book added successfully! Redirecting...
             </div>
           )}
 
-          {/* Navigation */}
-          <div className="flex gap-3 mt-8 justify-between">
+          <div className="flex gap-3 justify-between">
             <button
               type="button"
               onClick={onBack}
-              className="btn-pill-outline px-6 py-2.5"
+              className="px-6 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
-              ← Cancel
+              Cancel
             </button>
 
             <button
               type="submit"
               disabled={isLoading || !asin}
-              className="btn-pill-dark px-6 py-2.5"
+              className="bg-gray-900 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-colors"
             >
               {isLoading ? "Adding…" : "Add Book"}
             </button>
           </div>
         </form>
       </div>
-    </main>
+    </div>
   );
 }

@@ -24,12 +24,25 @@ export async function POST(request: Request) {
 
     const supabase = await supabaseServer();
 
+    // Look up the book to carry its ASIN/marketplace onto the campaign row
+    const { data: book, error: bookError } = await supabase
+      .from("books")
+      .select("asin, marketplace")
+      .eq("id", bookId)
+      .eq("user_id", user.id)
+      .single();
+
+    if (bookError || !book) {
+      return Response.json({ error: "Book not found" }, { status: 404 });
+    }
+
     // Create campaign record linked to book
     const { error: insertError } = await supabase.from("campaigns").insert({
       user_id: user.id,
       book_id: bookId,
+      asin: book.asin,
+      marketplace: book.marketplace,
       name: campaignName,
-      variant: variant || 1,
       status: "draft",
       tropes_keyword_count: 0,
       comp_names_keyword_count: 0,

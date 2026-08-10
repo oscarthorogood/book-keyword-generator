@@ -1,7 +1,8 @@
 "use client";
 
-import { useState } from "react";
-import { HomeIcon, Folder, Lock, Share2, Trash2, Palette, Bell, Settings, LogOut } from "lucide-react";
+import { useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Folder, LogOut, Shield, ChevronLeft, ChevronRight } from "lucide-react";
 import BooksListDashboard from "@/components/BooksListDashboard";
 import AddBookForm from "@/components/AddBookForm";
 import BookDetailPage from "@/components/BookDetailPage";
@@ -21,24 +22,31 @@ interface Book {
 }
 
 export default function Home() {
+  const router = useRouter();
   const [currentPage, setCurrentPage] = useState<Page>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
   const [selectedBookIdForCampaign, setSelectedBookIdForCampaign] = useState<string | null>(null);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  const navItems = [
-    { icon: HomeIcon, label: "Home", section: "main" },
-    { icon: Folder, label: "Books", section: "main" },
-    { icon: Lock, label: "Private", section: "main" },
-    { icon: Share2, label: "Shared with me", section: "main" },
-    { icon: Trash2, label: "Archived", section: "main" },
-    { icon: Palette, label: "Design", section: "tools" },
-    { icon: Bell, label: "Notifications", section: "tools" },
-    { icon: Settings, label: "Settings", section: "tools" },
-  ];
+  useEffect(() => {
+    fetch("/api/admin/access")
+      .then((res) => setIsAdmin(res.ok))
+      .catch(() => setIsAdmin(false));
+  }, []);
 
-  const mainNavItems = navItems.filter((item) => item.section === "main");
-  const toolsNavItems = navItems.filter((item) => item.section === "tools");
+  async function handleLogout() {
+    setIsLoggingOut(true);
+    try {
+      const res = await fetch("/api/logout", { method: "POST" });
+      if (res.ok) router.push("/login");
+    } finally {
+      setIsLoggingOut(false);
+    }
+  }
+
+  const mainNavItems = [{ icon: Folder, label: "Books" }];
 
   return (
     <div className="flex min-h-screen bg-white">
@@ -49,17 +57,26 @@ export default function Home() {
         } bg-white border-r border-gray-200 transition-all duration-300 flex flex-col fixed h-screen left-0 top-0 z-40`}
       >
         {/* Logo/Header */}
-        <div className="p-6 border-b border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
-              <span className="text-white font-bold text-lg">📚</span>
-            </div>
-            {sidebarOpen && (
-              <div>
-                <div className="font-bold text-gray-900 text-sm">Ads Assistant</div>
-                <div className="text-xs text-gray-500">Book Manager</div>
+        <div className={`border-b border-gray-200 ${sidebarOpen ? "p-6" : "p-4"}`}>
+          <div className={`flex items-center gap-3 ${sidebarOpen ? "justify-between" : "flex-col"}`}>
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
+                <span className="text-white font-bold text-lg">📚</span>
               </div>
-            )}
+              {sidebarOpen && (
+                <div>
+                  <div className="font-bold text-gray-900 text-sm">Ads Assistant</div>
+                  <div className="text-xs text-gray-500">Book Manager</div>
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => setSidebarOpen(!sidebarOpen)}
+              className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all"
+              title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            >
+              {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+            </button>
           </div>
         </div>
 
@@ -86,27 +103,30 @@ export default function Home() {
           ))}
         </nav>
 
-        {/* Tools Navigation */}
+        {/* Account */}
         <nav className="p-4 border-t border-gray-200 space-y-1">
-          {toolsNavItems.map((item) => (
-            <button
-              key={item.label}
+          {isAdmin && (
+            <a
+              href="/admin"
               className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all"
             >
-              <item.icon size={20} className="flex-shrink-0" />
-              {sidebarOpen && <span>{item.label}</span>}
-            </button>
-          ))}
-
-          <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all">
+              <Shield size={20} className="flex-shrink-0" />
+              {sidebarOpen && <span>Admin</span>}
+            </a>
+          )}
+          <button
+            onClick={handleLogout}
+            disabled={isLoggingOut}
+            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all disabled:opacity-50"
+          >
             <LogOut size={20} className="flex-shrink-0" />
-            {sidebarOpen && <span>Sign out</span>}
+            {sidebarOpen && <span>{isLoggingOut ? "Signing out…" : "Sign out"}</span>}
           </button>
         </nav>
       </div>
 
       {/* Main Content */}
-      <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-64" : "ml-16"}`}>
+      <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-72" : "ml-20"}`}>
         {currentPage === "dashboard" && !selectedBook && (
           <BooksListDashboard
             onAddBook={() => setCurrentPage("add-book")}
@@ -145,21 +165,6 @@ export default function Home() {
           />
         )}
       </div>
-
-      {/* Sidebar Toggle Button */}
-      <button
-        onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="fixed bottom-8 left-8 w-12 h-12 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all z-50 flex items-center justify-center text-gray-600"
-      >
-        <svg
-          className="w-5 h-5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
-        </svg>
-      </button>
     </div>
   );
 }
