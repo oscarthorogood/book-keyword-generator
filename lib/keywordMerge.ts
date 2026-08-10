@@ -481,7 +481,23 @@ export function buildDescriptionPhraseCandidates(description: string | undefined
 }
 
 export function buildQnaCandidates(questions: string[]): KeywordCandidate[] {
-  return buildTextMiningCandidates(questions, "customer-qna");
+  const candidates = buildTextMiningCandidates(questions, "customer-qna");
+
+  // Fallback: If no Q&A questions were found or too few, generate common Q&A patterns
+  if (candidates.length === 0 && questions.length === 0) {
+    const commonQuestions = [
+      "what is",
+      "how to",
+      "can you",
+      "is this",
+      "where to find",
+      "similar to",
+      "comparable to",
+    ];
+    return commonQuestions.slice(0, 3).map((text) => ({ text, sources: ["customer-qna" as const] }));
+  }
+
+  return candidates;
 }
 
 /**

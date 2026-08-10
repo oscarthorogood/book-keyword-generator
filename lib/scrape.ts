@@ -324,6 +324,7 @@ export async function getAutocompleteSuggestions(
 /**
  * Fetches autocomplete completions across every seed in `seedTerms` (see
  * buildAutocompleteSeeds), bounded to AUTOCOMPLETE_CONCURRENCY in flight.
+ * Includes retry logic for seeds that don't return results on first try.
  */
 export async function getAutocompleteKeywordSet(
   seedTerms: string[],
@@ -332,7 +333,24 @@ export async function getAutocompleteKeywordSet(
   const results = await mapWithConcurrency(seedTerms, AUTOCOMPLETE_CONCURRENCY, (term) =>
     getAutocompleteSuggestions(term, marketplace)
   );
-  return results.flat();
+
+  const allResults = results.flat();
+
+  // If we got very few results, try simpler seed variations
+  if (allResults.length < 3 && seedTerms.length > 0) {
+    const simpleSeeds = seedTerms
+      .map(t => t.split(/\s+/).slice(0, 1).join("")) // First word only
+      .filter((t, i, arr) => arr.indexOf(t) === i && t.length > 0); // Deduplicate
+
+    if (simpleSeeds.length > 0) {
+      const simpleResults = await mapWithConcurrency(simpleSeeds.slice(0, 5), AUTOCOMPLETE_CONCURRENCY, (term) =>
+        getAutocompleteSuggestions(term, marketplace)
+      );
+      allResults.push(...simpleResults.flat());
+    }
+  }
+
+  return allResults;
 }
 
 /**
