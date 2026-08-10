@@ -10,6 +10,7 @@ import type { KeywordCategory, KeywordGroupType, KeywordSource, MatchTypeStrateg
 
 interface CampaignGenerationFormProps {
   onBack: () => void;
+  bookId?: string;
 }
 
 type FormPage = 1 | 2 | 3 | 4 | 5 | 6;
@@ -88,7 +89,7 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function CampaignGenerationForm({ onBack }: CampaignGenerationFormProps) {
+export default function CampaignGenerationForm({ onBack, bookId }: CampaignGenerationFormProps) {
   const [currentPage, setCurrentPage] = useState<FormPage>(1);
 
   const [asin, setAsin] = useState("");
@@ -366,43 +367,67 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
     setErrorMessage(null);
 
     try {
-      // Simplified: just save campaign basics, no generation
-      const normalizedAsin = normalizeAsinOrIsbn(asin);
-      if (!normalizedAsin) {
-        throw new Error("Invalid ASIN/ISBN format");
-      }
+      // Book-centric flow: if bookId provided, create campaign for that book
+      // Otherwise, use legacy flow
+      if (bookId) {
+        // Create campaign for existing book
+        const campaignName = `Campaign ${Number(variant) || 1}`;
 
-      const campaignName = buildCampaignName({
-        asin: normalizedAsin,
-        marketplace,
-        creatorInitials: creatorInitials || "XX",
-        authorName,
-        bookTitle,
-        seriesName: seriesName.trim() ? seriesName : undefined,
-        variant: Number(variant) || 1,
-      });
+        const res = await fetch("/api/campaigns/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookId,
+            campaignName,
+            variant: Number(variant) || 1,
+          }),
+        });
 
-      const res = await fetch("/api/campaigns/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
+          setStatus("error");
+          return;
+        }
+      } else {
+        // Legacy flow: create book and campaign together
+        const normalizedAsin = normalizeAsinOrIsbn(asin);
+        if (!normalizedAsin) {
+          throw new Error("Invalid ASIN/ISBN format");
+        }
+
+        const campaignName = buildCampaignName({
           asin: normalizedAsin,
-          campaignName,
           marketplace,
+          creatorInitials: creatorInitials || "XX",
           authorName,
           bookTitle,
-          seriesName: seriesName || null,
-          seriesOrder: seriesOrder ? parseInt(seriesOrder) : null,
-          seriesTotal: seriesTotal ? parseInt(seriesTotal) : null,
+          seriesName: seriesName.trim() ? seriesName : undefined,
           variant: Number(variant) || 1,
-        }),
-      });
+        });
 
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
-        setStatus("error");
-        return;
+        const res = await fetch("/api/campaigns/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            asin: normalizedAsin,
+            campaignName,
+            marketplace,
+            authorName,
+            bookTitle,
+            seriesName: seriesName || null,
+            seriesOrder: seriesOrder ? parseInt(seriesOrder) : null,
+            seriesTotal: seriesTotal ? parseInt(seriesTotal) : null,
+            variant: Number(variant) || 1,
+          }),
+        });
+
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
+          setStatus("error");
+          return;
+        }
       }
 
       setStatus("success");
@@ -419,6 +444,97 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
   }
 
   const isLoading = status === "loading";
+
+  // Simplified form for book-centric flow
+  if (bookId) {
+    return (
+      <main className="flex-1 flex justify-center px-3 py-6 md:px-6 md:py-10">
+        <div className="w-full max-w-2xl shell p-4 md:p-8">
+          <div className="flex items-center justify-between gap-4 mb-8">
+            <div className="flex items-center gap-3">
+              <button
+                onClick={onBack}
+                className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
+              >
+                <ArrowLeft size={20} className="text-gray-600" />
+              </button>
+              <div className="logo-mark">PB</div>
+              <div>
+                <p className="brand-title text-base md:text-lg">New Campaign</p>
+                <p className="eyebrow">Create campaign for this book</p>
+              </div>
+            </div>
+          </div>
+
+          <div className="mb-6 md:mb-8">
+            <h1 className="page-heading text-2xl md:text-4xl">Create Campaign</h1>
+            <p className="text-sm mt-3 max-w-2xl leading-relaxed" style={{ color: "var(--muted)" }}>
+              Give your new campaign a name and variant number. You can configure keywords and budget later.
+            </p>
+          </div>
+
+          <form onSubmit={handleSubmit}>
+            <div className="card mb-6">
+              <p className="card-title mb-4">Campaign Details</p>
+              <div className="space-y-4">
+                <div>
+                  <label className="field-label">Campaign Name</label>
+                  <input
+                    required
+                    value={variant}
+                    onChange={(e) => setVariant(e.target.value)}
+                    placeholder="Campaign Variant (e.g., 1, 2, A, etc.)"
+                    className="input"
+                  />
+                  <span className="field-hint">
+                    Enter a variant identifier for this campaign
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {status === "error" && errorMessage && (
+              <div
+                className="mb-6 status-banner"
+                style={{ background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }}
+              >
+                <span className="status-dot" style={{ background: "var(--accent-red)" }} />
+                <span style={{ color: "var(--accent-red)" }}>{errorMessage}</span>
+              </div>
+            )}
+
+            {status === "success" && (
+              <div
+                className="mb-6 status-banner"
+                style={{ background: "var(--accent-green-soft)", borderColor: "var(--accent-green)" }}
+              >
+                <span className="status-dot" style={{ background: "var(--accent-green)" }} />
+                <span style={{ color: "var(--accent-green)" }}>Campaign created! Redirecting...</span>
+              </div>
+            )}
+
+            <div className="flex gap-3 justify-between">
+              <button
+                type="button"
+                onClick={onBack}
+                className="btn-pill-outline px-6 py-2.5"
+              >
+                ← Cancel
+              </button>
+
+              <button
+                type="submit"
+                disabled={isLoading || !variant}
+                className="btn-pill-dark px-6 py-2.5"
+              >
+                {isLoading ? "Creating…" : "Create Campaign"}
+              </button>
+            </div>
+          </form>
+        </div>
+      </main>
+    );
+  }
 
   const [recommendedMin] = recommendedRange?.split("-").map(Number) ?? [null];
   const belowRecommendedMin =
