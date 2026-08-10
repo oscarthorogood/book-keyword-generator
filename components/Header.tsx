@@ -38,28 +38,30 @@ export function Header({ isAdmin = false }: { isAdmin?: boolean }) {
   const onAdmin = pathname === "/admin";
 
   return (
-    <header className="border-b" style={{ borderColor: "var(--line)" }}>
-      <div className="flex items-center justify-between px-3 py-4 md:px-6 md:py-5">
-        <Link href="/" className="flex items-center gap-2" style={{ textDecoration: "none" }}>
-          <div className="logo-mark text-sm">PB</div>
-          <span className="text-sm font-medium">Amazon Book Ads Builder</span>
+    <header className="border-b bg-white" style={{ borderColor: "var(--line)" }}>
+      <div
+        className="mx-auto flex w-full items-center justify-between gap-4 px-8 py-4"
+        style={{ maxWidth: "var(--container-max)" }}
+      >
+        <Link href="/" className="flex items-center gap-3 no-underline">
+          <span className="logo-mark" aria-hidden="true">
+            AB
+          </span>
+          <span className="text-md font-semibold" style={{ color: "var(--text-primary)" }}>
+            Amazon Book Ads Builder
+          </span>
         </Link>
-        <nav className="flex items-center gap-2">
+        <nav className="flex items-center gap-3" aria-label="Account">
           {isAdmin && (
             <Link
               href={onAdmin ? "/" : "/admin"}
-              className="btn-pill-outline text-xs px-3 py-1.5"
-              style={{ textDecoration: "none" }}
+              className="btn btn-secondary btn-sm no-underline"
               aria-current={onAdmin ? "page" : undefined}
             >
               {onAdmin ? "Builder" : "Access"}
             </Link>
           )}
-          <button
-            onClick={handleLogout}
-            disabled={isLoggingOut}
-            className="btn-pill-outline text-xs px-3 py-1.5"
-          >
+          <button onClick={handleLogout} disabled={isLoggingOut} className="btn btn-secondary btn-sm">
             {isLoggingOut ? "Signing out…" : "Sign out"}
           </button>
         </nav>

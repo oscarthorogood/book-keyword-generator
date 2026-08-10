@@ -18,22 +18,22 @@ export default async function AdminPage() {
   }
 
   return (
-    <main className="flex-1 flex justify-center px-3 py-6 md:px-6 md:py-10">
-      <div className="w-full max-w-3xl shell p-4 md:p-8">
-        <div className="mb-6">
-          <p className="brand-title text-base md:text-lg">Access</p>
-          <p className="eyebrow">Who can sign in</p>
+    <main className="flex-1 bg-white">
+      <div className="mx-auto w-full" style={{ maxWidth: "var(--container-max)" }}>
+        <header className="page-header">
+          <h1 className="page-title">Access</h1>
+          <p className="page-subtitle mt-1 max-w-2xl">
+            Who can sign in. Revoking ends any active session immediately and blocks new sign-in links;
+            reinstating emails a fresh one.
+          </p>
+        </header>
+
+        <div className="page-body">
+          <AccessManager
+            adminEmail={normalizeEmail(email)}
+            initialRequests={await listAccessRequests()}
+          />
         </div>
-
-        <p className="text-sm mb-6" style={{ color: "var(--muted)" }}>
-          Revoking ends any active session immediately and blocks new sign-in
-          links. Reinstating emails a fresh link.
-        </p>
-
-        <AccessManager
-          adminEmail={normalizeEmail(email)}
-          initialRequests={await listAccessRequests()}
-        />
       </div>
     </main>
   );

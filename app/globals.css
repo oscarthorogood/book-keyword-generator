@@ -1,352 +1,1163 @@
 @import "tailwindcss";
 
-:root {
-  --bg-a: #ffffff;
-  --bg-b: #fafafa;
-  --bg-c: #f5f5f5;
-  --bg-mid: #ffffff;
-  --foreground: #111827;
-  --ink: #111827;
-  --muted: #6b7280;
-  --panel: #ffffff;
-  --panel-muted: #f9fafb;
-  --line: #e5e7eb;
+/* ==========================================================================
+   Untitled UI design language — token layer
+   --------------------------------------------------------------------------
+   The single source of truth for every colour, type size, radius, shadow and
+   spacing value in the app. Nothing in the codebase may introduce a value
+   that isn't defined here.
 
-  --accent-purple: #1f2937;
-  --accent-purple-soft: #f3f4f6;
-  --accent-green: #374151;
-  --accent-green-soft: #f3f4f6;
-  --accent-yellow: #4b5563;
-  --accent-yellow-soft: #f9fafb;
-  --accent-red: #ef4444;
-  --accent-red-soft: #fee2e2;
+   Tailwind v4 reads these `@theme` variables directly, so redefining the
+   `gray` scale (etc.) means every existing utility class — `text-gray-600`,
+   `rounded-lg`, `shadow-xs` — resolves to the Untitled UI value rather than
+   Tailwind's default. That's deliberate: it makes the system impossible to
+   bypass by accident.
+   ========================================================================== */
+
+@theme {
+  /* ---- Typeface ------------------------------------------------------- */
+  --font-sans: var(--font-inter), "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    Helvetica, Arial, sans-serif;
+  /* Tabular data only: ASINs, IDs, code. Never body copy. */
+  --font-mono: var(--font-roboto-mono), "Roboto Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  /* ---- Gray: the workhorse -------------------------------------------- */
+  --color-gray-25: #fcfcfd;
+  --color-gray-50: #f9fafb;
+  --color-gray-100: #f2f4f7;
+  --color-gray-200: #eaecf0;
+  --color-gray-300: #d0d5dd;
+  --color-gray-400: #98a2b3;
+  --color-gray-500: #667085;
+  --color-gray-600: #475467;
+  --color-gray-700: #344054;
+  --color-gray-800: #1d2939;
+  --color-gray-900: #101828;
+
+  /* ---- Brand (kept for focus rings and marketing links) ---------------- */
+  --color-brand-25: #fcfaff;
+  --color-brand-50: #f9f5ff;
+  --color-brand-100: #f4ebff;
+  --color-brand-200: #e9d7fe;
+  --color-brand-300: #d6bbfb;
+  --color-brand-400: #b692f6;
+  --color-brand-500: #9e77ed;
+  --color-brand-600: #7f56d9;
+  --color-brand-700: #6941c6;
+  --color-brand-800: #53389e;
+  --color-brand-900: #42307d;
+
+  /* ---- Error ----------------------------------------------------------- */
+  --color-error-25: #fffbfa;
+  --color-error-50: #fef3f2;
+  --color-error-100: #fee4e2;
+  --color-error-200: #fecdca;
+  --color-error-300: #fda29b;
+  --color-error-400: #f97066;
+  --color-error-500: #f04438;
+  --color-error-600: #d92d20;
+  --color-error-700: #b42318;
+  --color-error-800: #912018;
+  --color-error-900: #7a271a;
+
+  /* ---- Warning --------------------------------------------------------- */
+  --color-warning-25: #fffcf5;
+  --color-warning-50: #fffaeb;
+  --color-warning-100: #fef0c7;
+  --color-warning-200: #fedf89;
+  --color-warning-300: #fec84b;
+  --color-warning-400: #fdb022;
+  --color-warning-500: #f79009;
+  --color-warning-600: #dc6803;
+  --color-warning-700: #b54708;
+  --color-warning-800: #93370d;
+  --color-warning-900: #7a2e0e;
+
+  /* ---- Success --------------------------------------------------------- */
+  --color-success-25: #f6fef9;
+  --color-success-50: #ecfdf3;
+  --color-success-100: #d1fadf;
+  --color-success-200: #a6f4c5;
+  --color-success-300: #6ce9a6;
+  --color-success-400: #32d583;
+  --color-success-500: #12b76a;
+  --color-success-600: #039855;
+  --color-success-700: #027a48;
+  --color-success-800: #05603a;
+  --color-success-900: #054f31;
+
+  /* ---- Accent (charts, tags, avatars — never core UI chrome) ----------- */
+  --color-accent-blue: #1570ef;
+  --color-accent-indigo: #444ce7;
+  --color-accent-purple: #6938ef;
+  --color-accent-pink: #dd2590;
+  --color-accent-orange: #ec4a0a;
+
+  /* ---- Type scale ------------------------------------------------------ */
+  --text-display-2xl: 4.5rem;
+  --text-display-2xl--line-height: 5.625rem;
+  --text-display-2xl--letter-spacing: -0.02em;
+  --text-display-xl: 3.75rem;
+  --text-display-xl--line-height: 4.5rem;
+  --text-display-xl--letter-spacing: -0.02em;
+  --text-display-lg: 3rem;
+  --text-display-lg--line-height: 3.75rem;
+  --text-display-lg--letter-spacing: -0.02em;
+  --text-display-md: 2.25rem;
+  --text-display-md--line-height: 2.75rem;
+  --text-display-md--letter-spacing: -0.02em;
+  --text-display-sm: 1.875rem;
+  --text-display-sm--line-height: 2.375rem;
+  --text-display-xs: 1.5rem;
+  --text-display-xs--line-height: 2rem;
+
+  --text-xl: 1.25rem;
+  --text-xl--line-height: 1.875rem;
+  --text-lg: 1.125rem;
+  --text-lg--line-height: 1.75rem;
+  --text-md: 1rem;
+  --text-md--line-height: 1.5rem;
+  --text-base: 1rem;
+  --text-base--line-height: 1.5rem;
+  --text-sm: 0.875rem;
+  --text-sm--line-height: 1.25rem;
+  --text-xs: 0.75rem;
+  --text-xs--line-height: 1.125rem;
+
+  /* ---- Radius ---------------------------------------------------------- */
+  --radius-xs: 4px;
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-3xl: 24px;
+  --radius-full: 9999px;
+
+  /* ---- Shadows (always paired with a border) --------------------------- */
+  --shadow-xs: 0px 1px 2px rgba(16, 24, 40, 0.05);
+  --shadow-sm: 0px 1px 3px rgba(16, 24, 40, 0.1), 0px 1px 2px rgba(16, 24, 40, 0.06);
+  --shadow-md: 0px 4px 8px -2px rgba(16, 24, 40, 0.1), 0px 2px 4px -2px rgba(16, 24, 40, 0.06);
+  --shadow-lg: 0px 12px 16px -4px rgba(16, 24, 40, 0.08), 0px 4px 6px -2px rgba(16, 24, 40, 0.03);
+  --shadow-xl: 0px 20px 24px -4px rgba(16, 24, 40, 0.08), 0px 8px 8px -4px rgba(16, 24, 40, 0.03);
+  --shadow-2xl: 0px 24px 48px -12px rgba(16, 24, 40, 0.18);
+  --shadow-3xl: 0px 32px 64px -12px rgba(16, 24, 40, 0.14);
+}
+
+/* --------------------------------------------------------------------------
+   Semantic aliases. Components reference these rather than raw scale steps,
+   so a role ("secondary text") is named once and can never drift between
+   files. Every value here is a token from the scale above.
+   -------------------------------------------------------------------------- */
+:root {
+  --bg-page: #ffffff;
+  --bg-subtle: #f9fafb; /* gray-50  — section + hover backgrounds */
+  --bg-muted: #f2f4f7; /* gray-100 — pressed states, tab track, skeletons */
+  --panel: #ffffff;
+  --line: #eaecf0; /* gray-200 — every divider and default border */
+  --line-strong: #d0d5dd; /* gray-300 — input borders */
+
+  --text-primary: #101828; /* gray-900 — headings, highest contrast */
+  --text-ui: #344054; /* gray-700 — labels, nav, button text */
+  --text-secondary: #475467; /* gray-600 — body + supporting copy */
+  --text-tertiary: #667085; /* gray-500 — icons, metadata */
+  --text-placeholder: #98a2b3; /* gray-400 */
+
+  --icon-default: #667085; /* gray-500 */
+  --icon-active: #344054; /* gray-700 */
+
+  --primary-solid: #101828; /* gray-900 — monochrome brand */
+  --primary-solid-hover: #000000;
+  --primary-fg: #ffffff;
+
+  /* Focus rings (§3.5) */
+  --ring-brand: 0 0 0 4px rgba(158, 119, 237, 0.24);
+  --ring-gray: 0 0 0 4px rgba(152, 162, 179, 0.14);
+  --ring-error: 0 0 0 4px rgba(240, 68, 56, 0.24);
+
+  /* Motion (§6) */
+  --motion-micro: 150ms ease;
+  --motion-overlay: 240ms cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Layout (§3.2) */
+  --sidebar-width: 280px;
+  --sidebar-width-collapsed: 80px;
+  --container-max: 1280px;
+
+  color-scheme: light;
 }
 
 @theme inline {
-  --color-background: var(--bg-mid);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --color-background: var(--bg-page);
+  --color-foreground: var(--text-primary);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --bg-a: #1f2937;
-    --bg-b: #111827;
-    --bg-c: #0f172a;
-    --bg-mid: #111827;
-    --foreground: #f3f4f6;
-    --ink: #f3f4f6;
-    --muted: #9ca3af;
-    --panel: #1f2937;
-    --panel-muted: #111827;
-    --line: #374151;
+/* ==========================================================================
+   Base
+   ========================================================================== */
 
-    --accent-purple: #d1d5db;
-    --accent-purple-soft: #374151;
-    --accent-green: #9ca3af;
-    --accent-green-soft: #374151;
-    --accent-yellow: #6b7280;
-    --accent-yellow-soft: #4b5563;
-    --accent-red: #ef4444;
-    --accent-red-soft: #7f1d1d;
+@layer base {
+  /* Tailwind v4 defaults `border-color` to currentColor; the system default is
+     gray-200. This lives in @layer base so component recipes (which need
+     gray-300 on inputs, or a semantic border on alerts) still win — an
+     unlayered `*` rule would beat every one of them. */
+  *,
+  ::before,
+  ::after {
+    border-color: var(--line);
   }
 }
 
-* {
-  border-color: var(--line);
+html {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
 }
 
 body {
-  color: var(--foreground);
-  font-family: var(--font-sans), Arial, Helvetica, sans-serif;
+  background: var(--bg-page);
+  color: var(--text-secondary);
+  font-size: 1rem;
+  line-height: 1.5rem;
   min-height: 100%;
-  background: var(--bg-mid);
 }
 
-/* ---- Shared design-system classes ---- */
-/* @layer components so Tailwind utilities (e.g. `hidden`, `sm:inline-flex`)
-   always win over these when both apply to the same element. */
-@layer components {
-
-.shell {
-  background: var(--panel-muted);
-  border: 1px solid var(--line);
-  border-radius: 32px;
-  box-shadow: 0 30px 60px -30px rgba(20, 15, 45, 0.18);
-}
-
-.logo-mark {
-  width: 2.5rem;
-  height: 2.5rem;
-  border-radius: 9999px;
-  background: var(--ink);
-  color: var(--panel);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-weight: 800;
-  font-size: 0.8rem;
-  letter-spacing: 0.02em;
-  flex-shrink: 0;
-}
-
-.brand-title {
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  line-height: 1.1;
-}
-
-.eyebrow {
-  font-size: 0.7rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
-  color: var(--muted);
-}
-
-.page-heading {
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  text-transform: uppercase;
-  line-height: 1;
-}
-
-.card {
-  background: var(--panel);
-  border: 1px solid var(--line);
-  border-radius: 24px;
-  padding: 1.5rem;
-  box-shadow: 0 1px 2px rgba(15, 10, 35, 0.03), 0 16px 32px -24px rgba(15, 10, 35, 0.18);
-}
-
-.card-title {
-  font-size: 0.75rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
-  color: var(--ink);
-}
-
-.field-label {
-  display: block;
-  font-size: 0.8rem;
+/* Headings are Semibold, never Bold — and never pure black. */
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+  color: var(--text-primary);
   font-weight: 600;
-  margin-bottom: 0.4rem;
-  color: var(--ink);
 }
 
-.field-hint {
-  display: block;
-  font-size: 0.72rem;
-  color: var(--muted);
-  margin-top: 0.35rem;
+::selection {
+  background: var(--color-brand-100);
 }
 
-.input {
-  width: 100%;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  background: var(--panel-muted);
-  color: var(--ink);
-  padding: 0.6rem 0.85rem;
-  font-size: 0.875rem;
+/* Thin, unobtrusive scrollbars (§4.12). */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--line-strong);
+  border-radius: var(--radius-full);
+}
+
+/* Every interactive element gets a visible focus ring. Components that carry
+   their own shadow re-declare this so the ring composes with it. */
+:where(a, button, input, select, textarea, [tabindex]):focus-visible {
   outline: none;
-  transition: border-color 0.15s ease, background 0.15s ease;
+  box-shadow: var(--ring-gray);
+  border-radius: var(--radius-md);
 }
 
-.input:focus {
-  border-color: #4b5563;
-  background: var(--panel);
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
-.btn-pill-dark {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.5rem;
-  border-radius: 9999px;
-  background: var(--ink);
-  color: var(--panel);
-  font-size: 0.875rem;
-  font-weight: 600;
-  padding: 0.65rem 1.25rem;
-  border: none;
-  cursor: pointer;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
+/* ==========================================================================
+   Components (§4 recipes)
+   --------------------------------------------------------------------------
+   In @layer components so Tailwind utilities always win when both apply to
+   the same element.
+   ========================================================================== */
+@layer components {
+  /* ---- Layout ---------------------------------------------------------- */
 
-.btn-pill-dark:hover:not(:disabled) {
-  opacity: 0.88;
-}
+  .app-shell {
+    background: var(--bg-page);
+    min-height: 100vh;
+  }
 
-.btn-pill-dark:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
+  .page-header {
+    border-bottom: 1px solid var(--line);
+    padding: 24px 32px;
+  }
 
-.btn-pill-outline {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 0.4rem;
-  border-radius: 9999px;
-  border: 1px solid var(--line);
-  background: var(--panel);
-  color: var(--ink);
-  font-size: 0.8rem;
-  font-weight: 600;
-  padding: 0.55rem 1.1rem;
-  cursor: pointer;
-  transition: background 0.15s ease, border-color 0.15s ease;
-  white-space: nowrap;
-}
+  .page-body {
+    padding: 32px;
+  }
 
-.btn-pill-outline:hover:not(:disabled) {
-  background: var(--panel-muted);
-}
+  @media (max-width: 640px) {
+    .page-header,
+    .page-body {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+  }
 
-.btn-pill-outline:disabled {
-  opacity: 0.5;
-  cursor: not-allowed;
-}
+  /* Page title — Display xs Semibold, the app-UI heading size. */
+  .page-title {
+    font-size: var(--text-display-xs);
+    line-height: var(--text-display-xs--line-height);
+    font-weight: 600;
+    color: var(--text-primary);
+  }
 
-.chip-toggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.4rem;
-  border-radius: 9999px;
-  border: 1px solid var(--line);
-  padding: 0.45rem 0.95rem;
-  font-size: 0.8rem;
-  font-weight: 600;
-  cursor: pointer;
-  background: var(--panel-muted);
-  color: var(--ink);
-  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
-}
+  .page-subtitle {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--text-secondary);
+  }
 
-.chip-toggle:has(input:checked) {
-  background: var(--ink);
-  color: var(--panel);
-  border-color: var(--ink);
-}
+  /* Section label above a title. Sentence case, never all-caps shouting. */
+  .eyebrow {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+  }
 
-.chip-toggle input {
-  position: absolute;
-  opacity: 0;
-  width: 0;
-  height: 0;
-}
+  /* ---- Buttons (§4.1) -------------------------------------------------- */
 
-.chip-tag {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.3rem;
-  border-radius: 9999px;
-  border: 1px solid var(--line);
-  background: var(--panel-muted);
-  padding: 0.3rem 0.7rem;
-  font-size: 0.72rem;
-  font-weight: 500;
-  color: var(--ink);
-}
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    height: 40px;
+    padding: 0 16px;
+    border-radius: var(--radius-md);
+    border: 1px solid transparent;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 600;
+    white-space: nowrap;
+    cursor: pointer;
+    box-shadow: var(--shadow-xs);
+    transition:
+      background var(--motion-micro),
+      border-color var(--motion-micro),
+      color var(--motion-micro),
+      box-shadow var(--motion-micro);
+  }
 
-.chip-tag:hover {
-  background: var(--accent-red-soft);
-  border-color: var(--accent-red);
-  color: var(--accent-red);
-}
+  .btn:disabled {
+    cursor: not-allowed;
+    box-shadow: none;
+  }
 
-.option-card {
-  display: flex;
-  align-items: flex-start;
-  gap: 0.6rem;
-  border-radius: 16px;
-  border: 1px solid var(--line);
-  background: var(--panel-muted);
-  padding: 0.75rem 0.9rem;
-  cursor: pointer;
-  font-size: 0.85rem;
-  font-weight: 600;
-  transition: border-color 0.15s ease, background 0.15s ease;
-}
+  .btn:focus-visible {
+    outline: none;
+  }
 
-.option-card:has(input:checked) {
-  border-color: #374151;
-  background: #f3f4f6;
-}
+  .btn-sm {
+    height: 36px;
+    padding: 0 12px;
+  }
 
-.stat-tile {
-  border-radius: 20px;
-  padding: 1rem 1.1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 0.2rem;
-}
+  .btn-lg {
+    height: 44px;
+    padding: 0 18px;
+  }
 
-.stat-tile .stat-value {
-  font-size: 1.6rem;
-  font-weight: 800;
-  letter-spacing: -0.01em;
-  line-height: 1.1;
-}
+  /* Square icon-only button — 40px keeps the hit area accessible. */
+  .btn-icon {
+    width: 40px;
+    height: 40px;
+    padding: 0;
+  }
 
-.stat-tile .stat-label {
-  font-size: 0.72rem;
-  font-weight: 600;
-  color: var(--muted);
-}
+  .btn-icon.btn-sm {
+    width: 36px;
+    height: 36px;
+  }
 
-.tone-purple {
-  background: #f3f4f6;
-  color: #374151;
-}
+  .btn-primary {
+    background: var(--primary-solid);
+    color: var(--primary-fg);
+    border-color: var(--primary-solid);
+  }
 
-.tone-green {
-  background: #f3f4f6;
-  color: #374151;
-}
+  .btn-primary:hover:not(:disabled) {
+    background: var(--primary-solid-hover);
+    border-color: var(--primary-solid-hover);
+  }
 
-.tone-yellow {
-  background: #f9fafb;
-  color: #4b5563;
-}
+  .btn-primary:focus-visible {
+    box-shadow: var(--shadow-xs), var(--ring-gray);
+  }
 
-.tone-blue {
-  background: #f3f4f6;
-  color: #374151;
-}
+  .btn-primary:disabled {
+    background: var(--bg-muted);
+    border-color: var(--bg-muted);
+    color: var(--text-placeholder);
+  }
 
-.status-banner {
-  border-radius: 20px;
-  border: 1px solid var(--line);
-  padding: 1rem 1.1rem;
-  font-size: 0.85rem;
-  display: flex;
-  gap: 0.7rem;
-  align-items: flex-start;
-}
+  .btn-secondary {
+    background: var(--panel);
+    color: var(--text-ui);
+    border-color: var(--line-strong);
+  }
 
-.status-dot {
-  width: 0.55rem;
-  height: 0.55rem;
-  border-radius: 9999px;
-  margin-top: 0.35rem;
-  flex-shrink: 0;
-}
+  .btn-secondary:hover:not(:disabled) {
+    background: var(--bg-subtle);
+  }
 
-.source-row {
-  display: flex;
-  justify-content: space-between;
-  gap: 0.5rem;
-  font-size: 0.78rem;
-  padding: 0.35rem 0;
-  border-bottom: 1px solid var(--line);
-}
+  .btn-secondary:focus-visible {
+    box-shadow: var(--shadow-xs), var(--ring-gray);
+  }
 
-.source-row:last-child {
-  border-bottom: none;
-}
+  .btn-secondary:disabled {
+    color: var(--line-strong);
+    border-color: var(--line);
+  }
 
-} /* @layer components */
+  .btn-tertiary {
+    background: transparent;
+    color: var(--text-secondary);
+    border-color: transparent;
+    box-shadow: none;
+  }
+
+  .btn-tertiary:hover:not(:disabled) {
+    background: var(--bg-subtle);
+    color: var(--text-ui);
+  }
+
+  .btn-tertiary:focus-visible {
+    box-shadow: var(--ring-gray);
+  }
+
+  .btn-tertiary:disabled {
+    color: var(--line-strong);
+  }
+
+  .btn-destructive {
+    background: var(--color-error-600);
+    color: #ffffff;
+    border-color: var(--color-error-600);
+  }
+
+  .btn-destructive:hover:not(:disabled) {
+    background: var(--color-error-700);
+    border-color: var(--color-error-700);
+  }
+
+  .btn-destructive:focus-visible {
+    box-shadow: var(--shadow-xs), var(--ring-error);
+  }
+
+  .btn-destructive:disabled {
+    background: var(--color-error-100);
+    border-color: var(--color-error-100);
+    color: #ffffff;
+  }
+
+  /* Text-only link button. */
+  .btn-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    transition: color var(--motion-micro);
+  }
+
+  .btn-link:hover:not(:disabled) {
+    color: var(--text-ui);
+    text-decoration: underline;
+  }
+
+  .btn-link:disabled {
+    color: var(--line-strong);
+    cursor: not-allowed;
+  }
+
+  /* ---- Inputs & forms (§4.2) ------------------------------------------ */
+
+  .input {
+    width: 100%;
+    background: var(--panel);
+    color: var(--text-primary);
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-xs);
+    padding: 10px 14px;
+    font-size: 1rem;
+    line-height: 1.5rem;
+    transition:
+      border-color var(--motion-micro),
+      box-shadow var(--motion-micro),
+      background var(--motion-micro);
+  }
+
+  .input::placeholder {
+    color: var(--text-placeholder);
+  }
+
+  .input:focus,
+  .input:focus-visible {
+    outline: none;
+    border-color: var(--text-placeholder);
+    box-shadow: var(--shadow-xs), var(--ring-gray);
+  }
+
+  .input:disabled {
+    background: var(--bg-subtle);
+    color: var(--text-tertiary);
+    cursor: not-allowed;
+  }
+
+  .input-error {
+    border-color: var(--color-error-300);
+  }
+
+  .input-error:focus,
+  .input-error:focus-visible {
+    border-color: var(--color-error-300);
+    box-shadow: var(--shadow-xs), var(--ring-error);
+  }
+
+  /* Compact control used inside table rows and toolbars. */
+  .input-sm {
+    padding: 6px 10px;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+  }
+
+  /* Leading-icon inputs: the icon sits 14px in, text clears it by 8px. */
+  .input-with-icon {
+    padding-left: 42px;
+  }
+
+  .input-icon {
+    position: absolute;
+    left: 14px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--icon-default);
+    pointer-events: none;
+  }
+
+  select.input {
+    appearance: none;
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none' stroke='%23667085' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 12px center;
+    padding-right: 40px;
+  }
+
+  .field-label {
+    display: block;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 500;
+    color: var(--text-ui);
+    margin-bottom: 6px;
+  }
+
+  .field-hint {
+    display: block;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--text-secondary);
+    margin-top: 6px;
+  }
+
+  .field-error {
+    display: block;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--color-error-600);
+    margin-top: 6px;
+  }
+
+  /* Checkbox: 16px, radius-xs, primary fill when checked. */
+  .checkbox {
+    appearance: none;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-xs);
+    background: var(--panel);
+    cursor: pointer;
+    transition:
+      background var(--motion-micro),
+      border-color var(--motion-micro);
+  }
+
+  .checkbox:checked {
+    background: var(--primary-solid);
+    border-color: var(--primary-solid);
+    background-image: url("data:image/svg+xml;charset=utf-8,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: center;
+  }
+
+  .checkbox:focus-visible {
+    outline: none;
+    box-shadow: var(--ring-gray);
+  }
+
+  /* ---- Cards (§4.3) ---------------------------------------------------- */
+
+  .card {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xs);
+    padding: 24px;
+  }
+
+  .card-compact {
+    padding: 16px;
+  }
+
+  .card-interactive {
+    cursor: pointer;
+    text-align: left;
+    transition:
+      box-shadow var(--motion-micro),
+      border-color var(--motion-micro);
+  }
+
+  .card-interactive:hover {
+    box-shadow: var(--shadow-sm);
+    border-color: var(--line-strong);
+  }
+
+  .card-interactive:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-xs), var(--ring-gray);
+  }
+
+  .card-title {
+    font-size: 1rem;
+    line-height: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    letter-spacing: normal;
+    text-transform: none;
+  }
+
+  /* Metadata line under a card/row title: "220 KB · docx". */
+  .meta-line {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--text-secondary);
+  }
+
+  /* Inverted "new item" action card, per the reference screens. */
+  .action-card {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    background: var(--primary-solid);
+    color: var(--primary-fg);
+    border: 1px solid var(--primary-solid);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xs);
+    padding: 16px;
+    cursor: pointer;
+    text-align: left;
+    transition:
+      background var(--motion-micro),
+      box-shadow var(--motion-micro);
+  }
+
+  .action-card:hover:not(:disabled) {
+    background: var(--primary-solid-hover);
+    box-shadow: var(--shadow-sm);
+  }
+
+  .action-card:focus-visible {
+    outline: none;
+    box-shadow: var(--shadow-xs), var(--ring-gray);
+  }
+
+  .action-card:disabled {
+    cursor: not-allowed;
+    background: var(--bg-muted);
+    border-color: var(--line);
+    color: var(--text-placeholder);
+  }
+
+  .action-card-secondary {
+    background: var(--panel);
+    color: var(--text-primary);
+    border-color: var(--line);
+  }
+
+  .action-card-secondary:hover:not(:disabled) {
+    background: var(--panel);
+    border-color: var(--line-strong);
+    box-shadow: var(--shadow-sm);
+  }
+
+  /* ---- Featured icon tiles (§4.11) ------------------------------------- */
+
+  .icon-tile {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: var(--radius-md);
+    background: var(--bg-subtle);
+    color: var(--icon-active);
+  }
+
+  .icon-tile-dark {
+    background: var(--primary-solid);
+    color: var(--primary-fg);
+  }
+
+  .icon-tile-lg {
+    width: 48px;
+    height: 48px;
+  }
+
+  .icon-tile-inverted {
+    background: rgba(255, 255, 255, 0.12);
+    color: var(--primary-fg);
+  }
+
+  /* ---- Navigation (§4.4) ----------------------------------------------- */
+
+  .nav-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    width: 100%;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    font-size: 1rem;
+    line-height: 1.5rem;
+    font-weight: 600;
+    color: var(--text-ui);
+    background: transparent;
+    border: none;
+    cursor: pointer;
+    text-align: left;
+    text-decoration: none;
+    transition:
+      background var(--motion-micro),
+      color var(--motion-micro);
+  }
+
+  .nav-item:hover:not(:disabled) {
+    background: var(--bg-subtle);
+  }
+
+  .nav-item:focus-visible {
+    outline: none;
+    box-shadow: var(--ring-gray);
+  }
+
+  .nav-item[aria-current="page"],
+  .nav-item-active {
+    background: var(--bg-muted);
+    color: var(--text-primary);
+  }
+
+  .nav-item:disabled {
+    color: var(--text-placeholder);
+    cursor: not-allowed;
+  }
+
+  /* Small uppercase-free section heading inside the sidebar. */
+  .nav-section-label {
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    padding: 0 12px;
+    margin-bottom: 8px;
+  }
+
+  /* ---- Tabs (§4.4, pill style) ----------------------------------------- */
+
+  .tabs {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 4px;
+    background: var(--bg-subtle);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-md);
+  }
+
+  .tab {
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    border: none;
+    background: transparent;
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 600;
+    color: var(--text-tertiary);
+    cursor: pointer;
+    white-space: nowrap;
+    transition:
+      background var(--motion-micro),
+      color var(--motion-micro),
+      box-shadow var(--motion-micro);
+  }
+
+  .tab:hover:not(.tab-active) {
+    color: var(--text-ui);
+  }
+
+  .tab:focus-visible {
+    outline: none;
+    box-shadow: var(--ring-gray);
+  }
+
+  .tab-active {
+    background: var(--panel);
+    color: var(--text-ui);
+    box-shadow: var(--shadow-xs);
+  }
+
+  /* ---- Tables & lists (§4.5) ------------------------------------------- */
+
+  .table-wrap {
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-xs);
+    overflow: hidden;
+    background: var(--panel);
+  }
+
+  .table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  .table thead th {
+    background: var(--bg-subtle);
+    border-bottom: 1px solid var(--line);
+    padding: 12px 24px;
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-align: left;
+    white-space: nowrap;
+  }
+
+  .table tbody td {
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--line);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--text-secondary);
+    vertical-align: middle;
+  }
+
+  .table tbody tr:last-child td {
+    border-bottom: none;
+  }
+
+  .table tbody tr {
+    transition: background var(--motion-micro);
+  }
+
+  .table tbody tr:hover {
+    background: var(--bg-subtle);
+  }
+
+  /* The identifying cell in a row: name in gray-900 Medium. */
+  .cell-primary {
+    font-weight: 500;
+    color: var(--text-primary);
+  }
+
+  /* Tighter table for dense lists (keyword manager). */
+  .table-dense thead th {
+    padding: 12px 16px;
+  }
+
+  .table-dense tbody td {
+    padding: 12px 16px;
+  }
+
+  /* ---- Badges & status (§4.6) ------------------------------------------ */
+
+  .badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    border: 1px solid transparent;
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    font-weight: 500;
+    white-space: nowrap;
+  }
+
+  .badge-gray {
+    background: var(--bg-subtle);
+    border-color: var(--line);
+    color: var(--text-ui);
+  }
+
+  .badge-success {
+    background: var(--color-success-50);
+    border-color: var(--color-success-200);
+    color: var(--color-success-700);
+  }
+
+  .badge-error {
+    background: var(--color-error-50);
+    border-color: var(--color-error-200);
+    color: var(--color-error-700);
+  }
+
+  .badge-warning {
+    background: var(--color-warning-50);
+    border-color: var(--color-warning-200);
+    color: var(--color-warning-700);
+  }
+
+  .badge-brand {
+    background: var(--color-brand-50);
+    border-color: var(--color-brand-200);
+    color: var(--color-brand-700);
+  }
+
+  .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: var(--radius-full);
+    flex-shrink: 0;
+  }
+
+  /* Removable tag chip. */
+  .chip-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 2px 10px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--line);
+    background: var(--bg-subtle);
+    font-size: 0.75rem;
+    line-height: 1.125rem;
+    font-weight: 500;
+    color: var(--text-ui);
+  }
+
+  /* ---- Avatars (§4.7) --------------------------------------------------- */
+
+  .avatar {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: var(--radius-full);
+    background: var(--bg-muted);
+    color: var(--text-secondary);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    font-weight: 600;
+    box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+  }
+
+  .avatar-sm {
+    width: 32px;
+    height: 32px;
+    font-size: 0.75rem;
+  }
+
+  /* ---- Alerts (§4.9) ---------------------------------------------------- */
+
+  .alert {
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 16px;
+    border-radius: var(--radius-lg);
+    border: 1px solid var(--line);
+    background: var(--bg-subtle);
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--text-secondary);
+  }
+
+  .alert-title {
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .alert-error {
+    background: var(--color-error-25);
+    border-color: var(--color-error-300);
+    color: var(--color-error-700);
+  }
+
+  .alert-error .alert-title {
+    color: var(--color-error-700);
+  }
+
+  .alert-warning {
+    background: var(--color-warning-25);
+    border-color: var(--color-warning-300);
+    color: var(--color-warning-700);
+  }
+
+  .alert-warning .alert-title {
+    color: var(--color-warning-700);
+  }
+
+  .alert-success {
+    background: var(--color-success-25);
+    border-color: var(--color-success-300);
+    color: var(--color-success-700);
+  }
+
+  .alert-success .alert-title {
+    color: var(--color-success-700);
+  }
+
+  /* ---- Progress (§4.10) ------------------------------------------------- */
+
+  .progress-track {
+    height: 8px;
+    width: 100%;
+    border-radius: var(--radius-full);
+    background: var(--bg-muted);
+    overflow: hidden;
+  }
+
+  .progress-fill {
+    height: 100%;
+    border-radius: var(--radius-full);
+    background: var(--primary-solid);
+    transition: width var(--motion-overlay);
+  }
+
+  /* ---- Empty states & skeletons (§4.12) --------------------------------- */
+
+  .empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+    padding: 48px 24px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    background: var(--panel);
+    text-align: center;
+  }
+
+  .empty-state-title {
+    font-size: 1.125rem;
+    line-height: 1.75rem;
+    font-weight: 600;
+    color: var(--text-primary);
+  }
+
+  .empty-state-body {
+    font-size: 0.875rem;
+    line-height: 1.25rem;
+    color: var(--text-secondary);
+    max-width: 352px;
+  }
+
+  .skeleton {
+    background: var(--bg-muted);
+    border-radius: var(--radius-sm);
+    animation: skeleton-pulse 1.6s ease-in-out infinite;
+  }
+
+  @keyframes skeleton-pulse {
+    0%,
+    100% {
+      opacity: 1;
+    }
+    50% {
+      opacity: 0.55;
+    }
+  }
+
+  /* ---- Overlays (§4.8) --------------------------------------------------- */
+
+  .popover {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 6px;
+    animation: overlay-in var(--motion-overlay);
+  }
+
+  @keyframes overlay-in {
+    from {
+      opacity: 0;
+      transform: translateY(-4px) scale(0.98);
+    }
+    to {
+      opacity: 1;
+      transform: none;
+    }
+  }
+
+  /* ---- Misc -------------------------------------------------------------- */
+
+  /* Brand mark: simple dark rounded tile (§4.11). */
+  .logo-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: var(--radius-md);
+    background: var(--primary-solid);
+    color: var(--primary-fg);
+    font-size: 0.875rem;
+    font-weight: 600;
+    letter-spacing: normal;
+  }
+
+  .divider {
+    height: 1px;
+    width: 100%;
+    background: var(--line);
+    border: none;
+  }
+
+  /* Auth/marketing surface: a card, not a floating slab. */
+  .shell {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+  }
+}

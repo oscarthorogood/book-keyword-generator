@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Folder, LogOut, Shield, ChevronLeft, ChevronRight } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, LogOut, Plus, Shield } from "lucide-react";
 import BooksListDashboard from "@/components/BooksListDashboard";
 import AddBookForm from "@/components/AddBookForm";
 import BookDetailPage from "@/components/BookDetailPage";
@@ -35,87 +35,99 @@ export default function Home() {
     }
   }
 
-  const mainNavItems = [{ icon: Folder, label: "Books" }];
+  const onBooks = currentPage === "dashboard" || currentPage === "book-detail";
 
   return (
-    <div className="flex min-h-screen bg-white">
-      {/* Sidebar */}
-      <div
-        className={`${
-          sidebarOpen ? "w-72" : "w-20"
-        } bg-white border-r border-gray-200 transition-all duration-300 flex flex-col fixed h-screen left-0 top-0 z-40`}
+    <div className="app-shell flex min-h-screen">
+      {/* Sidebar — fixed 280px, white, single gray-200 right border (§4.4). */}
+      <aside
+        className="fixed left-0 top-0 z-40 flex h-screen flex-col border-r bg-white transition-[width] duration-150"
+        style={{
+          width: sidebarOpen ? "var(--sidebar-width)" : "var(--sidebar-width-collapsed)",
+          borderColor: "var(--line)",
+        }}
       >
-        {/* Logo/Header */}
-        <div className={`border-b border-gray-200 ${sidebarOpen ? "p-6" : "p-4"}`}>
-          <div className={`flex items-center gap-3 ${sidebarOpen ? "justify-between" : "flex-col"}`}>
-            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
-                <span className="text-white font-bold text-lg">📚</span>
-              </div>
-              {sidebarOpen && (
-                <div>
-                  <div className="font-bold text-gray-900 text-sm">Ads Assistant</div>
-                  <div className="text-xs text-gray-500">Book Manager</div>
-                </div>
-              )}
+        <div className={`flex items-center gap-3 ${sidebarOpen ? "justify-between px-4 pt-6" : "justify-center px-3 pt-6"}`}>
+          {sidebarOpen && (
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="logo-mark" aria-hidden="true">
+                AB
+              </span>
+              <span className="truncate text-md font-semibold" style={{ color: "var(--text-primary)" }}>
+                Ads Builder
+              </span>
             </div>
-            <button
-              onClick={() => setSidebarOpen(!sidebarOpen)}
-              className="w-8 h-8 flex-shrink-0 flex items-center justify-center rounded-lg border border-gray-200 text-gray-500 hover:bg-gray-50 transition-all"
-              title={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
-            >
-              {sidebarOpen ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-            </button>
-          </div>
+          )}
+          <button
+            onClick={() => setSidebarOpen(!sidebarOpen)}
+            className="btn btn-secondary btn-icon btn-sm"
+            aria-label={sidebarOpen ? "Collapse sidebar" : "Expand sidebar"}
+            aria-expanded={sidebarOpen}
+          >
+            {sidebarOpen ? <ChevronLeft size={20} /> : <ChevronRight size={20} />}
+          </button>
         </div>
 
-        {/* Main Navigation */}
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
-          {mainNavItems.map((item) => (
-            <button
-              key={item.label}
-              onClick={() => {
-                if (item.label === "Books") {
-                  setCurrentPage("dashboard");
-                  setSelectedBookId(null);
-                }
-              }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                (currentPage === "dashboard" || currentPage === "book-detail") && item.label === "Books"
-                  ? "bg-gray-100 text-gray-900"
-                  : "text-gray-600 hover:bg-gray-50"
-              }`}
-            >
-              <item.icon size={20} className="flex-shrink-0" />
-              {sidebarOpen && <span>{item.label}</span>}
-            </button>
-          ))}
+        <nav className="flex-1 overflow-y-auto px-4 py-6" aria-label="Main">
+          <button
+            onClick={() => {
+              setCurrentPage("dashboard");
+              setSelectedBookId(null);
+            }}
+            className={`nav-item ${onBooks ? "nav-item-active" : ""} ${sidebarOpen ? "" : "justify-center px-0"}`}
+            aria-current={onBooks ? "page" : undefined}
+            title={sidebarOpen ? undefined : "Books"}
+          >
+            <BookOpen size={20} className="shrink-0" style={{ color: onBooks ? "var(--icon-active)" : "var(--icon-default)" }} />
+            {sidebarOpen && <span>Books</span>}
+          </button>
+
+          <button
+            onClick={() => setCurrentPage("add-book")}
+            className={`nav-item mt-1 ${currentPage === "add-book" ? "nav-item-active" : ""} ${
+              sidebarOpen ? "" : "justify-center px-0"
+            }`}
+            aria-current={currentPage === "add-book" ? "page" : undefined}
+            title={sidebarOpen ? undefined : "Add book"}
+          >
+            <Plus
+              size={20}
+              className="shrink-0"
+              style={{ color: currentPage === "add-book" ? "var(--icon-active)" : "var(--icon-default)" }}
+            />
+            {sidebarOpen && <span>Add book</span>}
+          </button>
         </nav>
 
-        {/* Account */}
-        <nav className="p-4 border-t border-gray-200 space-y-1">
+        {/* Bottom-pinned account area (§4.4). */}
+        <div className="border-t px-4 py-4" style={{ borderColor: "var(--line)" }}>
           {isAdmin && (
             <a
               href="/admin"
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all"
+              className={`nav-item ${sidebarOpen ? "" : "justify-center px-0"}`}
+              title={sidebarOpen ? undefined : "Access"}
             >
-              <Shield size={20} className="flex-shrink-0" />
-              {sidebarOpen && <span>Admin</span>}
+              <Shield size={20} className="shrink-0" style={{ color: "var(--icon-default)" }} />
+              {sidebarOpen && <span>Access</span>}
             </a>
           )}
           <button
             onClick={handleLogout}
             disabled={isLoggingOut}
-            className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all disabled:opacity-50"
+            className={`nav-item mt-1 ${sidebarOpen ? "" : "justify-center px-0"}`}
+            title={sidebarOpen ? undefined : "Sign out"}
           >
-            <LogOut size={20} className="flex-shrink-0" />
+            <LogOut size={20} className="shrink-0" style={{ color: "var(--icon-default)" }} />
             {sidebarOpen && <span>{isLoggingOut ? "Signing out…" : "Sign out"}</span>}
           </button>
-        </nav>
-      </div>
+        </div>
+      </aside>
 
-      {/* Main Content */}
-      <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-72" : "ml-20"}`}>
+      {/* Main content — fluid, offset by the sidebar. */}
+      <div
+        className="min-w-0 flex-1 transition-[margin] duration-150"
+        style={{ marginLeft: sidebarOpen ? "var(--sidebar-width)" : "var(--sidebar-width-collapsed)" }}
+      >
         {currentPage === "dashboard" && (
           <BooksListDashboard
             onAddBook={() => setCurrentPage("add-book")}

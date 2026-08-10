@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 
 export interface AccessRequest {
   email: string;
@@ -9,11 +10,25 @@ export interface AccessRequest {
   decided_at: string | null;
 }
 
-const STATUS_TONE: Record<AccessRequest["status"], string> = {
-  pending: "var(--accent-yellow)",
-  approved: "var(--accent-green)",
-  denied: "var(--muted)",
+const STATUS_BADGE: Record<AccessRequest["status"], string> = {
+  pending: "badge-warning",
+  approved: "badge-success",
+  denied: "badge-gray",
 };
+
+const STATUS_LABEL: Record<AccessRequest["status"], string> = {
+  pending: "Pending",
+  approved: "Approved",
+  denied: "Revoked",
+};
+
+function formatDate(value: string | null): string {
+  if (!value) return "—";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "—"
+    : date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
+}
 
 /**
  * The initial list is rendered on the server, so there is no fetch-on-mount
@@ -74,78 +89,96 @@ export function AccessManager({
   }
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-5">
       {notice && (
-        <div
-          className="status-banner"
-          style={{ background: "var(--accent-green-soft)", borderColor: "var(--accent-green)" }}
-        >
-          <span className="status-dot" style={{ background: "var(--accent-green)" }} />
-          <span style={{ color: "var(--accent-green)" }}>{notice}</span>
+        <div className="alert alert-success" aria-live="polite">
+          <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
+          <p>{notice}</p>
         </div>
       )}
       {error && (
-        <div
-          className="status-banner"
-          style={{ background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }}
-        >
-          <span className="status-dot" style={{ background: "var(--accent-red)" }} />
-          <span style={{ color: "var(--accent-red)" }}>{error}</span>
+        <div className="alert alert-error" role="alert">
+          <AlertCircle size={20} className="mt-0.5 shrink-0" />
+          <p>{error}</p>
         </div>
       )}
 
-      {requests.length === 0 && (
-        <p style={{ color: "var(--muted)" }}>No access requests yet.</p>
-      )}
-
-      {requests.map((r) => {
-        const isSelf = r.email === adminEmail;
-        return (
-          <div
-            key={r.email}
-            className="source-row"
-            style={{ alignItems: "center", flexWrap: "wrap", gap: "0.75rem" }}
-          >
-            <span className="flex items-center gap-2">
-              <span
-                className="status-dot"
-                style={{ marginTop: 0, background: STATUS_TONE[r.status] }}
-              />
-              <span>
-                {r.email}
-                <span style={{ color: "var(--muted)" }}>
-                  {" "}
-                  · {r.status}
-                  {isSelf ? " · you" : ""}
-                </span>
-              </span>
-            </span>
-
-            <span className="flex items-center gap-2">
-              {r.status !== "approved" && (
-                <button
-                  type="button"
-                  disabled={busy === r.email}
-                  onClick={() => decide(r.email, "approved")}
-                  className="btn-pill-dark text-xs px-3 py-1.5 disabled:opacity-50"
-                >
-                  {r.status === "denied" ? "Reinstate" : "Approve"}
-                </button>
-              )}
-              {r.status !== "denied" && !isSelf && (
-                <button
-                  type="button"
-                  disabled={busy === r.email}
-                  onClick={() => decide(r.email, "denied")}
-                  className="btn-pill-outline text-xs px-3 py-1.5 disabled:opacity-50"
-                >
-                  {r.status === "approved" ? "Revoke" : "Deny"}
-                </button>
-              )}
-            </span>
+      {requests.length === 0 ? (
+        <div className="empty-state">
+          <div className="space-y-1">
+            <p className="empty-state-title">No access requests yet</p>
+            <p className="empty-state-body">
+              When someone asks for a sign-in link, they&apos;ll appear here for approval.
+            </p>
           </div>
-        );
-      })}
+        </div>
+      ) : (
+        <div className="table-wrap overflow-x-auto">
+          <table className="table">
+            <thead>
+              <tr>
+                <th scope="col">Email</th>
+                <th scope="col">Status</th>
+                <th scope="col" className="hidden sm:table-cell">
+                  Requested
+                </th>
+                <th scope="col">
+                  <span className="sr-only">Actions</span>
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {requests.map((r) => {
+                const isSelf = r.email === adminEmail;
+                return (
+                  <tr key={r.email}>
+                    <td>
+                      <div className="flex items-center gap-3">
+                        <span className="avatar avatar-sm" aria-hidden="true">
+                          {r.email.slice(0, 2).toUpperCase()}
+                        </span>
+                        <div className="min-w-0">
+                          <p className="cell-primary truncate">{r.email}</p>
+                          {isSelf && <p className="meta-line text-xs">This is you</p>}
+                        </div>
+                      </div>
+                    </td>
+                    <td>
+                      <span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_LABEL[r.status]}</span>
+                    </td>
+                    <td className="hidden sm:table-cell">{formatDate(r.requested_at)}</td>
+                    <td>
+                      <div className="flex items-center justify-end gap-2">
+                        {r.status !== "approved" && (
+                          <button
+                            type="button"
+                            disabled={busy === r.email}
+                            onClick={() => decide(r.email, "approved")}
+                            className="btn btn-primary btn-sm"
+                          >
+                            {busy === r.email && <Loader2 size={16} className="animate-spin" />}
+                            {r.status === "denied" ? "Reinstate" : "Approve"}
+                          </button>
+                        )}
+                        {r.status !== "denied" && !isSelf && (
+                          <button
+                            type="button"
+                            disabled={busy === r.email}
+                            onClick={() => decide(r.email, "denied")}
+                            className="btn btn-secondary btn-sm"
+                          >
+                            {r.status === "approved" ? "Revoke" : "Deny"}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
     </div>
   );
 }
