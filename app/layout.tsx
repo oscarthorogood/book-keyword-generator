@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import type { ReactNode } from "react";
 import { Geist, Geist_Mono } from "next/font/google";
+import { SpeedInsights } from "@vercel/speed-insights/next";
 import { Header } from "@/components/Header";
 import { isCurrentUserAdmin } from "@/lib/admin";
 import "./globals.css";
@@ -51,6 +52,7 @@ export default async function RootLayout({ children }: RootLayoutProps) {
       <body className="min-h-full flex flex-col">
         <Header isAdmin={isAdmin} />
         {children}
+        <SpeedInsights />
       </body>
     </html>
   );
