@@ -207,10 +207,9 @@ export async function fetchAmazonBookMetadata(
 
   let amazonData: Partial<AmazonBookData> = { asin: normalized };
 
-  // If it's an ASIN, scrape Amazon directly
-  if (isAsin) {
-    amazonData = await scrapeAmazonBook(normalized, marketplace);
-  }
+  // Try to scrape Amazon — works for both ASINs and ISBNs
+  // Amazon product pages can be accessed via /dp/ASIN or via ISBN lookups
+  amazonData = await scrapeAmazonBook(normalized, marketplace);
 
   // Enrich with metadata from other sources
   const enrichment = await enrichBookMetadata({
