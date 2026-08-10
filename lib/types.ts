@@ -26,7 +26,15 @@ export type KeywordSource =
   | "manual"
   | "key-trope"
   | "amazon-recs"
-  | "firecrawl";
+  | "firecrawl"
+  /** The listing's own HTML metadata: <title>, meta keywords, URL slug, variation swatches. */
+  | "listing-metadata"
+  /** SerpApi Amazon Search — Amazon's own "related searches" for a seed term. */
+  | "serpapi-related"
+  /** SerpApi Amazon Search — competitor titles/authors ranking for a seed term. */
+  | "serpapi-organic"
+  /** SerpApi Amazon Autocomplete — the suggestions readers see while typing. */
+  | "serpapi-autocomplete";
 
 /**
  * The 20-category keyword-intent taxonomy — see lib/keywordCategories.ts for
@@ -178,6 +186,32 @@ export interface ProductPageData {
   hasPhysical?: boolean;
   hasHardcover?: boolean;
   hasPaperback?: boolean;
+  /**
+   * Formats confirmed present on the ASIN or its sibling editions, read from
+   * the format swatch strip — the has* flags above come from a page-wide text
+   * search and report almost every format on almost every page, so they must
+   * not be used to decide whether a format keyword is legitimate.
+   */
+  availableFormats?: string[];
+  isKindleUnlimited?: boolean;
+
+  // HTML-level metadata (lib/listingMetadata.ts)
+  /** The <title> tag — often a cleaner form of the product title. */
+  htmlTitle?: string;
+  /** Amazon's own <meta name="keywords"> terms, when present. */
+  metaKeywords?: string[];
+  metaDescription?: string;
+  /** Human-readable URL segment before /dp/ — a canonical keyword phrase. */
+  urlSlug?: string;
+  /** Byline/publisher brand, for brand-targeting campaigns. */
+  brand?: string;
+  /** Variation swatch labels (size, colour, pack count, style). */
+  variations?: string[];
+  /** Parsed JSON-LD blocks from the page. */
+  structuredData?: Array<Record<string, unknown>>;
+  /** Per-field extraction outcome, for tracking selector drift. */
+  extractionFieldsFound?: string[];
+  extractionFieldsMissing?: string[];
 
   // Awards & recognition
   awards?: string[];

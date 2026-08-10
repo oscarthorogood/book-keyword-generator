@@ -32,7 +32,16 @@ export interface BookSnapshotView {
   goodreadsTags?: string[];
   openLibrarySubjects?: string[];
   googleBooksCategories?: string[];
-  capture?: { ok: boolean; blocked: boolean; emptySources?: string[] };
+  /** Editions confirmed on the listing — format keywords are only allowed for these. */
+  formats?: string[];
+  isKindleUnlimited?: boolean;
+  capture?: {
+    ok: boolean;
+    blocked: boolean;
+    emptySources?: string[];
+    /** Share of the tracked ListingRecord fields this capture found, 0-1. */
+    completeness?: number;
+  };
 }
 
 export interface Book {
@@ -166,6 +175,11 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
     ...(snapshot.rating !== undefined
       ? ([["Rating", `${snapshot.rating} (${snapshot.reviewCount ?? 0} reviews)`]] as Array<[string, string]>)
       : []),
+    ...(snapshot.formats?.length
+      ? ([["Formats", snapshot.formats.join(", ") + (snapshot.isKindleUnlimited ? " · KU" : "")]] as Array<
+          [string, string]
+        >)
+      : []),
     ...(snapshot.bestSellerRanks?.length
       ? ([["Best seller rank", `#${snapshot.bestSellerRanks[0].rank} in ${snapshot.bestSellerRanks[0].category}`]] as Array<
           [string, string]
@@ -239,6 +253,8 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
               <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
                 Captured {formatDate(snapshot.capturedAt)} · {mineable} data points available to the keyword
                 generator
+                {snapshot.capture?.completeness !== undefined &&
+                  ` · ${Math.round(snapshot.capture.completeness * 100)}% of listing fields read`}
               </p>
             </div>
           </div>

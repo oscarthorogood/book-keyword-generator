@@ -1,10 +1,10 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Plus, Trash2, Sparkles, X, Search, Loader2 } from "lucide-react";
+import { Plus, Trash2, Sparkles, X, Search, Loader2, Download, Filter } from "lucide-react";
 
 type MatchType = "broad" | "phrase" | "exact";
-type KeywordStatus = "active" | "paused" | "negative" | "archived";
+type KeywordStatus = "active" | "paused" | "negative" | "archived" | "rejected";
 
 interface Keyword {
   id: string;
@@ -15,6 +15,10 @@ interface Keyword {
   bid: number | null;
   source: string | null;
   created_at: string;
+  /** Why the filter pipeline rejected or paused this keyword (lib/keywordFilters.ts). */
+  rejection_reason?: string | null;
+  /** Which filter decided — uiPollution, offTopicEntity, anchorRelevance, … */
+  rejected_by_filter?: string | null;
 }
 
 interface GenerateSummary {
@@ -24,6 +28,15 @@ interface GenerateSummary {
   contributingSources: string[];
   byMatchType: Record<string, number>;
   aiRanked: boolean;
+  pausedCount?: number;
+  rejectedCount?: number;
+  negativeCount?: number;
+  filterSummary?: {
+    byVerdict: Record<string, number>;
+    byFilter: Record<string, number>;
+  };
+  /** True when the database predates sql/08 and only the active keywords could be stored. */
+  needsFilterMigration?: boolean;
 }
 
 interface KeywordManagerProps {
@@ -34,7 +47,7 @@ interface KeywordManagerProps {
   onKeywordsChanged?: () => void;
 }
 
-const STATUSES: KeywordStatus[] = ["active", "paused", "negative", "archived"];
+const STATUSES: KeywordStatus[] = ["active", "paused", "negative", "archived", "rejected"];
 const PAGE_SIZE = 100;
 
 const statusStyles: Record<KeywordStatus, string> = {
@@ -42,7 +55,14 @@ const statusStyles: Record<KeywordStatus, string> = {
   paused: "bg-yellow-50 text-yellow-700 border-yellow-200",
   negative: "bg-red-50 text-red-700 border-red-200",
   archived: "bg-gray-50 text-gray-500 border-gray-200",
+  rejected: "bg-orange-50 text-orange-700 border-orange-200",
 };
+
+/** Filter names are camelCase in the pipeline; show them as words. */
+function labelForFilter(filter: string | null | undefined): string {
+  if (!filter) return "";
+  return filter.replace(/([A-Z])/g, " $1").toLowerCase();
+}
 
 /** Fetches without touching state, so effects never set state synchronously. */
 async function fetchKeywords(bookId: string): Promise<Keyword[]> {
@@ -74,6 +94,10 @@ export default function KeywordManager({
   const [search, setSearch] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const [filterFilter, setFilterFilter] = useState<"all" | string>("all");
+  const [refiltering, setRefiltering] = useState(false);
+  const [refilterResult, setRefilterResult] = useState<string | null>(null);
 
   const [showGenerateForm, setShowGenerateForm] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -214,20 +238,62 @@ export default function KeywordManager({
     }
   }
 
+  /**
+   * Re-runs the filter pipeline over the keywords this book already has —
+   * the migration path for lists generated before the pipeline existed, and
+   * the way to re-apply it after tuning.
+   */
+  async function rerunFilters() {
+    setRefiltering(true);
+    setRefilterResult(null);
+    try {
+      const res = await fetch(`/api/books/${bookId}/keywords/filter`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRefilterResult(body.error || "Could not re-run the filters.");
+        return;
+      }
+      setRefilterResult(
+        `Re-checked ${body.examined} keyword${body.examined === 1 ? "" : "s"} · ${body.changed} changed`
+      );
+      await reload();
+    } catch (err) {
+      setRefilterResult(err instanceof Error ? err.message : "Could not re-run the filters.");
+    } finally {
+      setRefiltering(false);
+    }
+  }
+
   const sources = useMemo(
     () => Array.from(new Set(keywords.map((k) => k.source).filter((s): s is string => !!s))).sort(),
+    [keywords]
+  );
+
+  const rejectingFilters = useMemo(
+    () =>
+      Array.from(
+        new Set(keywords.map((k) => k.rejected_by_filter).filter((f): f is string => !!f))
+      ).sort(),
     [keywords]
   );
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return keywords.filter((k) => {
+      // A generate run produces more rejections than keepers, so the default
+      // view is the list you'd actually work with; rejected has its own tab.
+      if (statusFilter === "all" && k.status === "rejected") return false;
       if (statusFilter !== "all" && k.status !== statusFilter) return false;
       if (sourceFilter !== "all" && k.source !== sourceFilter) return false;
+      if (filterFilter !== "all" && k.rejected_by_filter !== filterFilter) return false;
       if (term && !k.text.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [keywords, statusFilter, sourceFilter, search]);
+  }, [keywords, statusFilter, sourceFilter, filterFilter, search]);
 
   const page = visible.slice(0, visibleCount);
   const allPageSelected = page.length > 0 && page.every((k) => selected.has(k.id));
@@ -247,15 +313,43 @@ export default function KeywordManager({
         <div>
           <p className="card-title">Keyword manager</p>
           <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
-            {keywords.length} keyword{keywords.length === 1 ? "" : "s"} for this book
+            {keywords.filter((k) => k.status !== "rejected").length} keyword
+            {keywords.filter((k) => k.status !== "rejected").length === 1 ? "" : "s"} for this book
+            {keywords.some((k) => k.status === "rejected") &&
+              ` · ${keywords.filter((k) => k.status === "rejected").length} rejected by the relevance filters`}
             {metadataCapturedAt ? " · generated from the metadata captured when the book was added" : ""}
           </p>
         </div>
-        <button onClick={() => setShowGenerateForm((open) => !open)} className="btn-pill-dark">
-          <Sparkles size={15} />
-          Generate keywords
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <a
+            href={`/api/books/${bookId}/keywords/export`}
+            className="btn-pill-outline"
+            title="Download an Amazon Ads bulk-upload CSV (keywords, negatives and ASIN/brand targets)"
+          >
+            <Download size={15} />
+            Export bulksheet
+          </a>
+          <button
+            onClick={rerunFilters}
+            disabled={refiltering || keywords.length === 0}
+            className="btn-pill-outline"
+            title="Re-check every keyword against this book's relevance filters"
+          >
+            {refiltering ? <Loader2 size={15} className="animate-spin" /> : <Filter size={15} />}
+            {refiltering ? "Filtering…" : "Re-run filters"}
+          </button>
+          <button onClick={() => setShowGenerateForm((open) => !open)} className="btn-pill-dark">
+            <Sparkles size={15} />
+            Generate keywords
+          </button>
+        </div>
       </div>
+
+      {refilterResult && (
+        <p className="text-xs mb-4" style={{ color: "var(--muted)" }}>
+          {refilterResult}
+        </p>
+      )}
 
       {showGenerateForm && (
         <div className="rounded-2xl border p-4 mb-5" style={{ background: "var(--panel-muted)" }}>
@@ -330,6 +424,26 @@ export default function KeywordManager({
                   .join(", ")}`}
               {summary.aiRanked && " · AI relevance pass applied"}
             </p>
+            {summary.needsFilterMigration && (
+              <p className="mt-1" style={{ color: "var(--accent-red)" }}>
+                Rejected and paused keywords could not be stored — apply
+                <code className="mx-1">sql/08-keyword-filter-status.sql</code> to this database to keep them.
+              </p>
+            )}
+            {summary.filterSummary && (
+              <p className="mt-1">
+                Relevance filters: {summary.filterSummary.byVerdict.pass ?? 0} kept ·{" "}
+                {summary.filterSummary.byVerdict.pause ?? 0} paused ·{" "}
+                {summary.filterSummary.byVerdict.reject ?? 0} rejected
+                {summary.negativeCount ? ` · ${summary.negativeCount} negatives added` : ""}
+                {Object.keys(summary.filterSummary.byFilter).length > 0 &&
+                  ` — ${Object.entries(summary.filterSummary.byFilter)
+                    .sort((a, b) => b[1] - a[1])
+                    .slice(0, 4)
+                    .map(([filter, count]) => `${count} ${labelForFilter(filter).trim()}`)
+                    .join(", ")}`}
+              </p>
+            )}
             <p className="mt-1">{summary.contributingSources.map(labelForSource).join(", ")}</p>
           </div>
         </div>
@@ -390,7 +504,9 @@ export default function KeywordManager({
           className="input w-auto"
           aria-label="Filter by status"
         >
-          <option value="all">All statuses ({keywords.length})</option>
+          <option value="all">
+            All except rejected ({keywords.filter((k) => k.status !== "rejected").length})
+          </option>
           {STATUSES.map((status) => (
             <option key={status} value={status}>
               {status[0].toUpperCase() + status.slice(1)} ({keywords.filter((k) => k.status === status).length})
@@ -414,6 +530,25 @@ export default function KeywordManager({
             </option>
           ))}
         </select>
+
+        {rejectingFilters.length > 0 && (
+          <select
+            value={filterFilter}
+            onChange={(e) => {
+              setFilterFilter(e.target.value);
+              setVisibleCount(PAGE_SIZE);
+            }}
+            className="input w-auto"
+            aria-label="Filter by rejecting filter"
+          >
+            <option value="all">Any filter verdict</option>
+            {rejectingFilters.map((filter) => (
+              <option key={filter} value={filter}>
+                {labelForFilter(filter).trim()} ({keywords.filter((k) => k.rejected_by_filter === filter).length})
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {selected.size > 0 && (
@@ -465,6 +600,7 @@ export default function KeywordManager({
                   <th className="text-left px-4 py-2 font-medium">Keyword</th>
                   <th className="text-left px-4 py-2 font-medium">Match</th>
                   <th className="text-left px-4 py-2 font-medium">Source</th>
+                  <th className="text-left px-4 py-2 font-medium">Filter verdict</th>
                   <th className="text-left px-4 py-2 font-medium">Category</th>
                   <th className="text-left px-4 py-2 font-medium">Bid</th>
                   <th className="text-left px-4 py-2 font-medium">Status</th>
@@ -509,6 +645,16 @@ export default function KeywordManager({
                     </td>
                     <td className="px-4 py-2 text-xs" style={{ color: "var(--muted)" }}>
                       {labelForSource(keyword.source)}
+                    </td>
+                    <td className="px-4 py-2 text-xs" style={{ color: "var(--muted)" }}>
+                      {keyword.rejected_by_filter ? (
+                        <span title={keyword.rejection_reason ?? undefined}>
+                          {labelForFilter(keyword.rejected_by_filter).trim()}
+                          {keyword.rejection_reason ? ` — ${keyword.rejection_reason}` : ""}
+                        </span>
+                      ) : (
+                        "—"
+                      )}
                     </td>
                     <td className="px-4 py-2 text-xs" style={{ color: "var(--muted)" }}>
                       {keyword.category ? keyword.category.replace(/-/g, " ") : "—"}

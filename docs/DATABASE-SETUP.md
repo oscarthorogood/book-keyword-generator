@@ -256,6 +256,26 @@ SELECT COUNT(*) FROM access_requests WHERE status = 'approved';
 
 ---
 
+## Migrations
+
+Everything the app needs is in `sql/`, applied in filename order through the
+Supabase SQL Editor:
+
+| File | What it does |
+|---|---|
+| `01-access-requests-table.sql` | Magic-link allowlist |
+| `02-storage-bucket-policies.sql` | Private `bulksheets` bucket policies |
+| `04-books-table.sql` | Books, with `metadata_json` holding the scrape snapshot |
+| `05-books-campaign-counts-trigger.sql` | Keeps per-book counts in sync |
+| `06-keywords-table.sql` | The keywords table + RLS + count trigger |
+| `07-remove-campaigns.sql` | Drops the superseded campaigns table |
+| `08-keyword-filter-status.sql` | **Required for the relevance filter pipeline** — adds the `rejected` status and the `rejection_reason` / `rejected_by_filter` columns, and stops rejected keywords counting toward `books.total_keywords` |
+
+Without `08`, generating keywords fails on the status check constraint: the
+pipeline writes rejected and paused rows alongside the active ones.
+
+---
+
 ## Next Steps
 
 1. ✅ Complete setup steps 1-8 above

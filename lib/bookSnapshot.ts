@@ -26,6 +26,9 @@ import {
 } from "./firecrawl";
 import { deriveGenreTerms, detectGenreFamilies, type GenreFamily } from "./genre";
 import { getGoodreadsTags } from "./goodreads";
+import { fallbackFormats } from "./listingMetadata";
+import { logFieldCoverage, normalizeListingText, validateListingRecord, type ListingRecord } from "./listingRecord";
+import { crawlAmazonViaSerpApi, isSerpApiConfigured } from "./serpApi";
 import {
   buildSeedsFromMetadata,
   getProductPageUrl,
@@ -42,7 +45,7 @@ import type { Marketplace, ProductPageData, RelatedCompetitor } from "./types";
  * snapshots less useful. Books carrying an older version are re-captured
  * lazily the next time keywords are generated.
  */
-export const SNAPSHOT_VERSION = 3;
+export const SNAPSHOT_VERSION = 4;
 
 export interface BookSnapshot {
   version: number;
@@ -69,6 +72,26 @@ export interface BookSnapshot {
   categories: string[];
   bestSellerRanks: Array<{ rank: number; category: string }>;
   bulletPoints: string[];
+
+  /**
+   * Listing-level HTML metadata (lib/listingMetadata.ts): Amazon's own
+   * associated terms, the page title, the canonical URL slug and the
+   * variation swatches — all keyword sources in their own right.
+   */
+  htmlTitle?: string;
+  metaKeywords: string[];
+  metaDescription?: string;
+  urlSlug?: string;
+  brand?: string;
+  variations: string[];
+
+  /**
+   * Which editions exist, read from the format swatch strip. The keyword
+   * pipeline will not generate or activate a format keyword for a format
+   * that isn't here (lib/keywordFilters.ts#formatAvailabilityFilter).
+   */
+  formats: string[];
+  isKindleUnlimited: boolean;
 
   /** Genre vocabulary + families resolved from every taxonomy source (see lib/genre.ts). */
   genreTerms: string[];
@@ -109,6 +132,10 @@ export interface BookSnapshot {
     /** Sources that returned nothing, for the "what did we actually get?" panel. */
     emptySources: string[];
     durationMs: number;
+    /** ListingRecord validation: which tracked fields the capture found, and what failed. */
+    fieldCoverage?: Record<string, boolean>;
+    completeness?: number;
+    validationErrors?: string[];
   };
 }
 
@@ -290,6 +317,33 @@ export async function captureBookSnapshot(
     });
   }
 
+  // When the direct crawl found no comparable titles — the usual outcome of
+  // a bot-checked page — SerpApi's snowball crawl reads the same carousels
+  // from its own infrastructure. Credit-budgeted, and skipped entirely when
+  // the direct crawl already worked or no key is configured.
+  if (competitors.length === 0 && isSerpApiConfigured() && title) {
+    // Seeded with the deepest (most specific) category node rather than the
+    // title: searching a title returns the book itself, searching its
+    // subgenre returns the shelf it competes on.
+    const categorySeeds = [...productPage.categoryPath, ...(firecrawl.categories ?? [])].slice(-2).reverse();
+    const seeds = [...categorySeeds, title].filter((seed): seed is string => !!seed);
+    const crawl = await withBudget(
+      crawlAmazonViaSerpApi(seeds, marketplace, { maxHops: 1, creditBudget: 6 }),
+      COMP_CRAWL_BUDGET_MS,
+      { phrases: [], asins: [], competitors: [], creditsUsed: 0 },
+      "serpapi comp crawl"
+    );
+    for (const competitor of crawl.competitors) {
+      const key = competitor.title?.toLowerCase();
+      if (!key || knownCompetitorTitles.has(key)) continue;
+      knownCompetitorTitles.add(key);
+      competitors.push(competitor);
+    }
+    if (crawl.creditsUsed > 0) {
+      console.warn(`[captureBookSnapshot] SerpApi comp crawl used ${crawl.creditsUsed} credits for ${asin}`);
+    }
+  }
+
   const reviewSnippets = dedupe([...productPage.reviewSnippets, ...(firecrawl.reviewSnippets ?? [])], 60);
   const qna = dedupe([...qnaQuestions, ...(firecrawl.customerQuestions ?? [])], 30);
   const categoryPath = productPage.categoryPath.length > 0 ? productPage.categoryPath : firecrawl.categories ?? [];
@@ -311,6 +365,48 @@ export async function captureBookSnapshot(
     description,
     bulletPoints,
   };
+
+  // Formats decide whether format keywords are allowed to exist at all, so
+  // they come from the swatch strip (or the edition rows), never from a
+  // page-wide text match — see lib/listingMetadata.ts.
+  const formats =
+    productPage.availableFormats && productPage.availableFormats.length > 0
+      ? productPage.availableFormats
+      : fallbackFormats({ bindingType: productPage.bindingType, format: productPage.format });
+
+  const listingRecord: ListingRecord = {
+    asin,
+    marketplace,
+    scrapedAt: new Date().toISOString(),
+    sourceUrl: productUrl,
+    isCompetitor: false,
+    title: normalizeListingText(title),
+    bullets: dedupe(bulletPoints, 10),
+    description: normalizeListingText(description),
+    brand: productPage.brand ?? productPage.publisher ?? firecrawl.publisher,
+    categoryPath: dedupe(categoryPath, 12),
+    variations: productPage.variations ?? [],
+    htmlTitle: normalizeListingText(productPage.htmlTitle),
+    metaKeywords: productPage.metaKeywords ?? [],
+    metaDescription: normalizeListingText(productPage.metaDescription),
+    urlSlug: productPage.urlSlug,
+    structuredData: productPage.structuredData ?? [],
+    bsr: bestSellerRanks,
+    relatedAsins: dedupe([...productPage.compAsins, ...competitorCrawl.productTargetAsins], 30),
+    reviewSnippets,
+    qaSnippets: qna,
+    reviewCount: productPage.reviewCount ?? firecrawl.reviewCount,
+    rating: productPage.rating ?? firecrawl.rating,
+    price: productPage.price ?? firecrawl.price,
+    formats,
+    isKindleUnlimited: !!productPage.isKindleUnlimited,
+    language: productPage.language || firecrawl.language,
+  };
+
+  // Per-field extraction success: a field that stops being found is selector
+  // drift, and without this it just looks like a thinner keyword list.
+  const validation = validateListingRecord(listingRecord);
+  logFieldCoverage(listingRecord, validation);
 
   const providers: Array<"amazon-page" | "firecrawl"> = [];
   if (productPage.title) providers.push("amazon-page");
@@ -355,6 +451,15 @@ export async function captureBookSnapshot(
     bestSellerRanks: bestSellerRanks.slice(0, 10),
     bulletPoints: dedupe(bulletPoints, 10),
 
+    htmlTitle: listingRecord.htmlTitle,
+    metaKeywords: listingRecord.metaKeywords,
+    metaDescription: listingRecord.metaDescription,
+    urlSlug: listingRecord.urlSlug,
+    brand: listingRecord.brand,
+    variations: listingRecord.variations,
+    formats,
+    isKindleUnlimited: listingRecord.isKindleUnlimited,
+
     genreTerms: deriveGenreTerms(genreInput),
     genreFamilies: detectGenreFamilies(genreInput),
 
@@ -393,7 +498,48 @@ export async function captureBookSnapshot(
       providers,
       emptySources,
       durationMs: Date.now() - startedAt,
+      fieldCoverage: validation.coverage,
+      completeness: validation.completeness,
+      validationErrors: validation.errors,
     },
+  };
+}
+
+/**
+ * The stored snapshot as a `ListingRecord` — the validated, flat shape the
+ * keyword miner and the bulksheet export both work from. Rebuilt from the
+ * snapshot rather than stored twice, so there is one source of truth per
+ * book and older snapshots (captured before a field existed) still produce a
+ * valid record with that field empty.
+ */
+export function listingRecordFromSnapshot(snapshot: BookSnapshot, sourceUrl?: string): ListingRecord {
+  return {
+    asin: snapshot.asin,
+    marketplace: snapshot.marketplace,
+    scrapedAt: snapshot.capturedAt,
+    sourceUrl: sourceUrl ?? getProductPageUrl(snapshot.asin, snapshot.marketplace),
+    isCompetitor: false,
+    title: snapshot.title,
+    bullets: snapshot.bulletPoints,
+    description: snapshot.description,
+    brand: snapshot.brand ?? snapshot.publisher,
+    categoryPath: snapshot.categoryPath,
+    variations: snapshot.variations ?? [],
+    htmlTitle: snapshot.htmlTitle,
+    metaKeywords: snapshot.metaKeywords ?? [],
+    metaDescription: snapshot.metaDescription,
+    urlSlug: snapshot.urlSlug,
+    structuredData: [],
+    bsr: snapshot.bestSellerRanks,
+    relatedAsins: snapshot.compAsins,
+    reviewSnippets: snapshot.reviewSnippets,
+    qaSnippets: snapshot.qnaQuestions,
+    reviewCount: snapshot.reviewCount,
+    rating: snapshot.rating,
+    price: snapshot.price,
+    formats: snapshot.formats ?? [],
+    isKindleUnlimited: !!snapshot.isKindleUnlimited,
+    language: snapshot.language,
   };
 }
 

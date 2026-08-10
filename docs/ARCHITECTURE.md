@@ -91,14 +91,26 @@ POST `/api/generate` accepts `GenerateRequest` (see `lib/types.ts`):
 
 **Campaign Structure & Export:**
 - `lib/naming.ts` — Campaign/ad group name building + parsing
-- `lib/bulksheet.ts` — XLSX row construction and export
-- `lib/productTargets.ts` — Product targeting candidate building + ASIN validation
+- `lib/bulksheet.ts` — Amazon Ads bulk-upload row construction + CSV export
+- `lib/productTargets.ts` — ASIN/brand targeting candidates, ranked by BSR + review count
+- `lib/negativeKeywords.ts` — Negative keyword candidates from pipeline rejections
 
 **Supplementary:**
 - `lib/amazonAds.ts` — Amazon Ads API client (suggested bids, etc.) — stub, not live yet
 - `lib/aiRanker.ts` — Optional LLM ranking (Claude API) — improves sort order
-- `lib/datamuse.ts` — Synonym expansion via Datamuse API
+- `lib/synonyms.ts` — Allowlist-only genre synonym expansion
 - `lib/isbn.ts` — ISBN/ASIN normalization
+
+**Relevance filtering (post-generation):**
+- `lib/keywordFilters.ts` — The ordered filter pipeline (reject / pause / pass)
+- `lib/keywordAnchors.ts` — Per-book relevance anchors derived from the scrape
+- `lib/keywordFilterConfig.ts` — Tunable blocklists/allowlists
+
+**Listing capture:**
+- `lib/listingRecord.ts` — `ListingRecord` schema, validation, per-field coverage
+- `lib/listingMetadata.ts` — HTML-level extraction (meta keywords, slug, formats, variations)
+- `lib/listingKeywords.ts` — Field-weighted n-gram mining over a listing record
+- `lib/fetchLog.ts` — Fetch audit log, per-host rate limiting, CAPTCHA circuit breaker
 
 **UI Layer:**
 - `app/page.tsx` — Main form (book metadata, keyword preferences, bid settings)
@@ -340,7 +352,9 @@ CREATE TABLE action_log (
 | Wikipedia | Category info | Wikipedia API | Working |
 | Wikidata | Genre/work data | Wikidata JSON API | Working |
 | Library of Congress | Subject classifications | LOC SRU API | Working |
-| Datamuse | Synonym expansion | Datamuse JSON API | Working |
+| SerpApi Amazon Search | Related searches, competitor titles/authors | SerpApi (`engine=amazon`) | Optional (key) |
+| SerpApi Amazon Autocomplete | Search-bar suggestions | SerpApi (`engine=amazon_autocomplete`) | Optional (key) |
+| SerpApi Amazon Product | ASIN record, bought-together crawl | SerpApi (`engine=amazon_product`) | Optional (key) |
 | Claude API | Keyword ranking (optional) | LLM ranking service | Configured (optional) |
 | **Amazon Ads API** | **Suggested bids, campaign state** | **⏳ NOT YET** | ⏳ Needed for Phase 3 |
 | Firecrawl | Fallback web scraping | Firecrawl API (optional) | Fallback |

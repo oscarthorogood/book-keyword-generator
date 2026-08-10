@@ -17,6 +17,8 @@
  * genre words shoppers actually type.
  */
 
+import { UI_POLLUTION_TERMS } from "./keywordFilterConfig";
+
 export type GenreFamily =
   | "mystery-thriller"
   | "romance"
@@ -313,6 +315,12 @@ function isUsableGenreTerm(term: string): boolean {
   if (isCategoryNoise(term)) return false;
   if (SUBJECT_NOISE_PATTERN.test(term)) return false;
   if (/^\d+$/.test(term)) return false;
+  // Page chrome that lands in the category list from a partially-parsed page
+  // ("learn more", "enabled", "264 pages", "see top 100 in kindle store").
+  // Cleaning it here rather than only downstream matters because the genre
+  // vocabulary seeds *every* templated source: one bad term becomes a dozen
+  // bad keywords ("best learn more books") before any filter sees them.
+  if (UI_POLLUTION_TERMS.some((label) => new RegExp(`(^|[^a-z0-9])${label}([^a-z0-9]|$)`).test(term))) return false;
   // Fragments left over from an aggressive split ("-e-book-fiction").
   if (/^-|-$/.test(term)) return false;
   return true;

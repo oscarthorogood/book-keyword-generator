@@ -1,13 +1,13 @@
 import { applyAiRelevance, isAiRankingConfigured, rankKeywordsWithAi } from "@/lib/aiRanker";
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
-import type { BookSnapshot } from "@/lib/bookSnapshot";
+import { listingRecordFromSnapshot, type BookSnapshot } from "@/lib/bookSnapshot";
 import { loadBookWithSnapshot } from "@/lib/bookStore";
 import { assessCompDataHealth, filterHallucinatedCompKeywords } from "@/lib/compDataValidation";
-import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { boostScoresByDescriptionQuality } from "@/lib/descriptionQuality";
 import { genreFamilySearchTerms, genreFamilyThemeTerms } from "@/lib/genre";
 import { buildGoodreadsTagCandidates } from "@/lib/goodreads";
 import { ALL_KEYWORD_CATEGORIES, buildCategorizedKeywordCandidates } from "@/lib/keywordCategories";
+import { applyFiltersToCandidates, buildFilterContext } from "@/lib/keywordFilters";
 import {
   BOOK_COMP_NAME_MAX,
   BOOK_KEYWORD_MAX,
@@ -40,7 +40,11 @@ import {
   splitKeywordsByCategory,
 } from "@/lib/keywordMerge";
 import { validateFinalKeywords } from "@/lib/keywordValidation";
+import { buildListingMetadataCandidates } from "@/lib/listingKeywords";
+import { buildFormatNegatives, buildNegativeKeywords } from "@/lib/negativeKeywords";
+import { buildBrandTargets, buildProductTargets } from "@/lib/productTargets";
 import { mineReviewLanguage } from "@/lib/reviewMining";
+import { getSerpApiKeywordCandidates } from "@/lib/serpApiKeywords";
 import {
   buildAutocompleteSeeds,
   getAutocompleteKeywordSet,
@@ -88,6 +92,10 @@ const ALL_KEYWORD_SOURCES: KeywordSource[] = [
   "goodreads-tags",
   "amazon-recs",
   "firecrawl",
+  "listing-metadata",
+  "serpapi-related",
+  "serpapi-organic",
+  "serpapi-autocomplete",
   "user-tag",
   "key-trope",
 ];
@@ -97,7 +105,8 @@ function buildSnapshotCandidates(
   snapshot: BookSnapshot,
   keyTropes: string[],
   knownTags: string[],
-  keywordCategories: KeywordCategory[]
+  keywordCategories: KeywordCategory[],
+  primaryGenrePhrase: string
 ): {
   groups: Partial<Record<KeywordSource, KeywordCandidate[]>>;
   categorized: KeywordCandidate[];
@@ -160,6 +169,7 @@ function buildSnapshotCandidates(
     goodreadsTags: snapshot.goodreadsTags,
     reviewLanguagePhrases: reviewLanguageCandidates.map((c) => c.text),
     enabledCategories: new Set(keywordCategories),
+    primaryGenrePhrase,
   });
 
   return {
@@ -187,10 +197,15 @@ function buildSnapshotCandidates(
       "goodreads-tags": buildGoodreadsTagCandidates(snapshot.goodreadsTags),
       firecrawl: buildFirecrawlCandidates(snapshot.firecrawlMetadata),
       "user-tag": buildKnownTagCandidates(knownTags),
+      // The listing's own HTML metadata: Amazon's meta keywords, the page
+      // title, the canonical URL slug and the variation swatches, plus the
+      // best field-weighted n-grams across all of it (lib/listingKeywords.ts).
+      "listing-metadata": buildListingMetadataCandidates(listingRecordFromSnapshot(snapshot)),
       "buyer-intent": buildBuyerIntentCandidates(genreSeedTerms, {
         title: snapshot.title,
         author: snapshot.author,
         seriesName: snapshot.seriesName,
+        formats: snapshot.formats ?? [],
       }),
     },
   };
@@ -268,15 +283,40 @@ export async function POST(
     );
     const defaultBid = typeof body.defaultBid === "number" && body.defaultBid > 0 ? body.defaultBid : 0.5;
 
+    // The relevance anchors for this book — title/author/series/characters,
+    // genre, setting, comparable authors — derived from the stored snapshot.
+    // They drive the filter pipeline's final gate and the completion of
+    // dangling modifiers during generation.
+    const filterContext = buildFilterContext({
+      title: snapshot.title,
+      author: snapshot.author,
+      seriesName: snapshot.seriesName,
+      description: snapshot.description,
+      genreTerms: snapshot.genreTerms,
+      genreFamilies: snapshot.genreFamilies,
+      categoryPath: snapshot.categoryPath,
+      categories: snapshot.categories,
+      goodreadsTags: snapshot.goodreadsTags,
+      competitors: snapshot.competitors,
+      compTitles: snapshot.compTitles,
+      reviewSnippets: snapshot.reviewSnippets,
+      keyTropes,
+      marketplace: snapshot.marketplace,
+      language: snapshot.language,
+      formats: snapshot.formats ?? [],
+      isKindleUnlimited: !!snapshot.isKindleUnlimited,
+    });
+
     const { groups, categorized, genreSeedTerms } = buildSnapshotCandidates(
       snapshot,
       keyTropes,
       knownTags,
-      keywordCategories
+      keywordCategories,
+      filterContext.anchors.primaryGenrePhrase
     );
 
     // Live sources: autocomplete engines are JSON endpoints that aren't
-    // subject to Amazon's product-page bot wall, and Datamuse/Ads API are
+    // subject to Amazon's product-page bot wall, and SerpApi/the Ads API are
     // proper APIs — cheap enough to re-run on every generate.
     const seedTerms = [
       ...buildAutocompleteSeeds({
@@ -288,13 +328,19 @@ export async function POST(
       ...snapshot.firecrawlSeeds,
     ];
 
+    // SerpApi is seeded with genre/comp phrases rather than the title: a
+    // title search returns the book itself, a subgenre search returns the
+    // shelf it competes on — and Amazon's own "related searches" for that
+    // shelf are the highest-value expansions available.
+    const serpApiSeeds = [...genreSeedTerms.slice(0, 3), ...(snapshot.seriesName ? [snapshot.seriesName] : [])];
+
     const [
       adsApiCandidates,
       amazonAutocomplete,
       googleAutocomplete,
       youtubeAutocomplete,
       duckDuckGoAutocomplete,
-      datamuseSynonyms,
+      serpApiResult,
     ] = await Promise.all([
       isAdsApiConfigured()
         ? getAdsApiKeywordRecommendations(snapshot.asin, snapshot.marketplace).catch((err: Error) => {
@@ -306,8 +352,11 @@ export async function POST(
       getGoogleAutocompleteKeywordSet(seedTerms),
       getYoutubeAutocompleteKeywordSet(seedTerms),
       getDuckDuckGoAutocompleteKeywordSet(seedTerms),
-      getSynonymExpansionCandidates(genreSeedTerms),
+      getSerpApiKeywordCandidates(serpApiSeeds, snapshot.marketplace),
     ]);
+
+    const serpApiBySource = (source: KeywordSource) =>
+      serpApiResult.candidates.filter((candidate) => candidate.sources.includes(source));
 
     // Autocomplete corpora occasionally return bare ASINs; those belong to
     // product targeting, not the keyword list.
@@ -317,7 +366,13 @@ export async function POST(
       "google-autocomplete": extractAsinCandidates(googleAutocomplete).keywords,
       "youtube-autocomplete": extractAsinCandidates(youtubeAutocomplete).keywords,
       "duckduckgo-autocomplete": extractAsinCandidates(duckDuckGoAutocomplete).keywords,
-      synonym: [...datamuseSynonyms, ...buildCuratedSynonymCandidates(genreSeedTerms)],
+      "serpapi-related": serpApiBySource("serpapi-related"),
+      "serpapi-organic": serpApiBySource("serpapi-organic"),
+      "serpapi-autocomplete": serpApiBySource("serpapi-autocomplete"),
+      // Synonym expansion is allowlist-only (lib/synonyms.ts): genre phrases
+      // map to other genre phrases, or they don't expand. The open-ended
+      // thesaurus lookup this replaced is what produced "felon books".
+      synonym: buildCuratedSynonymCandidates(genreSeedTerms),
     };
 
     const sourceCandidateGroups = { ...groups, ...liveGroups };
@@ -387,6 +442,33 @@ export async function POST(
       }
     }
 
+    // ---- Filter pipeline -------------------------------------------------
+    // Everything above is source-led: each source contributes what it found.
+    // This is the shared validation layer that decides what any of it is
+    // worth for *this* book (lib/keywordFilters.ts). Rejections and pauses
+    // are kept, with the deciding filter and its reason, so the keyword
+    // manager can show why — and a false positive can be resurrected.
+    const tropesFiltered = applyFiltersToCandidates(tropesKeywords, filterContext);
+    const compFiltered = applyFiltersToCandidates(compNameKeywords, filterContext);
+
+    tropesKeywords = tropesFiltered.passed;
+    compNameKeywords = compFiltered.passed;
+
+    const filterSummary = {
+      byVerdict: {
+        pass: tropesFiltered.summary.byVerdict.pass + compFiltered.summary.byVerdict.pass,
+        pause: tropesFiltered.summary.byVerdict.pause + compFiltered.summary.byVerdict.pause,
+        reject: tropesFiltered.summary.byVerdict.reject + compFiltered.summary.byVerdict.reject,
+      },
+      byFilter: { ...tropesFiltered.summary.byFilter } as Record<string, number>,
+    };
+    for (const [filter, count] of Object.entries(compFiltered.summary.byFilter)) {
+      filterSummary.byFilter[filter] = (filterSummary.byFilter[filter] ?? 0) + count;
+    }
+
+    const pausedCandidates = [...tropesFiltered.paused, ...compFiltered.paused];
+    const rejectedCandidates = [...tropesFiltered.rejected, ...compFiltered.rejected];
+
     const finalCandidates = [...tropesKeywords, ...compNameKeywords];
 
     if (finalCandidates.length === 0) {
@@ -399,7 +481,37 @@ export async function POST(
       );
     }
 
-    const rows = finalCandidates.map((candidate) => ({
+    // Negatives: the rejections that describe a real (unwanted) search
+    // intent, plus the formats this listing doesn't have. Rejecting a
+    // keyword stops the app bidding on it; a negative stops Amazon serving
+    // on it via a broader match.
+    const negatives = [
+      ...buildNegativeKeywords([...tropesFiltered.results, ...compFiltered.results]),
+      ...buildFormatNegatives(snapshot.formats ?? []),
+    ];
+
+    const activeRows = finalCandidates.map((candidate) => ({
+      book_id: bookId,
+      user_id: user.id,
+      text: candidate.text,
+      // A phrase mined from the book's own blurb is long-tail by nature: it
+      // is specific enough for Phrase/Exact and far too thin for Broad.
+      match_type:
+        candidate.matchTypeCeiling && pickMatchType(candidate) === "broad"
+          ? candidate.matchTypeCeiling
+          : pickMatchType(candidate),
+      category: candidate.category ?? null,
+      source: primaryKeywordSource(candidate),
+      bid: candidate.suggestedBid ?? defaultBid,
+      status: "active",
+      rejection_reason: null as string | null,
+      rejected_by_filter: null as string | null,
+    }));
+
+    const reviewRows = [
+      ...pausedCandidates.map((candidate) => ({ candidate, status: "paused" as const })),
+      ...rejectedCandidates.map((candidate) => ({ candidate, status: "rejected" as const })),
+    ].map(({ candidate, status }) => ({
       book_id: bookId,
       user_id: user.id,
       text: candidate.text,
@@ -407,12 +519,57 @@ export async function POST(
       category: candidate.category ?? null,
       source: primaryKeywordSource(candidate),
       bid: candidate.suggestedBid ?? defaultBid,
+      status,
+      rejection_reason: candidate.reason ?? null,
+      rejected_by_filter: candidate.filter ?? null,
     }));
 
-    const { data: inserted, error: insertError } = await supabase
+    const negativeRows = negatives.map((negative) => ({
+      book_id: bookId,
+      user_id: user.id,
+      text: negative.text,
+      match_type: negative.matchType,
+      category: null,
+      source: "manual" as KeywordSource,
+      bid: null,
+      status: "negative",
+      rejection_reason: negative.reason,
+      rejected_by_filter: null as string | null,
+    }));
+
+    // Negatives are keyed on (book, text, match_type) like everything else,
+    // so a term that is both a negative and a rejected keyword would collide
+    // on upsert; the negative wins, since it's the one that does something.
+    const negativeKeys = new Set(negativeRows.map((row) => `${row.text}|${row.match_type}`));
+    const rows = [
+      ...activeRows,
+      ...reviewRows.filter((row) => !negativeKeys.has(`${row.text}|${row.match_type}`)),
+      ...negativeRows,
+    ];
+
+    let { data: inserted, error: insertError } = await supabase
       .from("keywords")
       .upsert(rows, { onConflict: "book_id,text,match_type", ignoreDuplicates: true })
       .select();
+
+    // sql/08-keyword-filter-status.sql adds the 'rejected' status and the two
+    // reason columns. On a database that hasn't had it applied yet, write the
+    // active keywords only rather than failing the whole run, and say why.
+    const needsFilterMigration =
+      !!insertError && /rejection_reason|rejected_by_filter|status_check|rejected/i.test(insertError.message);
+
+    if (needsFilterMigration) {
+      console.error("[generate] filter columns missing — apply sql/08-keyword-filter-status.sql:", insertError!.message);
+      const legacyRows = activeRows.map(({ rejection_reason, rejected_by_filter, ...row }) => {
+        void rejection_reason;
+        void rejected_by_filter;
+        return row;
+      });
+      ({ data: inserted, error: insertError } = await supabase
+        .from("keywords")
+        .upsert(legacyRows, { onConflict: "book_id,text,match_type", ignoreDuplicates: true })
+        .select());
+    }
 
     if (insertError) {
       return Response.json({ error: insertError.message }, { status: 400 });
@@ -420,18 +577,40 @@ export async function POST(
 
     const insertedCount = inserted?.length ?? 0;
 
+    // Product targeting is a separate campaign type: bare ASINs match no
+    // text, and brand targeting reaches a competitor's whole catalogue.
+    const productTargets = buildProductTargets(snapshot.competitors, snapshot.compAsins);
+    const brandTargets = buildBrandTargets(snapshot.competitors);
+
     return Response.json({
       success: true,
       generatedCount: finalCandidates.length,
       insertedCount,
-      alreadyPresentCount: finalCandidates.length - insertedCount,
+      alreadyPresentCount: rows.length - insertedCount,
       keywordCount: tropesKeywords.length,
       compNameCount: compNameKeywords.length,
+      pausedCount: pausedCandidates.length,
+      rejectedCount: rejectedCandidates.length,
+      negativeCount: negatives.length,
+      filterSummary,
       contributingSources,
-      bySource: countBy(rows.map((r) => r.source)),
-      byCategory: countBy(rows.map((r) => r.category).filter((c): c is string => !!c)),
-      byMatchType: countBy(rows.map((r) => r.match_type)),
+      bySource: countBy(activeRows.map((r) => r.source)),
+      byCategory: countBy(activeRows.map((r) => r.category).filter((c): c is string => !!c)),
+      byMatchType: countBy(activeRows.map((r) => r.match_type)),
       genreTerms: snapshot.genreTerms.slice(0, 10),
+      anchors: {
+        bookSpecific: filterContext.anchors.bookSpecific.slice(0, 10),
+        genre: filterContext.anchors.genre.slice(0, 10),
+        setting: filterContext.anchors.setting.slice(0, 10),
+        comps: filterContext.anchors.comps.slice(0, 10),
+        primaryGenrePhrase: filterContext.anchors.primaryGenrePhrase,
+      },
+      productTargetCount: productTargets.length,
+      brandTargetCount: brandTargets.length,
+      serpApiCreditsUsed: serpApiResult.creditsUsed,
+      // Set when the database predates sql/08-keyword-filter-status.sql, so
+      // only the active keywords could be stored.
+      needsFilterMigration,
       compDataHealth,
       aiRanked,
       metadataCapturedAt: snapshot.capturedAt,

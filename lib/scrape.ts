@@ -1,5 +1,7 @@
 import * as cheerio from "cheerio";
+import { HostBlockedError, withRateLimit } from "./fetchLog";
 import { type AmazonPageMetadata } from "./firecrawl";
+import { extractListingHtmlMetadata, fallbackFormats } from "./listingMetadata";
 import { fetchAmazonProductViaSerpApi, isSerpApiConfigured } from "./serpApi";
 import { KeywordCandidate, Marketplace, ProductPageData, RelatedCompetitor, RelatedCompetitorCrawl } from "./types";
 
@@ -56,10 +58,6 @@ export function resolveScraperProxyUrl(targetUrl: string, countryCode?: string):
   return `https://api.scraperapi.com/?${params.toString()}`;
 }
 
-function resolveProductPageFetchUrl(targetUrl: string, marketplace: Marketplace): string {
-  return resolveScraperProxyUrl(targetUrl, SCRAPER_PROXY_COUNTRY[marketplace]);
-}
-
 export const PAGE_TIMEOUT_MS = 8000;
 // Proxied requests add relay latency on top of the target site's own response time.
 export const PROXIED_PAGE_TIMEOUT_MS = 20000;
@@ -76,6 +74,72 @@ async function fetchWithTimeout(
     return await fetch(url, { ...init, signal: controller.signal });
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+export interface PageFetchResult {
+  html?: string;
+  status?: number;
+  /** True when the response was Amazon's bot/CAPTCHA interstitial rather than the page. */
+  blocked: boolean;
+  /** True when the host is inside a CAPTCHA cool-down and nothing was requested. */
+  skipped?: boolean;
+}
+
+/**
+ * The one way this module fetches an HTML page. Everything goes through the
+ * shared rate limiter and audit log (lib/fetchLog.ts): requests to the same
+ * host are spaced out and capped, every attempt is logged with its status
+ * and duration, and a bot check trips a per-host cool-down so a blocked host
+ * is left alone instead of being hammered. Never throws — a block, a
+ * non-2xx, a timeout and a cool-down all come back as an empty result the
+ * caller degrades from.
+ */
+export async function fetchPageHtml(
+  url: string,
+  options: { timeoutMs?: number; proxyCountry?: string; label?: string } = {}
+): Promise<PageFetchResult> {
+  const fetchUrl = resolveScraperProxyUrl(url, options.proxyCountry);
+  const timeoutMs = options.timeoutMs ?? (SCRAPER_PROXY_API_KEY ? PROXIED_PAGE_TIMEOUT_MS : PAGE_TIMEOUT_MS);
+
+  try {
+    // Rate limiting is keyed on the *target* host, not the proxy's, so
+    // routing through ScraperAPI doesn't quietly remove the spacing.
+    return await withRateLimit(url, async () => {
+      const res = await fetchWithTimeout(
+        fetchUrl,
+        {
+          headers: {
+            "User-Agent": USER_AGENT,
+            Accept: "text/html,application/xhtml+xml",
+            "Accept-Language": "en-US,en;q=0.9",
+          },
+        },
+        timeoutMs
+      );
+
+      if (!res.ok) {
+        return { value: { blocked: false, status: res.status } as PageFetchResult, status: res.status, note: options.label };
+      }
+
+      const html = await res.text();
+      if (looksLikeBotCheck(html)) {
+        return {
+          value: { blocked: true, status: res.status } as PageFetchResult,
+          status: res.status,
+          blocked: true,
+          note: options.label,
+        };
+      }
+
+      return { value: { html, blocked: false, status: res.status } as PageFetchResult, status: res.status, note: options.label };
+    });
+  } catch (err) {
+    if (err instanceof HostBlockedError) {
+      return { blocked: true, skipped: true };
+    }
+    console.error(`[fetchPageHtml] ${url} threw:`, err instanceof Error ? err.message : err);
+    return { blocked: false };
   }
 }
 
@@ -1037,38 +1101,38 @@ async function scrapeProductPageDirect(
   marketplace: Marketplace
 ): Promise<ProductPageData> {
   const url = getProductPageUrl(asin, marketplace);
-  const fetchUrl = resolveProductPageFetchUrl(url, marketplace);
   const logPrefix = `[scrapeProductPage] ${asin} (${marketplace})`;
 
   try {
-    const res = await fetchWithTimeout(
-      fetchUrl,
-      {
-        headers: {
-          "User-Agent": USER_AGENT,
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-      },
-      SCRAPER_PROXY_API_KEY ? PROXIED_PAGE_TIMEOUT_MS : PAGE_TIMEOUT_MS
-    );
-    if (!res.ok) {
-      console.error(`${logPrefix} -> HTTP ${res.status}`);
-      return { ...EMPTY_PRODUCT_PAGE, fetchStatus: res.status };
+    const page = await fetchPageHtml(url, {
+      proxyCountry: SCRAPER_PROXY_COUNTRY[marketplace],
+      label: `product page ${asin}`,
+    });
+
+    if (page.blocked) {
+      console.error(
+        `${logPrefix} -> ${page.skipped ? "skipped, host in bot-check cool-down" : "response looks like an Amazon bot/CAPTCHA check"}`
+      );
+      return { ...EMPTY_PRODUCT_PAGE, fetchStatus: page.status, blocked: true };
+    }
+    if (!page.html) {
+      console.error(`${logPrefix} -> no HTML (HTTP ${page.status ?? "n/a"})`);
+      return { ...EMPTY_PRODUCT_PAGE, fetchStatus: page.status };
     }
 
-    const html = await res.text();
-    if (looksLikeBotCheck(html)) {
-      console.error(`${logPrefix} -> HTTP ${res.status} but response looks like an Amazon bot/CAPTCHA check`);
-      return { ...EMPTY_PRODUCT_PAGE, fetchStatus: res.status, blocked: true };
-    }
+    const $ = cheerio.load(page.html);
 
-    const $ = cheerio.load(html);
-
+    // Selector-drift signal: the title is the field every other extraction
+    // depends on, so a page that loads without one is logged distinctly from
+    // a page that never loaded.
     const title = $("#productTitle").first().text().trim() || undefined;
     if (!title) {
-      console.error(`${logPrefix} -> HTTP ${res.status}, page loaded but #productTitle not found (selector drift, or a partial/soft block)`);
+      console.error(`${logPrefix} -> HTTP ${page.status}, page loaded but #productTitle not found (selector drift, or a partial/soft block)`);
     }
+
+    // HTML-level metadata: <title>, meta keywords/description, canonical URL
+    // slug, JSON-LD, variation swatches, and which editions actually exist.
+    const listingMetadata = extractListingHtmlMetadata($, url);
     const authorLink = $("#bylineInfo .author a, .author a.contributorNameID").first();
     const author = authorLink.text().trim() || undefined;
     const authorHref = authorLink.attr("href");
@@ -1218,7 +1282,27 @@ async function scrapeProductPageDirect(
       awardNominations: nominations,
       goodreadsRating: undefined,
       goodreadsRatingCount: undefined,
-      fetchStatus: res.status,
+      htmlTitle: listingMetadata.htmlTitle,
+      metaKeywords: listingMetadata.metaKeywords,
+      metaDescription: listingMetadata.metaDescription,
+      urlSlug: listingMetadata.urlSlug,
+      brand: listingMetadata.brand,
+      variations: listingMetadata.variations,
+      structuredData: listingMetadata.structuredData,
+      // The swatch strip is authoritative; the binding/edition rows only fill
+      // in when it didn't render. A page-wide search for "hardcover" would
+      // claim every listing has every format (see lib/listingMetadata.ts).
+      availableFormats:
+        listingMetadata.availableFormats.length > 0
+          ? listingMetadata.availableFormats
+          : fallbackFormats({
+              bindingType: editionInfo.bindingType,
+              formatVariants: extractFormatVariants($),
+            }),
+      isKindleUnlimited: listingMetadata.isKindleUnlimited,
+      extractionFieldsFound: listingMetadata.fieldsFound,
+      extractionFieldsMissing: listingMetadata.fieldsMissing,
+      fetchStatus: page.status,
     };
   } catch (err) {
     console.error(`${logPrefix} -> fetch threw:`, err instanceof Error ? err.message : err);
@@ -1366,21 +1450,13 @@ export async function scrapeCustomerQnA(asin: string, marketplace: Marketplace):
   const url = `https://www.${domain}/ask/questions/asin/${encodeURIComponent(asin)}/1`;
 
   try {
-    const res = await fetchWithTimeout(
-      url,
-      {
-        headers: {
-          "User-Agent": USER_AGENT,
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-      },
-      PAGE_TIMEOUT_MS
-    );
-    if (!res.ok) return [];
+    const page = await fetchPageHtml(url, {
+      proxyCountry: SCRAPER_PROXY_COUNTRY[marketplace],
+      label: `customer Q&A ${asin}`,
+    });
+    if (!page.html) return [];
 
-    const html = await res.text();
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(page.html);
 
     const questions = new Set<string>();
     $("[class*='question'] span, [class*='Question'] span, .askQuestionText").each((_, el) => {
@@ -1407,21 +1483,13 @@ export async function scrapeCustomerReviews(asin: string, marketplace: Marketpla
   const url = `https://www.${domain}/product-reviews/${encodeURIComponent(asin)}`;
 
   try {
-    const res = await fetchWithTimeout(
-      url,
-      {
-        headers: {
-          "User-Agent": USER_AGENT,
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-      },
-      PAGE_TIMEOUT_MS
-    );
-    if (!res.ok) return [];
+    const page = await fetchPageHtml(url, {
+      proxyCountry: SCRAPER_PROXY_COUNTRY[marketplace],
+      label: `customer reviews ${asin}`,
+    });
+    if (!page.html) return [];
 
-    const html = await res.text();
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(page.html);
 
     const bodies: string[] = [];
     $('[data-hook="review-body"]').each((_, el) => {
@@ -1443,21 +1511,10 @@ export async function scrapeCustomerReviews(asin: string, marketplace: Marketpla
  */
 export async function scrapeAuthorCatalog(authorUrl: string, excludeAsin: string): Promise<string[]> {
   try {
-    const res = await fetchWithTimeout(
-      authorUrl,
-      {
-        headers: {
-          "User-Agent": USER_AGENT,
-          Accept: "text/html,application/xhtml+xml",
-          "Accept-Language": "en-US,en;q=0.9",
-        },
-      },
-      PAGE_TIMEOUT_MS
-    );
-    if (!res.ok) return [];
+    const page = await fetchPageHtml(authorUrl, { label: "author catalog" });
+    if (!page.html) return [];
 
-    const html = await res.text();
-    const $ = cheerio.load(html);
+    const $ = cheerio.load(page.html);
 
     const titles = new Set<string>();
     $('a[href*="/dp/"]').each((_, el) => {
