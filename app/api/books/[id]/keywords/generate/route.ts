@@ -53,7 +53,7 @@ import {
   getYoutubeAutocompleteKeywordSet,
 } from "@/lib/scrape";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
-import { KeywordCandidate, KeywordCategory, KeywordSource } from "@/lib/types";
+import { KeywordCandidate, KeywordCategory, KeywordSource, MatchType } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -387,13 +387,17 @@ export async function POST(
 
     const { tropes, compNames } = splitKeywordsByCategory(collapseNearDuplicates(merged));
 
-    let tropesKeywords = boostScoresByDescriptionQuality(
+    // Carries the filter pipeline's match-type ceiling alongside the candidate,
+    // so a blurb-mined phrase can be capped at Phrase when it lands in a row.
+    type ReviewedKeyword = KeywordCandidate & { matchTypeCeiling?: MatchType };
+
+    let tropesKeywords: ReviewedKeyword[] = boostScoresByDescriptionQuality(
       scoreAndTierBids(tropes, defaultBid, knownTags),
       { description: snapshot.description, bulletPoints: snapshot.bulletPoints },
       "book-description"
     ).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
-    let compNameKeywords = boostScoresByCompetitorQuality(
+    let compNameKeywords: ReviewedKeyword[] = boostScoresByCompetitorQuality(
       scoreAndTierBids(compNames, defaultBid, knownTags),
       snapshot.competitors,
       0.2
@@ -595,7 +599,9 @@ export async function POST(
       filterSummary,
       contributingSources,
       bySource: countBy(activeRows.map((r) => r.source)),
-      byCategory: countBy(activeRows.map((r) => r.category).filter((c): c is string => !!c)),
+      byCategory: countBy(
+        activeRows.map((r) => r.category).filter((c): c is KeywordCategory => !!c)
+      ),
       byMatchType: countBy(activeRows.map((r) => r.match_type)),
       genreTerms: snapshot.genreTerms.slice(0, 10),
       anchors: {

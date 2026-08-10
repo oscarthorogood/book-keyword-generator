@@ -94,6 +94,40 @@ export function isSerpApiConfigured(): boolean {
   return !!SERPAPI_API_KEY;
 }
 
+/**
+ * SerpApi's responses are free-form JSON whose exact shape varies by engine,
+ * marketplace and product type, so they're read as unknown and narrowed at
+ * each access rather than asserted into a type the API never promised.
+ */
+type JsonRecord = Record<string, unknown>;
+
+function rec(value: unknown): JsonRecord | undefined {
+  return value && typeof value === "object" && !Array.isArray(value) ? (value as JsonRecord) : undefined;
+}
+
+function str(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim().length > 0 ? value : undefined;
+}
+
+function num(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+function list(value: unknown): unknown[] {
+  return Array.isArray(value) ? value : [];
+}
+
+/** product_information is a key/value dict; keep only the string-valued entries. */
+function stringRecord(value: unknown): Record<string, string> | undefined {
+  const record = rec(value);
+  if (!record) return undefined;
+  const out: Record<string, string> = {};
+  for (const [key, entry] of Object.entries(record)) {
+    if (typeof entry === "string") out[key] = entry;
+  }
+  return out;
+}
+
 async function fetchWithTimeout(url: string): Promise<Response> {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
@@ -109,7 +143,7 @@ async function fetchWithTimeout(url: string): Promise<Response> {
  * response whose `search_metadata.status` reports an error — so callers can
  * degrade instead of special-casing.
  */
-async function callSerpApi(params: Record<string, string>): Promise<Record<string, any> | null> {
+async function callSerpApi(params: Record<string, string>): Promise<JsonRecord | null> {
   if (!SERPAPI_API_KEY) return null;
 
   const query = new URLSearchParams({ ...params, api_key: SERPAPI_API_KEY });
@@ -121,10 +155,13 @@ async function callSerpApi(params: Record<string, string>): Promise<Record<strin
       console.error(`[serpApi] ${label} failed: HTTP ${res.status}`);
       return null;
     }
-    const data = await res.json();
-    const status = data?.search_metadata?.status;
-    if (data?.error || (status && status !== "Success")) {
-      console.error(`[serpApi] ${label} returned ${status ?? "an error"}: ${data?.error ?? "unknown"}`);
+    const data = rec(await res.json());
+    if (!data) return null;
+
+    const status = str(rec(data.search_metadata)?.status);
+    const error = str(data.error);
+    if (error || (status && status !== "Success")) {
+      console.error(`[serpApi] ${label} returned ${status ?? "an error"}: ${error ?? "unknown"}`);
       return null;
     }
     return data;
@@ -158,20 +195,21 @@ export function cleanBookTitle(raw: string | undefined): string | undefined {
 }
 
 /** Amazon book bylines are usually "by Author Name Format" — this API's fields don't reliably separate them, so try a few shapes. */
-function extractAuthor(product: Record<string, any>): string | undefined {
-  if (typeof product.author === "string") return product.author;
-  if (Array.isArray(product.authors) && product.authors.length > 0) {
-    return product.authors
-      .map((a: any) => (typeof a === "string" ? a : a?.name))
-      .filter(Boolean)
-      .join(", ");
-  }
-  if (typeof product.brand === "string") return product.brand;
-  return undefined;
+function extractAuthor(product: JsonRecord): string | undefined {
+  const author = str(product.author);
+  if (author) return author;
+
+  const authors = list(product.authors)
+    .map((entry) => str(entry) ?? str(rec(entry)?.name))
+    .filter((name): name is string => !!name);
+  if (authors.length > 0) return authors.join(", ");
+
+  return str(product.brand);
 }
 
 /** product_information is a free-form key/value dict whose exact keys vary by product type/marketplace. */
-function extractFromProductInformation(info: Record<string, string> | undefined) {
+function extractFromProductInformation(raw: unknown) {
+  const info = stringRecord(raw);
   if (!info) return {};
   const find = (...labels: string[]) => {
     for (const [key, value] of Object.entries(info)) {
@@ -215,10 +253,9 @@ function asStringArray(value: unknown, limit: number): string[] {
 }
 
 function collectAsins(value: unknown, into: Set<string>): void {
-  if (!Array.isArray(value)) return;
-  for (const entry of value) {
-    const asin = entry && typeof entry === "object" ? (entry as Record<string, unknown>).asin : undefined;
-    if (typeof asin === "string" && /^[A-Z0-9]{10}$/i.test(asin)) into.add(asin.toUpperCase());
+  for (const entry of list(value)) {
+    const asin = str(rec(entry)?.asin);
+    if (asin && /^[A-Z0-9]{10}$/i.test(asin)) into.add(asin.toUpperCase());
   }
 }
 
@@ -246,10 +283,12 @@ export async function searchAmazonViaSerpApi(
 
   const organicTitles: string[] = [];
   const organicAuthors: string[] = [];
-  for (const result of Array.isArray(data.organic_results) ? data.organic_results.slice(0, 15) : []) {
-    const title = cleanBookTitle(typeof result?.title === "string" ? result.title : undefined);
+  for (const entry of list(data.organic_results).slice(0, 15)) {
+    const result = rec(entry);
+    if (!result) continue;
+    const title = cleanBookTitle(str(result.title));
     if (title) organicTitles.push(title);
-    const author = extractAuthor(result ?? {});
+    const author = extractAuthor(result);
     if (author) organicAuthors.push(author.replace(/\s+/g, " ").trim());
   }
 
@@ -299,9 +338,11 @@ export async function fetchAmazonProductViaSerpApi(
 
   // SerpApi has shipped both spellings of this key across versions of the
   // Amazon endpoints; accept either rather than silently returning nothing.
-  const product = data.product_results ?? data.product_result ?? data.product ?? null;
+  const product = rec(data.product_results) ?? rec(data.product_result) ?? rec(data.product);
   if (!product) {
-    console.error(`[serpApi] no product results for ${asin}: ${data.search_metadata?.status ?? "unknown"}`);
+    console.error(
+      `[serpApi] no product results for ${asin}: ${str(rec(data.search_metadata)?.status) ?? "unknown"}`
+    );
     return null;
   }
 
@@ -311,11 +352,8 @@ export async function fetchAmazonProductViaSerpApi(
     ...asStringArray(product.feature_bullets, 8),
     ...asStringArray(data.about_item, 8),
   ];
-  const coverImageUrl: string | undefined = Array.isArray(product.images)
-    ? typeof product.images[0] === "string"
-      ? product.images[0]
-      : product.images[0]?.link
-    : product.thumbnail;
+  const firstImage = list(product.images)[0];
+  const coverImageUrl = str(firstImage) ?? str(rec(firstImage)?.link) ?? str(product.thumbnail);
 
   const relatedAsins = new Set<string>();
   collectAsins(data.bought_together, relatedAsins);
@@ -324,20 +362,17 @@ export async function fetchAmazonProductViaSerpApi(
   collectAsins(product.bought_together, relatedAsins);
   collectAsins(product.related_products, relatedAsins);
 
-  const reviewsBlock = data.reviews_information ?? product.reviews_information ?? {};
+  const reviewsBlock = rec(data.reviews_information) ?? rec(product.reviews_information) ?? {};
+
+  const price = rec(product.price);
 
   return {
-    title: typeof product.title === "string" ? product.title : undefined,
+    title: str(product.title),
     author: extractAuthor(product),
-    price: parsePrice(product.price?.value ?? product.price?.raw ?? product.price),
-    rating: typeof product.rating === "number" ? product.rating : undefined,
-    reviewCount:
-      typeof product.ratings_total === "number"
-        ? product.ratings_total
-        : typeof product.reviews === "number"
-          ? product.reviews
-          : undefined,
-    description: typeof product.description === "string" ? product.description : undefined,
+    price: parsePrice(price?.value ?? price?.raw ?? product.price),
+    rating: num(product.rating),
+    reviewCount: num(product.ratings_total) ?? num(product.reviews),
+    description: str(product.description),
     bulletPoints: bulletPoints.length > 0 ? bulletPoints.slice(0, 8) : undefined,
     categoryPath: categoryPath.length > 0 ? categoryPath : undefined,
     coverImageUrl,
