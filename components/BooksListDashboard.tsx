@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { Plus, BookOpen, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Plus, BookOpen, Search, AlertTriangle } from "lucide-react";
 
 interface Book {
   id: string;
@@ -11,170 +11,191 @@ interface Book {
   marketplace: string;
   total_keywords: number;
   created_at: string;
+  metadata_json?: {
+    coverImageUrl?: string;
+    genreTerms?: string[];
+    capture?: { ok: boolean; blocked: boolean };
+  } | null;
 }
 
 interface BooksListDashboardProps {
   onAddBook: () => void;
-  onSelectBook: (book: Book) => void;
+  onSelectBook: (bookId: string) => void;
 }
 
-export default function BooksListDashboard({
-  onAddBook,
-  onSelectBook,
-}: BooksListDashboardProps) {
+/** Fetches without touching state, so effects never set state synchronously. */
+async function fetchBooks(): Promise<{ books: Book[]; error: string | null }> {
+  try {
+    const res = await fetch("/api/books/list");
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) return { books: [], error: body.error || "Could not load your books." };
+    return { books: body.books ?? [], error: null };
+  } catch (err) {
+    return { books: [], error: err instanceof Error ? err.message : "Could not load your books." };
+  }
+}
+
+export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksListDashboardProps) {
   const [books, setBooks] = useState<Book[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
 
   useEffect(() => {
-    async function loadBooks() {
-      try {
-        setLoading(true);
-        setLoadError(null);
-        const res = await fetch("/api/books/list");
-        const body = await res.json().catch(() => ({}));
-
-        if (!res.ok) {
-          setLoadError(body.error || "Could not load books.");
-          setBooks([]);
-        } else {
-          setBooks(body.books || []);
-        }
-      } catch (err) {
-        setLoadError(err instanceof Error ? err.message : "Could not load books.");
-        setBooks([]);
-      } finally {
-        setLoading(false);
-      }
-    }
-
-    loadBooks();
+    let active = true;
+    fetchBooks().then(({ books: loaded, error }) => {
+      if (!active) return;
+      setBooks(loaded);
+      setLoadError(error);
+      setLoading(false);
+    });
+    return () => {
+      active = false;
+    };
   }, []);
 
-  const filteredBooks = books.filter((book) => {
-    const matchesSearch =
-      book.title.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      book.author.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      book.asin.toLowerCase().includes(searchTerm.toLowerCase());
-    return matchesSearch;
-  });
-
-  const isEmpty = books.length === 0;
+  const filteredBooks = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    if (!term) return books;
+    return books.filter((book) =>
+      [book.title, book.author, book.asin].some((field) => field?.toLowerCase().includes(term))
+    );
+  }, [books, searchTerm]);
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-8 py-6">
-        <h1 className="text-2xl font-bold text-gray-900">Books</h1>
-      </div>
-
-      {/* Main Content */}
-      <div className="flex-1 px-8 py-8">
-        {/* Add Book */}
-        <div className="mb-8">
-          <button
-            onClick={onAddBook}
-            className="group bg-gray-900 rounded-xl px-6 py-4 text-white hover:bg-gray-800 transition-all inline-flex items-center gap-3"
-          >
-            <div className="w-8 h-8 bg-white/10 rounded-lg flex items-center justify-center group-hover:bg-white/20 transition-colors">
-              <Plus size={18} />
-            </div>
-            <span className="text-sm font-semibold">Add Book</span>
-          </button>
-        </div>
-
-        {/* Book List */}
+    <div className="min-h-screen flex flex-col" style={{ background: "var(--bg-mid)" }}>
+      <header className="border-b px-8 py-6 flex items-center justify-between gap-4">
         <div>
-          <h2 className="text-base font-semibold text-gray-900 mb-4">Your Books</h2>
+          <p className="eyebrow mb-1">Library</p>
+          <h1 className="text-2xl font-bold" style={{ color: "var(--ink)" }}>
+            Books
+          </h1>
         </div>
+        <button onClick={onAddBook} className="btn-pill-dark">
+          <Plus size={16} />
+          Add book
+        </button>
+      </header>
 
+      <div className="flex-1 px-8 py-8">
         {loadError ? (
-          <div className="text-center py-16 bg-red-50 rounded-lg border border-red-200">
-            <p className="text-red-700 font-medium">Couldn&apos;t load your books</p>
-            <p className="text-red-600 text-sm mt-1">{loadError}</p>
+          <div
+            className="status-banner"
+            style={{ background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }}
+          >
+            <AlertTriangle size={16} className="mt-0.5" style={{ color: "var(--accent-red)" }} />
+            <div>
+              <p className="font-medium" style={{ color: "var(--ink)" }}>
+                Couldn&apos;t load your books
+              </p>
+              <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
+                {loadError}
+              </p>
+            </div>
           </div>
-        ) : isEmpty && !loading ? (
-          <div className="text-center py-16 bg-gray-50 rounded-lg border border-gray-200">
-            <BookOpen size={48} className="mx-auto text-gray-300 mb-4" />
-            <p className="text-gray-600">No books yet. Add one to get started.</p>
+        ) : loading ? (
+          <p className="text-center py-16 text-sm" style={{ color: "var(--muted)" }}>
+            Loading books…
+          </p>
+        ) : books.length === 0 ? (
+          <div className="text-center py-16 rounded-2xl border" style={{ background: "var(--panel-muted)" }}>
+            <BookOpen size={40} className="mx-auto mb-4" style={{ color: "var(--muted)" }} />
+            <p className="text-sm mb-4" style={{ color: "var(--muted)" }}>
+              No books yet. Paste an Amazon link to add your first one.
+            </p>
+            <button onClick={onAddBook} className="btn-pill-dark">
+              <Plus size={16} />
+              Add book
+            </button>
           </div>
         ) : (
           <>
-            {/* Search and Filter */}
-            <div className="flex items-center justify-between mb-6">
-              <div className="text-sm text-gray-600">
-                {filteredBooks.length} book{filteredBooks.length !== 1 ? "s" : ""}
-              </div>
-              <div className="relative w-64">
-                <Search className="absolute right-3 top-2.5 text-gray-400" size={18} />
+            <div className="flex items-center justify-between gap-4 mb-6">
+              <p className="text-sm" style={{ color: "var(--muted)" }}>
+                {filteredBooks.length} book{filteredBooks.length === 1 ? "" : "s"}
+              </p>
+              <div className="relative w-72">
+                <Search size={16} className="absolute left-3 top-2.5" style={{ color: "var(--muted)" }} />
                 <input
                   type="text"
-                  placeholder="Search books..."
+                  placeholder="Search title, author or ASIN…"
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pr-10 pl-4 py-2 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
+                  className="input pl-9"
                 />
               </div>
             </div>
 
-            {/* Books List */}
-            {loading ? (
-              <div className="flex items-center justify-center py-16">
-                <div className="text-center">
-                  <div className="animate-spin w-12 h-12 border-4 border-gray-200 border-t-gray-700 rounded-full mx-auto mb-4"></div>
-                  <p className="text-gray-600">Loading books...</p>
-                </div>
-              </div>
-            ) : filteredBooks.length === 0 ? (
-              <div className="text-center py-16 bg-gray-50 rounded-lg border border-gray-200">
-                <BookOpen size={48} className="mx-auto text-gray-300 mb-4" />
-                <p className="text-gray-600">No books found</p>
+            {filteredBooks.length === 0 ? (
+              <div className="text-center py-16 rounded-2xl border" style={{ background: "var(--panel-muted)" }}>
+                <p className="text-sm" style={{ color: "var(--muted)" }}>
+                  No books match that search.
+                </p>
               </div>
             ) : (
-              <div className="border border-gray-200 rounded-lg overflow-hidden overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead className="bg-gray-50 text-gray-600 text-xs uppercase">
-                    <tr>
-                      <th className="text-left px-4 py-3 font-medium">Title</th>
-                      <th className="text-left px-4 py-3 font-medium">Author</th>
-                      <th className="text-left px-4 py-3 font-medium">ASIN</th>
-                      <th className="text-left px-4 py-3 font-medium">Marketplace</th>
-                      <th className="text-right px-4 py-3 font-medium">Keywords</th>
-                      <th className="text-right px-4 py-3 font-medium">Added</th>
-                    </tr>
-                  </thead>
-                  <tbody className="divide-y divide-gray-100">
-                    {filteredBooks.map((book) => (
-                      <tr
-                        key={book.id}
-                        onClick={() => onSelectBook(book)}
-                        className="hover:bg-gray-50 transition-colors cursor-pointer"
-                      >
-                        <td className="px-4 py-3">
-                          <div className="flex items-center gap-3">
-                            <div className="w-8 h-8 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                              <BookOpen size={16} className="text-gray-600" />
-                            </div>
-                            <span className="font-medium text-gray-900">{book.title}</span>
-                          </div>
-                        </td>
-                        <td className="px-4 py-3 text-gray-600">{book.author}</td>
-                        <td className="px-4 py-3 text-gray-500 font-mono text-xs">{book.asin}</td>
-                        <td className="px-4 py-3 text-gray-600">{book.marketplace}</td>
-                        <td className="px-4 py-3 text-right text-gray-900 font-medium">
+              <div className="grid gap-3">
+                {filteredBooks.map((book) => {
+                  const snapshot = book.metadata_json ?? {};
+                  const captureFailed = snapshot.capture ? !snapshot.capture.ok || snapshot.capture.blocked : false;
+                  return (
+                    <button
+                      key={book.id}
+                      onClick={() => onSelectBook(book.id)}
+                      className="card flex items-center gap-4 text-left w-full hover:opacity-90 transition-opacity"
+                      style={{ padding: "1rem 1.25rem" }}
+                    >
+                      {snapshot.coverImageUrl ? (
+                        // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
+                        <img
+                          src={snapshot.coverImageUrl}
+                          alt=""
+                          className="w-10 h-14 object-contain rounded flex-shrink-0"
+                        />
+                      ) : (
+                        <div
+                          className="w-10 h-14 rounded flex items-center justify-center flex-shrink-0"
+                          style={{ background: "var(--panel-muted)" }}
+                        >
+                          <BookOpen size={16} style={{ color: "var(--muted)" }} />
+                        </div>
+                      )}
+
+                      <div className="flex-1 min-w-0">
+                        <p className="font-medium truncate" style={{ color: "var(--ink)" }}>
+                          {book.title}
+                        </p>
+                        <p className="text-xs truncate" style={{ color: "var(--muted)" }}>
+                          {book.author} · {book.marketplace} · <span className="font-mono">{book.asin}</span>
+                        </p>
+                        {snapshot.genreTerms && snapshot.genreTerms.length > 0 && (
+                          <p className="text-xs mt-1 truncate" style={{ color: "var(--muted)" }}>
+                            {snapshot.genreTerms.slice(0, 4).join(" · ")}
+                          </p>
+                        )}
+                      </div>
+
+                      {captureFailed && (
+                        <span
+                          className="text-xs inline-flex items-center gap-1"
+                          style={{ color: "var(--accent-red)" }}
+                          title="Metadata incomplete — open the book to re-fetch"
+                        >
+                          <AlertTriangle size={13} />
+                          Metadata
+                        </span>
+                      )}
+
+                      <div className="text-right flex-shrink-0">
+                        <p className="text-lg font-bold" style={{ color: "var(--ink)" }}>
                           {book.total_keywords}
-                        </td>
-                        <td className="px-4 py-3 text-right text-gray-500 text-xs">
-                          {new Date(book.created_at).toLocaleDateString("en-US", {
-                            month: "short",
-                            day: "numeric",
-                          })}
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                        </p>
+                        <p className="text-xs" style={{ color: "var(--muted)" }}>
+                          keywords
+                        </p>
+                      </div>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </>

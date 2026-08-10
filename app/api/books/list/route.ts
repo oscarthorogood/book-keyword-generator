@@ -5,7 +5,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
  * GET /api/books/list
  * Get all books for the authenticated user
  */
-export async function GET(request: Request) {
+export async function GET() {
   try {
     // Get authenticated user
     const user = await currentUser();

@@ -29,10 +29,9 @@ const STOPWORDS = new Set([
 ]);
 
 const MIN_SNIPPET_LENGTH = 15;
-// Phrases with 2+ occurrences are definitely valuable; single occurrences are
-// kept if they're high-quality (specific multi-word phrases, not generic terms)
-const MIN_GRAM_OCCURRENCES = 1;
-const MIN_GRAM_OCCURRENCES_FOR_SINGLE_WORD = 3; // Single words need more evidence
+// 3-4 word phrases are specific enough to trust from a single occurrence;
+// shorter ones need repetition across reviews before they mean anything.
+const MIN_GRAM_OCCURRENCES_FOR_SINGLE_WORD = 3;
 const MAX_MINED_PHRASES = 30; // Increased from 20 to capture more variety
 
 function tokenize(text: string): string[] {

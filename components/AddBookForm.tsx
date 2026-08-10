@@ -1,175 +1,145 @@
 "use client";
 
-import { FormEvent, useState } from "react";
-import { ArrowLeft } from "lucide-react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { ArrowLeft, Loader2 } from "lucide-react";
+import { parseAmazonInput } from "@/lib/amazonUrl";
 
 const MARKETPLACES = ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const;
+
+// The create call reads the product page, crawls comparable titles and
+// queries the external catalogues, so it takes a while. Naming the step in
+// progress is the difference between "working" and "frozen".
+const CAPTURE_STEPS = [
+  "Reading the Amazon product page…",
+  "Pulling categories, series and format details…",
+  "Crawling comparable titles and also-boughts…",
+  "Collecting reviews, Q&A and author catalogue…",
+  "Matching Google Books, Open Library and Goodreads…",
+  "Almost there — saving the book…",
+];
 
 interface AddBookFormProps {
   onBack: () => void;
   onSuccess: (bookId: string) => void;
 }
 
-interface BookMetadata {
-  asin?: string;
-  title?: string;
-  author?: string;
-  price?: number;
-  rating?: number;
-  reviewCount?: number;
-  publisher?: string;
-  publicationDate?: string;
-}
-
 export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
-  const [asin, setAsin] = useState("");
+  const [input, setInput] = useState("");
   const [marketplace, setMarketplace] = useState<(typeof MARKETPLACES)[number]>("US");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [stepIndex, setStepIndex] = useState(0);
   const [error, setError] = useState<string | null>(null);
-  const [status, setStatus] = useState<"idle" | "loading" | "success" | "error">("idle");
 
-  const [autofillStatus, setAutofillStatus] = useState<"idle" | "loading" | "error">("idle");
-  const [autofillError, setAutofillError] = useState<string | null>(null);
-  const [metadata, setMetadata] = useState<BookMetadata | null>(null);
-  const [bookTitle, setBookTitle] = useState("");
-  const [bookAuthor, setBookAuthor] = useState("");
+  // Same parser the API uses, so the form can show what it read out of a
+  // pasted link before the request is sent.
+  const parsed = useMemo(() => parseAmazonInput(input), [input]);
+  const detectedMarketplace = parsed?.marketplace;
 
-  async function handleAutofill() {
-    if (!asin.trim()) {
-      setAutofillError("Please enter an ASIN or ISBN");
-      setAutofillStatus("error");
-      return;
-    }
+  useEffect(() => {
+    if (!isSaving) return;
+    const timer = setInterval(() => {
+      setStepIndex((current) => Math.min(current + 1, CAPTURE_STEPS.length - 1));
+    }, 6000);
+    return () => clearInterval(timer);
+  }, [isSaving]);
 
-    setAutofillStatus("loading");
-    setAutofillError(null);
+  async function handleSubmit(event: FormEvent) {
+    event.preventDefault();
+    if (!input.trim() || isSaving) return;
 
-    try {
-      const res = await fetch(
-        `/api/lookup?asin=${encodeURIComponent(asin)}&marketplace=${marketplace}`
-      );
-      const body = await res.json();
-
-      if (!res.ok) {
-        setAutofillError(body.error ?? "Failed to lookup book");
-        setAutofillStatus("error");
-        return;
-      }
-
-      setMetadata(body);
-      setBookTitle(body.title || "");
-      setBookAuthor(body.author || "");
-      setAutofillStatus("idle");
-    } catch (err) {
-      setAutofillError(err instanceof Error ? err.message : "Something went wrong");
-      setAutofillStatus("error");
-    }
-  }
-
-  async function handleSubmit(e: FormEvent) {
-    e.preventDefault();
-    setIsLoading(true);
+    setIsSaving(true);
+    setStepIndex(0);
     setError(null);
-    setStatus("loading");
 
     try {
-      if (!asin || !marketplace) {
-        throw new Error("Please fill in all fields");
-      }
-
       const res = await fetch("/api/books/create", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          asin,
-          marketplace,
-        }),
+        body: JSON.stringify({ input: input.trim(), marketplace }),
       });
+      const data = await res.json().catch(() => ({}));
 
-      const data = await res.json();
-
-      // A book already existing for this ASIN/marketplace isn't a failure —
-      // the point of entering an ASIN is to land on that book's detail page
-      // either way, so treat 409 the same as a successful create.
+      // 409 means the book is already in the library — the point of typing an
+      // ASIN is to land on that book either way, so treat it as success.
+      const bookId = data.book?.id ?? data.bookId;
       if (!res.ok && res.status !== 409) {
-        throw new Error(data.error || "Failed to create book");
+        throw new Error(data.error || "Could not add that book.");
       }
-
-      const bookId = data.book?.id || data.bookId;
       if (!bookId) {
-        throw new Error("Book was saved but no book ID was returned.");
+        throw new Error("The book was saved but no ID came back. Refresh your library to find it.");
       }
 
-      setStatus("success");
-      setTimeout(() => {
-        onSuccess(bookId);
-      }, 800);
+      onSuccess(bookId);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong");
-      setStatus("error");
-    } finally {
-      setIsLoading(false);
+      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setIsSaving(false);
     }
   }
 
   return (
-    <div className="min-h-screen bg-white flex flex-col">
-      {/* Header */}
-      <div className="bg-white border-b border-gray-200 px-8 py-6">
+    <div className="min-h-screen flex flex-col" style={{ background: "var(--bg-mid)" }}>
+      <header className="border-b px-8 py-6">
         <button
           onClick={onBack}
-          className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
+          className="inline-flex items-center gap-2 text-sm mb-4"
+          style={{ color: "var(--muted)" }}
         >
-          <ArrowLeft size={20} />
-          Back to Books
+          <ArrowLeft size={18} />
+          Back to books
         </button>
-        <h1 className="text-2xl font-bold text-gray-900">Add a Book</h1>
-        <p className="text-sm text-gray-500 mt-1">
-          Enter an ASIN or ISBN to add a book to your library. We&apos;ll fetch the metadata automatically.
+        <p className="eyebrow mb-1">Add a book</p>
+        <h1 className="text-2xl font-bold" style={{ color: "var(--ink)" }}>
+          Paste the Amazon link
+        </h1>
+        <p className="text-sm mt-1" style={{ color: "var(--muted)" }}>
+          That&apos;s all we need. We capture the book&apos;s full Amazon metadata once, now, and every
+          keyword you generate later is built from it.
         </p>
-      </div>
+      </header>
 
-      {/* Main Content */}
       <div className="flex-1 px-8 py-8">
         <form onSubmit={handleSubmit} className="max-w-xl">
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6">
-            <p className="text-xs text-gray-600 font-medium mb-4">BOOK LOOKUP</p>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-900 mb-1.5">
-                  ASIN or ISBN
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    required
-                    value={asin}
-                    onChange={(e) => setAsin(e.target.value)}
-                    placeholder="B0XXXXXXXX or 978XXXXXXXXXX"
-                    maxLength={17}
-                    className="flex-1 px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
-                  />
-                  <button
-                    type="button"
-                    onClick={handleAutofill}
-                    disabled={autofillStatus === "loading" || !asin.trim()}
-                    className="px-4 py-2.5 bg-gray-900 text-white rounded-lg font-medium text-sm hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed transition-colors whitespace-nowrap"
-                  >
-                    {autofillStatus === "loading" ? "Looking up…" : "Autofill"}
-                  </button>
-                </div>
-                <p className="text-xs text-gray-500 mt-1.5">
-                  Enter an Amazon ASIN (10 chars) or ISBN, then click Autofill to fetch book details
-                </p>
-              </div>
+          <div className="card mb-6">
+            <p className="card-title mb-4">Book lookup</p>
 
-              <div>
-                <label className="block text-sm font-medium text-gray-900 mb-1.5">
+            <label className="field-label" htmlFor="book-input">
+              Amazon link, ASIN or ISBN
+            </label>
+            <input
+              id="book-input"
+              required
+              autoFocus
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              placeholder="https://www.amazon.com/dp/B0XXXXXXXX"
+              disabled={isSaving}
+              className="input"
+            />
+            <span className="field-hint">
+              A pasted product link is the most reliable — it tells us the ASIN and the marketplace. A bare
+              ASIN or ISBN works too.
+            </span>
+
+            {parsed && (
+              <p className="text-xs mt-2" style={{ color: "var(--muted)" }}>
+                Detected ASIN <span className="font-mono">{parsed.asin}</span>
+                {detectedMarketplace ? ` · ${detectedMarketplace} marketplace` : ""}
+              </p>
+            )}
+
+            {/* Only meaningful when the input can't say which store it came
+                from — a link already carries its marketplace. */}
+            {!detectedMarketplace && (
+              <div className="mt-5">
+                <label className="field-label" htmlFor="marketplace">
                   Marketplace
                 </label>
                 <select
+                  id="marketplace"
                   value={marketplace}
                   onChange={(e) => setMarketplace(e.target.value as typeof marketplace)}
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
+                  disabled={isSaving}
+                  className="input"
                 >
                   {MARKETPLACES.map((m) => (
                     <option key={m} value={m}>
@@ -177,131 +147,40 @@ export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
                     </option>
                   ))}
                 </select>
-                <p className="text-xs text-gray-500 mt-1.5">
-                  Select the Amazon marketplace for this book
-                </p>
               </div>
-
-              {autofillStatus === "error" && autofillError && (
-                <div className="p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                  {autofillError}
-                </div>
-              )}
-            </div>
+            )}
           </div>
 
-          {metadata && (
-            <div className={`border rounded-lg p-6 mb-6 ${
-              (bookTitle === "Unknown Title" || bookTitle === "") && (bookAuthor === "Unknown Author" || bookAuthor === "")
-                ? "bg-yellow-50 border-yellow-200"
-                : "bg-blue-50 border-blue-200"
-            }`}>
-              <p className={`text-xs font-medium mb-4 ${
-                (bookTitle === "Unknown Title" || bookTitle === "") && (bookAuthor === "Unknown Author" || bookAuthor === "")
-                  ? "text-yellow-600"
-                  : "text-blue-600"
-              }`}>
-                {(bookTitle === "Unknown Title" || bookTitle === "") && (bookAuthor === "Unknown Author" || bookAuthor === "")
-                  ? "MANUAL ENTRY REQUIRED"
-                  : "FETCHED METADATA"}
-              </p>
-              {(bookTitle === "Unknown Title" || bookTitle === "") && (bookAuthor === "Unknown Author" || bookAuthor === "") && (
-                <p className="text-xs text-yellow-700 mb-4">
-                  We couldn't fetch the book details from Amazon. Please enter the title and author manually.
-                </p>
-              )}
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-900 mb-1.5">
-                    Title {(bookTitle === "Unknown Title" || bookTitle === "") && <span className="text-red-600">*</span>}
-                  </label>
-                  <input
-                    type="text"
-                    value={bookTitle === "Unknown Title" ? "" : bookTitle}
-                    onChange={(e) => setBookTitle(e.target.value)}
-                    placeholder="Enter book title"
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-900 mb-1.5">
-                    Author {(bookAuthor === "Unknown Author" || bookAuthor === "") && <span className="text-red-600">*</span>}
-                  </label>
-                  <input
-                    type="text"
-                    value={bookAuthor === "Unknown Author" ? "" : bookAuthor}
-                    onChange={(e) => setBookAuthor(e.target.value)}
-                    placeholder="Enter author name"
-                    className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
-                  />
-                </div>
-
-                {metadata.price && metadata.price > 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 mb-1.5">
-                      Price
-                    </label>
-                    <p className="text-sm text-gray-600">${metadata.price.toFixed(2)}</p>
-                  </div>
-                )}
-
-                {metadata.publisher && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 mb-1.5">
-                      Publisher
-                    </label>
-                    <p className="text-sm text-gray-600">{metadata.publisher}</p>
-                  </div>
-                )}
-
-                {metadata.publicationDate && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-900 mb-1.5">
-                      Publication Date
-                    </label>
-                    <p className="text-sm text-gray-600">{metadata.publicationDate}</p>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-6">
-            <p className="text-sm font-semibold text-gray-900 mb-2">📖 Where to find ASIN</p>
-            <p className="text-xs text-gray-600 leading-relaxed">
-              On Amazon product pages, the ASIN is listed in the &quot;Product information&quot; section.
-              It&apos;s a 10-character code starting with &quot;B0&quot;. ISBNs work too—we&apos;ll convert them automatically.
-            </p>
-          </div>
-
-          {status === "error" && error && (
-            <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-              {error}
-            </div>
-          )}
-
-          {status === "success" && (
-            <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
-              Book added successfully! Redirecting...
-            </div>
-          )}
-
-          <div className="flex gap-3 justify-between">
-            <button
-              type="button"
-              onClick={onBack}
-              className="px-6 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+          {error && (
+            <div
+              className="status-banner mb-6"
+              style={{ background: "var(--accent-red-soft)", borderColor: "var(--accent-red)" }}
             >
+              <span className="status-dot" style={{ background: "var(--accent-red)" }} />
+              <span>{error}</span>
+            </div>
+          )}
+
+          {isSaving && (
+            <div className="status-banner mb-6" style={{ background: "var(--panel-muted)" }}>
+              <Loader2 size={16} className="animate-spin mt-0.5 flex-shrink-0" />
+              <div>
+                <p className="font-medium" style={{ color: "var(--ink)" }}>
+                  {CAPTURE_STEPS[stepIndex]}
+                </p>
+                <p className="text-xs mt-1" style={{ color: "var(--muted)" }}>
+                  This takes up to a minute. It only happens once per book.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex items-center justify-between gap-3">
+            <button type="button" onClick={onBack} className="btn-pill-outline" disabled={isSaving}>
               Cancel
             </button>
-
-            <button
-              type="submit"
-              disabled={isLoading || !asin}
-              className="bg-gray-900 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-colors"
-            >
-              {isLoading ? "Adding…" : "Add Book"}
+            <button type="submit" className="btn-pill-dark" disabled={isSaving || !input.trim()}>
+              {isSaving ? "Adding book…" : "Add book"}
             </button>
           </div>
         </form>

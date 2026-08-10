@@ -1,3 +1,4 @@
+import { cleanTaxonomyTerms } from "./genre";
 import { isUsableKeyword, normalize } from "./keywordMerge";
 import { KeywordCandidate, KeywordCategory, KeywordSource, RelatedCompetitor } from "./types";
 
@@ -177,21 +178,25 @@ export function buildCategorizedKeywordCandidates(ctx: CategoryContext): Keyword
   const topGenre = ctx.genreTerms[0];
   const currentYear = new Date().getFullYear();
 
-  // 1. Core Genre — top-level breadcrumb segment(s) + already-extracted genre terms.
+  // The breadcrumb as genre phrases rather than store nodes: "Kindle Store >
+  // Kindle eBooks > Mystery, Thriller & Suspense > Cozy Mystery" becomes
+  // mystery / thriller / suspense / cozy mystery. Templating over the raw
+  // segments is where keywords like "best kindle store books" came from.
+  const pathTerms = ctx.categoryPath.flatMap((segment) => cleanTaxonomyTerms(segment));
+
+  // 1. Core Genre — the broadest real genre nodes plus the already-resolved
+  // genre vocabulary.
   if (has("core-genre")) {
-    const topSegments = ctx.categoryPath.slice(1, 2); // skip the "Books" root
-    push("core-genre", "genre-metadata", [...topSegments, ...ctx.genreTerms.slice(0, 3)]);
+    push("core-genre", "genre-metadata", [...pathTerms.slice(0, 2), ...ctx.genreTerms.slice(0, 3)]);
     if (topGenre) push("core-genre", "buyer-intent", [`${topGenre} books`]);
   }
 
-  // 2. Micro-Niche Sub-Genre — deeper breadcrumb segments (more specific),
-  // reclassified into time-period/identity-cultural first if they clearly
-  // indicate one (see classifyCategoryPathSegment).
-  if (ctx.categoryPath.length > 2) {
-    for (const segment of ctx.categoryPath.slice(2)) {
-      const category = classifyCategoryPathSegment(segment);
-      if (has(category)) push(category, "genre-metadata", [segment]);
-    }
+  // 2. Micro-Niche Sub-Genre — the deeper, more specific end of the
+  // breadcrumb, reclassified into time-period/identity-cultural first if it
+  // clearly indicates one (see classifyCategoryPathSegment).
+  for (const segment of pathTerms.slice(2)) {
+    const category = classifyCategoryPathSegment(segment);
+    if (has(category)) push(category, "genre-metadata", [segment]);
   }
 
   // 3 & 4. Competing Author Names / Comparable Book Titles — the deep "also

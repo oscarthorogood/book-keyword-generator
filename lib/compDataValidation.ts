@@ -100,19 +100,16 @@ const KNOWN_UNRELATED_ENTITIES = new Set([
 ]);
 
 /**
- * Check if a generated keyword looks like it might be a hallucination —
- * specifically, a real entity name that's unrelated to the book but close
- * to the author's name.
+ * Check if a generated keyword looks like it might be a hallucination — a
+ * real entity (imprint, unrelated author, bookshop, brand) that got pulled in
+ * to fill a gap rather than because it describes this book.
  *
- * This is a heuristic: exact match against known unrelated entities.
- * Used as a second line of defense when comp data is thin.
+ * This is a heuristic: substring match against known unrelated entities, plus
+ * an abbreviation-density check on name-shaped templates. Used as a second
+ * line of defense when comp data is thin.
  */
-export function mightBeHallucination(
-  generatedKeyword: string,
-  authorName: string
-): boolean {
+export function mightBeHallucination(generatedKeyword: string): boolean {
   const lower = generatedKeyword.toLowerCase().trim();
-  const authorLower = authorName.toLowerCase();
 
   // Check if it matches a known unrelated entity
   for (const entity of KNOWN_UNRELATED_ENTITIES) {
@@ -141,16 +138,15 @@ export function mightBeHallucination(
  * Filter out potentially hallucinated keywords when comp data is thin.
  * Applied after scoring, before final selection, when hasEnoughData = false.
  */
-export function filterHallucinatedCompKeywords(
-  keywords: string[],
-  authorName: string,
+export function filterHallucinatedCompKeywords<T extends { text: string }>(
+  keywords: T[],
   compDataHealth: CompDataHealthStatus
-): string[] {
+): T[] {
   if (compDataHealth.hasEnoughData) {
-    // Enough real data — backfilled keywords are probably safe
+    // Enough real data — comparable names are backed by actual competitors
     return keywords;
   }
 
-  // Thin comp data — filter out suspicious keywords
-  return keywords.filter((kw) => !mightBeHallucination(kw, authorName));
+  // Thin comp data — drop the suspicious names rather than bid on them
+  return keywords.filter((keyword) => !mightBeHallucination(keyword.text));
 }

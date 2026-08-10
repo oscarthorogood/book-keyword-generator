@@ -1,121 +1,100 @@
 # Amazon Book Ads Builder
 
-A Manual Sponsored Products campaign builder for books. The flow is
-deliberately simple: enter an ASIN or ISBN, the app gathers as much book
-metadata as it can find for free, scrapes keyword candidates from every
-source it knows how to query, runs an AI pass to judge which ones are
-actually worth testing, and hands back a ready-to-upload Bulksheet. Built
-from two source docs: an analysis of a live account
+A keyword research tool for book ads. The flow is deliberately simple:
+
+1. **Add a book** — paste its Amazon link (or an ASIN/ISBN). That is the
+   whole form.
+2. **Generate keywords** — from the book page, the app builds a long,
+   reviewable keyword list out of 20-plus free sources.
+
+Built from two source docs: an analysis of a live account
 (`AmazonAdsKeywordGeneratorCampaignBuilderLearnings`) and a manual
 keyword-research process (`manual_amazon_book_ads_keyword_research_blueprint`)
 — the latter's alphabet-soup search-bar harvest, best-seller "also bought"
-deep dive, review/blurb language mining, and 3-way campaign structure are
-all automated here to the extent a free scrape can approximate a human
-research pass.
+deep dive and review/blurb language mining are all automated here to the
+extent a free scrape can approximate a human research pass.
 
-This app only ever builds **Manual** campaigns — Amazon's engine-driven Auto
-campaigns and the promote/negate-from-a-report workflow aren't part of it by
-design; the whole point is a self-contained "ASIN in, best-effort keyword
-list out" tool. More functionality (including possibly that workflow) may
-get layered on later, but the core loop below is meant to stay simple.
-
-One page, two API routes, no database — stateless: one request in, one file
-out. Gated behind magic-link sign-in with an admin-approved allowlist.
+Gated behind magic-link sign-in with an admin-approved allowlist.
 
 ## How it works
 
-1. Scrapes the book's own Amazon product page for ISBN, "customers also
-   bought" comp titles + their ASINs, category/best-seller placement,
-   top-review excerpts, and the publisher's own description + bullets.
-2. Crawls a hop past the immediate comp titles — each comp's own "also
-   bought" carousel — for more direct competitors' author, title, ASIN,
-   *and* review text (bounded: up to 5 first-hop + 6 second-hop pages),
-   approximating the research blueprint's best-seller deep dive.
-3. In parallel: calls the Amazon Ads API keyword-recommendations endpoint,
-   sweeps Amazon's *and* Google's unofficial autocomplete endpoints across
-   dozens of seed phrases (title, format/series-order/recency modifiers,
-   title + a–z *and* a–z + title — see "Keyword generation" below), looks
-   up the book in Google Books + Open Library for genre/subject data,
-   scrapes Google Books' "About this book" page for its content-derived
-   "Common terms and phrases" list, and looks up the book on Goodreads for
-   community-tagged trope/genre shelves.
-4. All sources degrade gracefully — if one fails (no Ads API credentials, a
-   blocked scrape, no ISBN match), the app carries on with whatever the
-   other sources returned instead of failing the whole request.
-5. Templates genre/subject terms into buyer-intent phrases and Datamuse
-   synonym expansions, mines recurring phrases out of review excerpts
-   pooled across the seed book *and* every deep-crawled comp title, pulls
-   explicit comp mentions ("perfect for fans of X") out of the book's own
-   blurb, and generates format/series-order/recency modifiers seeded from
-   real search term data.
-6. Merges everything, filters junk (generic terms, scraped-page boilerplate,
-   garbled/bot queries), collapses near-duplicates, routes bare-ASIN
-   "keywords"/ASIN-shaped candidates to product targeting instead of
-   dropping them, scores each surviving keyword by source agreement,
-   specificity (3-5 word phrases score highest), and phrase length.
-7. An optional AI pass (Google Gemini) reviews the heuristically-shortlisted
-   candidates against the book's actual context and decides which are worth
-   testing — see "AI-assisted ranking" below.
-8. Splits the result into 3 Ad Groups — **Tropes & Themes**, **Comp Authors
-   & Titles**, **Product Targeting** — each with its own bid tier, derived
-   from RRP × net margin × target ACOS × conversion rate (or a manual
-   override). Writes one Sponsored Products Bulksheet (Campaign / Ad Group /
-   Product Ad / Keyword / Product Targeting rows per ad group), best-scoring
-   keywords first in each.
+### One capture per book, at creation time
 
-## Campaign structure
+Adding a book reads its Amazon page **once** and stores everything it found
+on the book row as a snapshot (`lib/bookSnapshot.ts`, persisted to
+`books.metadata_json`). The page is read two ways in parallel, because
+Amazon CAPTCHAs product-page requests from datacenter IPs:
 
-The generator splits into 3 Ad Groups under one campaign, matching the
-research blueprint's recommendation to track these separately (section 5):
+- **Firecrawl** (`FIRECRAWL_API_KEY`) renders and extracts the page from its
+  own infrastructure — the reliable path from a cloud deployment. It returns
+  title, author, series, categories, best-seller ranks, comparable titles and
+  authors, review snippets and Q&A.
+- **The direct scrape** (optionally via ScraperAPI / SerpApi) gets the
+  structured bits Firecrawl can't: comp ASINs, the author's catalogue link.
 
-| Ad Group | Contents | Match Types | Bid tier |
-| :--- | :--- | :--- | :--- |
-| **Tropes & Themes** | Genre/subject terms, buyer-intent templates, autocomplete sweeps, review-mined phrases, category placement | User-selected (broad/phrase/exact) | 0.75× base (moderate — exploratory) |
-| **Comp Authors & Titles** | Bare comparable author/title names, from the product page's own carousel and the deep 2-hop crawl | Exact only | 1.0× base (highest intent) |
-| **Product Targeting** | Comp ASINs (own carousel + 2-hop crawl), plus any ASIN-shaped autocomplete/Ads-API "keywords" | n/a (ASIN targeting) | 0.9× base |
+Whichever succeeds fills the snapshot; when both do, the direct scrape's
+precise fields win and Firecrawl fills the gaps. The same call also crawls a
+hop past the immediate comp titles for more competitors and their review
+text, pulls customer Q&A and reviews, and looks the book up in Google Books,
+Open Library, Goodreads, Wikipedia, Wikidata and the Library of Congress.
 
-## Campaign naming convention
+Every source is best-effort and time-budgeted: one slow or blocked source
+never sinks the capture. If the page couldn't be read at all the book is
+still created, but it's labelled honestly and the book page offers a
+**Re-fetch metadata** button rather than silently showing "Unknown Title".
 
-Every campaign this app creates follows:
+### Genre resolution
 
-```
-PB_{creator initials}_{ASIN}_{Author}_{Series Name}_{Title}_{Country}_SPM_{variant}
-```
+What kind of book this is gets decided once, from the book's own taxonomy —
+Amazon's breadcrumb and best-seller categories, Google Books categories, Open
+Library subjects, Goodreads shelves, Wikidata genres (`lib/genre.ts`) — and
+everything downstream is seeded from it.
 
-e.g. `PB_MO_103671165X_Andrew Raymond_A DC Mairead Maclean Mystery_The Long Isle_UK_SPM_1`
+Two things this fixes, both of which used to poison whole keyword lists:
 
-This isn't optional or free-text — it's what lets the downstream monitoring
-system parse ASIN and Author back out of the campaign name with a plain
-string split, no lookup table needed (`lib/naming.ts`). The generator
-computes it server-side from structured fields rather than accepting a
-free-text campaign name. The `SPM` token is fixed (this app only builds
-Manual campaigns) but kept in the name so the field count/position matches
-what downstream tooling already expects.
+- Genre is no longer assumed. The autocomplete sweep and the theme/synonym
+  lexicons used to be hardcoded to thriller/mystery/crime, so a romance or a
+  cookbook got seeded with `<title> thriller` and generated crime keywords
+  off the back of it.
+- Amazon's breadcrumb is a *store* path, not a list of search phrases.
+  `Kindle Store › Kindle eBooks › Mystery, Thriller & Suspense` is now
+  stripped of store scaffolding and split into the phrases readers actually
+  type, instead of templating into keywords like "best kindle store books".
+
+### Keyword generation
+
+Generating keywords reads the stored snapshot instead of re-scraping Amazon,
+so it's fast, repeatable, and works from exactly the metadata the book page
+shows you. Only the cheap, unblocked endpoints run live per generate: the
+four autocomplete engines (Amazon, Google, YouTube, DuckDuckGo), Datamuse
+synonym expansion, and the Amazon Ads API when configured.
+
+From there it merges every source, filters junk (generic terms, store
+scaffolding, scraped-page boilerplate, garbled queries), collapses
+near-duplicates, scores each survivor by source agreement, specificity and
+category relevance, and assigns a match type per keyword: comparable
+author/title names run **exact**, specific 3+ word phrases run **phrase**,
+short generic terms run **broad**. An optional AI pass (Google Gemini)
+re-orders the list and drops off-topic candidates — it never truncates it.
+
+The result lands in the book's keyword manager as a long list (up to 300
+thematic keywords plus 120 comparable names) to review, filter, re-tier and
+prune.
+
+## Identifiers
 
 ### ASIN or ISBN
 
-The ASIN/ISBN field (Generate, Autofill) accepts an ISBN instead of an ASIN
-— for print books, Amazon assigns the ISBN-10 directly as the ASIN, so
-they're the same value. ISBN-13 (with or without hyphens) is converted to
+The add-book field accepts an Amazon product link, an ASIN, or an ISBN —
+for print books, Amazon assigns the ISBN-10 directly as the ASIN, so an ISBN
+and an ASIN are the same value. ISBN-13 (with or without hyphens) is converted to
 its ISBN-10 equivalent and used as the ASIN (`normalizeAsinOrIsbn` in
 `lib/isbn.ts`); 979-prefixed ISBN-13s have no ISBN-10 equivalent and are
-rejected. Both routes normalize server-side — the client never has to get
-this right on its own.
-
-## Bid economics
-
-Bids are derived from RRP rather than a flat default, matching the
-downstream monitoring tracker's actual profitability math (net margin rate
-0.4, i.e. `Net RRP = RRP × 0.4`):
-
-```
-maxCpc = (RRP × 0.4) × targetAcos × estConversionRate   (lib/bidding.ts)
-```
-
-That CPC ceiling is then tiered down for broader match types
-(`MATCH_TYPE_BID_MULTIPLIER`) and for the campaign's 3 ad groups
-(`AD_GROUP_BID_MULTIPLIER` — see "Campaign structure" above). A manual
-Default Bid is still accepted as a fallback when RRP isn't known.
+rejected. A pasted link also carries its own marketplace (amazon.co.uk vs
+amazon.com), which wins over the marketplace dropdown — scraping a .co.uk
+listing against amazon.com returns a different book, or nothing at all
+(`parseAmazonInput` in `lib/amazonUrl.ts`). Parsing happens server-side too,
+so the client never has to get this right on its own.
 
 ### Keyword generation, in more detail
 
@@ -214,30 +193,34 @@ better one:
   `lib/keywordMerge.ts`) — drops garbled/bot queries (a character-class
   sanity check, not linguistic) and scraped-page artifacts like rating
   widget text (`"4.5 out of 5 stars"`, `"955)"`) that leak in from product
-  page scraping. Both were confirmed present in a real production bulksheet.
-- **Bare-ASIN routing** (`extractAsinCandidates` in `lib/keywordMerge.ts`,
-  `lib/productTargets.ts`) — Auto-targeting's complements/substitutes clauses
-  match against other *products*, not text, so raw ASINs sometimes show up
-  as "search terms." Those are routed to Product Targeting rows instead of
-  being dropped as junk keywords.
+  page scraping. Both were confirmed present in real production keyword output.
+- **Bare-ASIN routing** (`extractAsinCandidates` in `lib/keywordMerge.ts`) —
+  Auto-targeting's complements/substitutes clauses match against other
+  *products*, not text, so raw ASINs sometimes show up as "search terms."
+  Those are split out rather than bid on as keywords.
 - **Near-duplicate collapsing** — a plural/word-order-insensitive signature
   merges near-identical candidates ("wizard school books" / "wizard schools
   book") so budget isn't split across the same idea twice.
 - **Confidence scoring + bid tiering** — keywords multiple independent
   sources agree on (and Ads-API-sourced ones, which carry real bid data)
   score highest and keep their bid; single-source speculative terms get a
-  discounted bid so testing them risks less spend. Bids are also tiered by
-  match type (`MATCH_TYPE_BID_MULTIPLIER` in `lib/bidding.ts` — exact match
-  gets the full CPC ceiling, broad the deepest discount). The Bulksheet
-  output is sorted best-first.
-- **Per-ad-group caps** — Tropes & Themes follows Amazon's own
-  keyword-targeting guidance of 25-50 keywords per ad group
-  (`RECOMMENDED_MIN_KEYWORDS` / `RECOMMENDED_MAX_KEYWORDS`); the UI flags it
-  if free sources come up short of 25 rather than padding with filler. Comp
-  Authors & Titles caps at 40 (`COMP_NAME_MAX_KEYWORDS`, matching the
-  blueprint's 20-40 direct-competitor target) and Product Targeting at 30
-  (`PRODUCT_TARGET_MAX` in `lib/productTargets.ts`) — both independent of the
-  Tropes cap since they're now separate ad groups, not one shared budget.
+  discounted bid so testing them risks less spend. The list is sorted
+  best-first.
+- **Per-keyword match types** (`pickMatchType` in `lib/keywordMerge.ts`) —
+  comparable author/title names run exact (a bare name in phrase match pulls
+  in every book that mentions it), specific 3+ word phrases run phrase, and
+  short generic terms run broad, where they need Amazon's expansion to find
+  real queries.
+- **Caps sized for research, not for one ad group** — a book's keyword list
+  is reviewed and pruned by hand, so it holds up to 300 thematic keywords
+  (`BOOK_KEYWORD_MAX`) plus 120 comparable names (`BOOK_COMP_NAME_MAX`).
+  Amazon's own 25-50-per-ad-group guidance (`RECOMMENDED_MIN_KEYWORDS` /
+  `RECOMMENDED_MAX_KEYWORDS`) applies when you carve an ad group out of that
+  list, not to the list itself.
+- **Thin-comp protection** (`lib/compDataValidation.ts`) — when the crawl
+  found only a comp or two, the comparable-names bucket is mostly names that
+  drifted in from page furniture (imprints, bookshops, unrelated authors with
+  similar names). Those are dropped rather than bid on.
 
 ## AI-assisted ranking
 
@@ -281,52 +264,29 @@ Firecrawl is not used as a fetch mechanism for the structured scrapes
 elsewhere in this app (its markdown output would break the cheerio
 selector-based extraction those rely on) — it's scoped to this one purpose.
 
-## Autofill from ASIN — the Book Profile
+## The book page
 
-The form has an **Autofill** button next to the ASIN field (`/api/lookup`)
-that builds a full book profile from the ASIN/ISBN alone, before the user
-fills in anything else:
+Each book shows the metadata its keywords are generated from — cover, series,
+publisher, rating, best-seller rank, Amazon's category path, and the resolved
+genre vocabulary that seeds every templated keyword — alongside when it was
+captured and how many data points the generator has to work with. If a
+capture came back thin or blocked, the page says so and offers **Re-fetch
+metadata** (`POST /api/books/[id]/refresh`), which re-runs the capture and
+replaces the snapshot.
 
-- Title, author, series, and a best-effort list price — fills Book Title /
-  Author Name / Series Name / RRP directly.
-- **Category path** — Amazon's own breadcrumb hierarchy in order (e.g.
-  `Books › Mystery, Thriller & Suspense › Cozy › Culinary`), so genre and
-  subgenre are read off Amazon's own taxonomy rather than guessed at.
-- **Best Sellers Rank** — the actual rank numbers (`#12 in Cozy Mystery`),
-  not just the category names the rest of the pipeline uses.
-- **Description + bullets** — the publisher's own blurb, same extraction the
-  generate pipeline uses for comp-mention mining (`buildDescriptionCandidates`).
-- **A combined, deduped tag list** — every free source this app already
-  queries, pulled into one list on this first call: the category path,
-  Google Books categories, Open Library subjects, and Goodreads shelf tags.
-  Shown as removable chips on the Generate form (`app/page.tsx`) — prune
-  anything irrelevant, or add your own — and whatever's left when you hit
-  Generate is sent as `knownTags` on the request.
+Books added before snapshots existed (or captured under an older snapshot
+shape) are re-captured automatically the first time keywords are generated,
+so an existing library heals itself rather than generating from metadata that
+isn't there.
 
-`knownTags` isn't just informational — it's folded directly into keyword
-generation as a new high-trust `user-tag` source
-(`buildKnownTagCandidates` in `lib/keywordMerge.ts`, scored above an
-algorithmically-agreed-upon term since a human reviewed it) and used to seed
-buyer-intent templating, Datamuse synonym expansion, and the AI ranking
-step's book context. A human-curated genre list at the top of the funnel is
-meant to raise the floor on everything downstream, not just add one more
-source alongside the rest.
+Optional `keyTropes` on the generate form ("enemies to lovers", "locked room
+mystery") are folded in as a high-trust source and used to seed buyer-intent
+templating, synonym expansion, and the AI ranking step's book context.
 
-This is a heavier call than the old title/author-only Autofill — it now
-also calls Google Books, Open Library, and Goodreads in parallel after the
-Amazon scrape, so `/api/lookup`'s `maxDuration` is 45s (vs 20s before) to
-give Goodreads' occasional two-hop lookup (search + book page) room. Series
-and price extraction remain best-effort (`extractSeriesName` /
-`extractPrice` in `lib/scrape.ts`) — Amazon shows several prices per page
-(Kindle/paperback/hardcover) and this just takes the first one found, so
-treat the prefilled RRP as a starting point to verify, not a guaranteed
-print list price.
-
-"Region" isn't part of this yet — the whole profile is scraped from
-whichever single marketplace is selected in the form. Cross-marketplace
-comparison (does this book rank differently on .com vs .co.uk?) would mean
-scraping the same ASIN across multiple domains, which isn't built — flag if
-that's worth adding.
+"Region" isn't part of this yet — a book is captured from whichever single
+marketplace its link points at. Cross-marketplace comparison (does this book
+rank differently on .com vs .co.uk?) would mean capturing the same ASIN
+across multiple domains, which isn't built.
 
 ## Setup
 
@@ -341,8 +301,8 @@ npm run dev
 See `.env.example`. Required:
 
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` /
-  `SUPABASE_SERVICE_ROLE_KEY` — back both authentication and bulksheet
-  archiving. See "Authentication" below.
+  `SUPABASE_SERVICE_ROLE_KEY` — authentication, and the books/keywords
+  tables. See "Authentication" below.
 - `AUTH_SECRET` — signs the approve/deny links. Must be a long random value in
   production.
 - `RESEND_API_KEY` / `EMAIL_FROM` / `ADMIN_EMAIL` — send the sign-in and
@@ -367,8 +327,8 @@ Optional:
 - `GEMINI_API_KEY` / `FIRECRAWL_API_KEY` — see "AI-assisted ranking" above.
   Neither is required; the app ranks keywords with the heuristic scorer
   alone when they're unset.
-- `NEXT_PUBLIC_SUPABASE_URL` / `SUPABASE_SERVICE_ROLE_KEY` — see "Bulksheet
-  archiving" below. Both are needed together; unset means downloads only.
+- `FIRECRAWL_API_KEY` — the most reliable way to read an Amazon book page
+  from a cloud deployment; see "Scraping from a cloud deployment" below.
 
 ### Authentication
 
@@ -426,31 +386,6 @@ Route protection is in `proxy.ts` (Next 16's rename of `middleware.ts`).
 Because a matcher change can silently drop coverage, `/api/generate` and
 `/api/lookup` re-check the session themselves.
 
-### Bulksheet archiving (Supabase Storage)
-
-When both Supabase variables are set, `/api/generate` uploads a copy of each
-generated `.xlsx` to a **private** Storage bucket named `bulksheets` and
-returns a 1-hour signed link in the `X-Archive-Url` response header, which the
-UI renders under the success banner. Objects are keyed
-`<userId>/YYYY/MM/DD/<uuid>-<campaign>.xlsx` — per-user, so each person's
-history is separable and any future Storage policy has a prefix to key off.
-Generations without a session (there are none today) land under `shared/`.
-
-Create the bucket once (Storage > New bucket, private, MIME type
-`application/vnd.openxmlformats-officedocument.spreadsheetml.sheet`).
-
-Two things to keep straight:
-
-- The service-role key bypasses row-level security. It is read only in
-  `lib/supabaseStorage.ts`, which is server-only — never import that module
-  from a Client Component, and never rename the var to `NEXT_PUBLIC_*`.
-- No Storage RLS policies are required, because only the service role touches
-  the bucket. If you later let the browser read or write it directly, you must
-  add policies on `storage.objects` first.
-
-Archiving is best-effort: a missing bucket, expired key, or Storage outage is
-logged server-side and the bulksheet still downloads normally.
-
 ### Deploy
 
 Push this repo to GitHub, then import it in Vercel and set the environment
@@ -488,21 +423,11 @@ etc.), edit `resolveScraperProxyUrl` in `lib/scrape.ts` — most use a similar
 
 ## Known open items
 
-- **Bulksheet schema needs a final check against a live template.** The
-  columns in `lib/bulksheet.ts` reflect Amazon's documented Sponsored Products
-  bulk-operations schema, but Amazon revises it periodically. Before the first
-  real upload, download a fresh template from Campaign Manager > Bulk
-  Operations and diff its header row against `COLUMNS` in that file.
-- **Product Targeting expression format is unverified.** Product targets are
-  written as `asin="B0..."` — the same class of assumption already flagged
-  for the Keyword rows above — confirm against a live downloaded template
-  before uploading.
-- **Bid economics formula deviates from the source doc's literal wording** —
-  see the comment in `lib/bidding.ts`. The doc states
-  `(Net revenue × ACOS) / conversion rate`; this implements
-  `(Net revenue × ACOS) × conversion rate` instead, since dividing by a
-  fraction inflates the max CPC above the max spend per sale. Worth a second
-  look if the resulting bids look off in practice.
+- **Firecrawl's structured-extraction request shape** in `lib/firecrawl.ts`
+  is written against the documented v1 `/scrape` contract, with a fallback to
+  the `json`-format variant if that request is rejected. Both are unverified
+  against a live key from this environment — check the server logs on the
+  first real capture if extractions come back empty.
 - **Ads API keyword-recommendations request/response shape** in
   `lib/amazonAds.ts` is written against the documented v3
   `sp/targets/keywords/recommendations` contract. Verify against the live
@@ -512,7 +437,8 @@ etc.), edit `resolveScraperProxyUrl` in `lib/scrape.ts` — most use a similar
   non-mocked run.
 - **Amazon and Google autocomplete scrapes are inherently fragile**
   (`lib/scrape.ts`) — both can change or block their unofficial endpoints
-  without notice. Wired to fail soft (empty result), never to block the export.
+  without notice. Wired to fail soft (empty result), never to block a
+  generate run.
 - **Review snippet selectors are unverified against a live page** — same
   caveat as the Google Books scrape below. `extractReviewSnippets` in
   `lib/scrape.ts` targets Amazon's current `data-hook="review-body"` /
@@ -569,6 +495,5 @@ etc.), edit `resolveScraperProxyUrl` in `lib/scrape.ts` — most use a similar
 ## Stack
 
 - Next.js (App Router, TypeScript)
-- `exceljs` for writing the Bulksheet `.xlsx` server-side
 - `cheerio` for HTML scraping
-- No database
+- Supabase (Postgres) for books and keywords

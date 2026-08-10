@@ -9,21 +9,13 @@ import BookDetailPage from "@/components/BookDetailPage";
 
 type Page = "dashboard" | "add-book" | "book-detail";
 
-interface Book {
-  id: string;
-  asin: string;
-  title: string;
-  author: string;
-  marketplace: string;
-  total_keywords: number;
-  created_at: string;
-}
-
 export default function Home() {
   const router = useRouter();
   const [currentPage, setCurrentPage] = useState<Page>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  // Only the id is held here — the detail page loads the book itself, so
+  // there's no half-populated copy of the row to keep in sync.
+  const [selectedBookId, setSelectedBookId] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -85,7 +77,7 @@ export default function Home() {
               onClick={() => {
                 if (item.label === "Books") {
                   setCurrentPage("dashboard");
-                  setSelectedBook(null);
+                  setSelectedBookId(null);
                 }
               }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
@@ -124,11 +116,11 @@ export default function Home() {
 
       {/* Main Content */}
       <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-72" : "ml-20"}`}>
-        {currentPage === "dashboard" && !selectedBook && (
+        {currentPage === "dashboard" && (
           <BooksListDashboard
             onAddBook={() => setCurrentPage("add-book")}
-            onSelectBook={(book) => {
-              setSelectedBook(book);
+            onSelectBook={(bookId) => {
+              setSelectedBookId(bookId);
               setCurrentPage("book-detail");
             }}
           />
@@ -137,24 +129,16 @@ export default function Home() {
           <AddBookForm
             onBack={() => setCurrentPage("dashboard")}
             onSuccess={(bookId) => {
-              setSelectedBook({
-                id: bookId,
-                asin: "",
-                title: "",
-                author: "",
-                marketplace: "",
-                total_keywords: 0,
-                created_at: "",
-              });
+              setSelectedBookId(bookId);
               setCurrentPage("book-detail");
             }}
           />
         )}
-        {currentPage === "book-detail" && selectedBook && (
+        {currentPage === "book-detail" && selectedBookId && (
           <BookDetailPage
-            bookId={selectedBook.id}
+            bookId={selectedBookId}
             onBack={() => {
-              setSelectedBook(null);
+              setSelectedBookId(null);
               setCurrentPage("dashboard");
             }}
           />

@@ -1,21 +1,16 @@
-import { currentUser, supabaseServer } from "@/lib/supabaseServer";
+import { applyAiRelevance, isAiRankingConfigured, rankKeywordsWithAi } from "@/lib/aiRanker";
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
-import { isAiRankingConfigured, mergeAiRanking, rankKeywordsWithAi } from "@/lib/aiRanker";
-import {
-  enrichBookMetadata,
-  lookupLocSubjects,
-  lookupWikidataGenres,
-  lookupWikipediaCategories,
-} from "@/lib/bookMetadata";
+import type { BookSnapshot } from "@/lib/bookSnapshot";
+import { loadBookWithSnapshot } from "@/lib/bookStore";
+import { assessCompDataHealth, filterHallucinatedCompKeywords } from "@/lib/compDataValidation";
 import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { boostScoresByDescriptionQuality } from "@/lib/descriptionQuality";
-import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
-import { buildGoodreadsTagCandidates, getGoodreadsTags } from "@/lib/goodreads";
+import { genreFamilySearchTerms, genreFamilyThemeTerms } from "@/lib/genre";
+import { buildGoodreadsTagCandidates } from "@/lib/goodreads";
+import { ALL_KEYWORD_CATEGORIES, buildCategorizedKeywordCandidates } from "@/lib/keywordCategories";
 import {
-  ALL_KEYWORD_CATEGORIES,
-  buildCategorizedKeywordCandidates,
-} from "@/lib/keywordCategories";
-import {
+  BOOK_COMP_NAME_MAX,
+  BOOK_KEYWORD_MAX,
   boostScoresByCompetitorQuality,
   buildAmazonRecommendationCandidates,
   buildAuthorCatalogCandidates,
@@ -28,19 +23,19 @@ import {
   buildDescriptionMetadataCandidates,
   buildDescriptionPhraseCandidates,
   buildFirecrawlCandidates,
+  buildGenreFamilyCandidates,
   buildGenreMetadataCandidates,
   buildKnownTagCandidates,
   buildLocCandidates,
   buildQnaCandidates,
   buildReviewGenreIndicators,
-  buildSyntheticGenreKeywords,
   buildWikidataCandidates,
   buildWikipediaCandidates,
   collapseNearDuplicates,
-  COMP_NAME_MAX_KEYWORDS,
   extractAsinCandidates,
   mergeKeywordCandidates,
-  RECOMMENDED_MAX_KEYWORDS,
+  pickMatchType,
+  primaryKeywordSource,
   scoreAndTierBids,
   splitKeywordsByCategory,
 } from "@/lib/keywordMerge";
@@ -48,25 +43,23 @@ import { validateFinalKeywords } from "@/lib/keywordValidation";
 import { mineReviewLanguage } from "@/lib/reviewMining";
 import {
   buildAutocompleteSeeds,
-  buildMetadataSeeds,
   getAutocompleteKeywordSet,
   getDuckDuckGoAutocompleteKeywordSet,
   getGoogleAutocompleteKeywordSet,
-  getProductPageUrl,
   getYoutubeAutocompleteKeywordSet,
-  scrapeAuthorCatalog,
-  scrapeCustomerQnA,
-  scrapeCustomerReviews,
-  scrapeProductPage,
-  scrapeRelatedCompetitors,
 } from "@/lib/scrape";
-import { KeywordCandidate, KeywordCategory, KeywordSource, Marketplace } from "@/lib/types";
+import { currentUser, supabaseServer } from "@/lib/supabaseServer";
+import { KeywordCandidate, KeywordCategory, KeywordSource } from "@/lib/types";
 
 export const runtime = "nodejs";
-// Same rationale as the old campaign pipeline: dozens of small outbound
-// scrape/lookup requests across every source below need room to finish.
 export const maxDuration = 60;
 
+/**
+ * The sources the pipeline draws on. Everything scraped from Amazon (product
+ * page, competitors, reviews, Q&A, author catalog) comes from the snapshot
+ * captured when the book was added; only the cheap, unblocked endpoints
+ * (autocomplete engines, Datamuse, the Ads API) run live per generate.
+ */
 const ALL_KEYWORD_SOURCES: KeywordSource[] = [
   "ads-api",
   "autocomplete",
@@ -93,17 +86,125 @@ const ALL_KEYWORD_SOURCES: KeywordSource[] = [
   "key-trope",
 ];
 
+/** Candidate groups built purely from the stored snapshot — no network calls. */
+function buildSnapshotCandidates(
+  snapshot: BookSnapshot,
+  keyTropes: string[],
+  knownTags: string[],
+  keywordCategories: KeywordCategory[]
+): {
+  groups: Partial<Record<KeywordSource, KeywordCandidate[]>>;
+  categorized: KeywordCandidate[];
+  genreSeedTerms: string[];
+} {
+  const familySearchTerms = genreFamilySearchTerms(snapshot.genreFamilies);
+  const themeTerms = genreFamilyThemeTerms(snapshot.genreFamilies);
+
+  // Genre vocabulary from Amazon's own placement and the external catalogues,
+  // plus the curated search phrasing for the families it lands in.
+  const genreMetadataCandidates = mergeKeywordCandidates(
+    buildGenreMetadataCandidates({
+      title: snapshot.title,
+      author: snapshot.author,
+      categories: snapshot.googleBooksCategories,
+      subjects: snapshot.openLibrarySubjects,
+      commonTerms: snapshot.commonTerms,
+    }),
+    buildGenreFamilyCandidates(snapshot.genreTerms, familySearchTerms)
+  );
+
+  const bookContentCandidates = mergeKeywordCandidates(
+    buildBookContentCandidates(snapshot.commonTerms),
+    buildDescriptionMetadataCandidates(snapshot.description, snapshot.bulletPoints, themeTerms)
+  );
+
+  const descriptionCandidates = [
+    ...buildDescriptionCandidates(snapshot.description, snapshot.bulletPoints),
+    ...buildDescriptionPhraseCandidates(snapshot.description),
+  ];
+
+  const reviewText = [...snapshot.reviewSnippets, ...snapshot.compReviewSnippets, ...snapshot.reviewBodies];
+  const reviewLanguageCandidates = mergeKeywordCandidates(
+    mineReviewLanguage(reviewText),
+    buildReviewGenreIndicators(reviewText, themeTerms)
+  );
+
+  // Seed terms for buyer-intent templating: the book's real genre vocabulary,
+  // never a guessed one, and only the best-attested end of it. Every term here
+  // is multiplied across a dozen templates, so a weak one (a stray Open
+  // Library subject like "man-woman relationships") becomes a dozen weak
+  // keywords. deriveGenreTerms already orders by source trust.
+  const genreSeedTerms = [
+    ...snapshot.genreTerms.slice(0, 8),
+    ...knownTags,
+    ...familySearchTerms.slice(0, 4),
+  ].filter(Boolean);
+
+  const categorized = buildCategorizedKeywordCandidates({
+    title: snapshot.title ?? "",
+    author: snapshot.author ?? "",
+    seriesName: snapshot.seriesName,
+    genreTerms: genreSeedTerms,
+    categoryPath: snapshot.categoryPath,
+    competitors: snapshot.competitors,
+    compTitles: snapshot.compTitles,
+    description: snapshot.description,
+    bulletPoints: snapshot.bulletPoints,
+    keyTropes,
+    goodreadsTags: snapshot.goodreadsTags,
+    reviewLanguagePhrases: reviewLanguageCandidates.map((c) => c.text),
+    enabledCategories: new Set(keywordCategories),
+  });
+
+  return {
+    genreSeedTerms,
+    categorized,
+    groups: {
+      "comp-title": buildCompTitleCandidates({
+        compTitles: snapshot.compTitles,
+        categories: snapshot.categories,
+      }),
+      "comp-name": buildCompNameCandidates(snapshot.competitors),
+      "author-catalog": buildAuthorCatalogCandidates(snapshot.authorCatalogTitles),
+      "amazon-recs": buildAmazonRecommendationCandidates([
+        snapshot.frequentlyBoughtTogether,
+        snapshot.compareWithSimilar,
+      ]),
+      "genre-metadata": genreMetadataCandidates,
+      "book-content": bookContentCandidates,
+      "book-description": descriptionCandidates,
+      "review-language": reviewLanguageCandidates,
+      "customer-qna": buildQnaCandidates(snapshot.qnaQuestions),
+      wikipedia: buildWikipediaCandidates(snapshot.wikipediaCategories),
+      wikidata: buildWikidataCandidates(snapshot.wikidataGenres),
+      "loc-subjects": buildLocCandidates(snapshot.locSubjects),
+      "goodreads-tags": buildGoodreadsTagCandidates(snapshot.goodreadsTags),
+      firecrawl: buildFirecrawlCandidates(snapshot.firecrawlMetadata),
+      "user-tag": buildKnownTagCandidates(knownTags),
+      "buyer-intent": buildBuyerIntentCandidates(genreSeedTerms, {
+        title: snapshot.title,
+        author: snapshot.author,
+        seriesName: snapshot.seriesName,
+      }),
+    },
+  };
+}
+
+function countBy<T extends string>(values: T[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const value of values) counts[value] = (counts[value] ?? 0) + 1;
+  return counts;
+}
+
 /**
  * POST /api/books/[id]/keywords/generate
- * Runs the book through the full multi-source keyword pipeline (the same
- * ~20+ sources the old campaign generator used: Ads API recommendations,
- * four autocomplete engines, deep "also bought" competitor crawl, author
- * catalog, genre/Wikipedia/Wikidata/LoC metadata, buyer-intent templating,
- * description/review/Q&A mining, Datamuse + curated synonyms, Goodreads
- * tags, Amazon's own recs modules, and optional Firecrawl/AI ranking) and
- * inserts the resulting shortlist straight into the keywords table —
- * a book-scoped, campaign-free version of the old /api/generate pipeline.
- * Body: { keyTropes?: string[], knownTags?: string[], keywordCategories?: KeywordCategory[], defaultBid?: number, sources?: KeywordSource[] }
+ * Body: { keyTropes?: string[], knownTags?: string[], keywordCategories?: KeywordCategory[], sources?: KeywordSource[], defaultBid?: number }
+ *
+ * Runs the book's stored metadata snapshot through every keyword source and
+ * writes the result into the book's keyword list. The snapshot is captured
+ * when the book is added (lib/bookSnapshot.ts) and re-captured here only if
+ * it's missing or stale, so generation is fast and produces the same keywords
+ * the book page says it's working from.
  */
 export async function POST(
   request: Request,
@@ -118,25 +219,35 @@ export async function POST(
     }
 
     const supabase = await supabaseServer();
+    const loaded = await loadBookWithSnapshot(supabase, bookId, user.id);
 
-    const { data: book, error: bookError } = await supabase
-      .from("books")
-      .select("id, asin, marketplace, title, author")
-      .eq("id", bookId)
-      .eq("user_id", user.id)
-      .single();
-
-    if (bookError || !book) {
+    if (!loaded) {
       return Response.json({ error: "Book not found" }, { status: 404 });
     }
 
+    const { snapshot } = loaded;
+
+    // Without a title there is no book to research: every source would be
+    // seeded with nothing and the run would return noise. Say so instead.
+    if (!snapshot.capture.ok || !snapshot.title) {
+      return Response.json(
+        {
+          error:
+            "This book's Amazon metadata could not be read, so there's nothing to generate keywords from. Re-fetch the metadata and try again.",
+          needsRefresh: true,
+        },
+        { status: 422 }
+      );
+    }
+
     const body = await request.json().catch(() => ({}));
-    const keyTropes: string[] = Array.isArray(body.keyTropes)
-      ? body.keyTropes.filter((t: unknown): t is string => typeof t === "string").slice(0, 50)
-      : [];
-    const knownTags: string[] = Array.isArray(body.knownTags)
-      ? body.knownTags.filter((t: unknown): t is string => typeof t === "string").slice(0, 50)
-      : [];
+    const asStrings = (value: unknown, limit: number): string[] =>
+      Array.isArray(value)
+        ? value.filter((v): v is string => typeof v === "string" && v.trim().length > 0).slice(0, limit)
+        : [];
+
+    const keyTropes = asStrings(body.keyTropes, 50);
+    const knownTags = asStrings(body.knownTags, 50);
     const keywordCategories: KeywordCategory[] = Array.isArray(body.keywordCategories)
       ? body.keywordCategories.filter((c: unknown): c is KeywordCategory =>
           typeof c === "string" && ALL_KEYWORD_CATEGORIES.includes(c as KeywordCategory)
@@ -151,266 +262,138 @@ export async function POST(
     );
     const defaultBid = typeof body.defaultBid === "number" && body.defaultBid > 0 ? body.defaultBid : 0.5;
 
-    const asin = book.asin as string;
-    const marketplace = (book.marketplace as Marketplace) || "US";
-    const bookTitle = book.title as string;
-    const authorName = book.author as string;
+    const { groups, categorized, genreSeedTerms } = buildSnapshotCandidates(
+      snapshot,
+      keyTropes,
+      knownTags,
+      keywordCategories
+    );
 
-    const productPage = await scrapeProductPage(asin, marketplace);
-    const seedTerms = buildAutocompleteSeeds(bookTitle, authorName);
+    // Live sources: autocomplete engines are JSON endpoints that aren't
+    // subject to Amazon's product-page bot wall, and Datamuse/Ads API are
+    // proper APIs — cheap enough to re-run on every generate.
+    const seedTerms = [
+      ...buildAutocompleteSeeds({
+        title: snapshot.title,
+        author: snapshot.author,
+        genreTerms: snapshot.genreTerms,
+        seriesName: snapshot.seriesName,
+      }),
+      ...snapshot.firecrawlSeeds,
+    ];
 
     const [
-      adsApiResult,
-      firecrawlExtraction,
-      autocompleteResult,
-      googleAutocompleteResult,
-      youtubeAutocompleteResult,
-      duckDuckGoAutocompleteResult,
-      bookMetadata,
-      relatedCompetitors,
-      firecrawlMarkdown,
-      qnaQuestions,
-      reviewBodies,
-      authorCatalogTitles,
-      wikipediaCategories,
-      wikidataGenres,
-      locSubjects,
+      adsApiCandidates,
+      amazonAutocomplete,
+      googleAutocomplete,
+      youtubeAutocomplete,
+      duckDuckGoAutocomplete,
+      datamuseSynonyms,
     ] = await Promise.all([
       isAdsApiConfigured()
-        ? getAdsApiKeywordRecommendations(asin, marketplace)
-            .then((candidates) => ({ candidates, error: undefined as string | undefined }))
-            .catch((err: Error) => ({ candidates: [] as KeywordCandidate[], error: err.message }))
-        : Promise.resolve({ candidates: [] as KeywordCandidate[], error: "Amazon Ads API credentials not configured." }),
-      buildMetadataSeeds(asin, marketplace),
-      getAutocompleteKeywordSet(seedTerms, marketplace),
+        ? getAdsApiKeywordRecommendations(snapshot.asin, snapshot.marketplace).catch((err: Error) => {
+            console.error("[generate] Ads API recommendations failed:", err.message);
+            return [] as KeywordCandidate[];
+          })
+        : Promise.resolve([] as KeywordCandidate[]),
+      getAutocompleteKeywordSet(seedTerms, snapshot.marketplace),
       getGoogleAutocompleteKeywordSet(seedTerms),
       getYoutubeAutocompleteKeywordSet(seedTerms),
       getDuckDuckGoAutocompleteKeywordSet(seedTerms),
-      enrichBookMetadata({
-        isbn10: productPage.isbn10,
-        isbn13: productPage.isbn13,
-        title: bookTitle,
-        author: authorName,
-      }),
-      scrapeRelatedCompetitors(asin, productPage.compAsins, marketplace),
-      isFirecrawlConfigured() ? scrapeMarkdown(getProductPageUrl(asin, marketplace)) : Promise.resolve(undefined),
-      scrapeCustomerQnA(asin, marketplace),
-      scrapeCustomerReviews(asin, marketplace),
-      productPage.authorUrl ? scrapeAuthorCatalog(productPage.authorUrl, asin) : Promise.resolve([] as string[]),
-      lookupWikipediaCategories(bookTitle),
-      lookupWikidataGenres(bookTitle),
-      lookupLocSubjects(bookTitle),
-    ]);
-
-    // Second sweep of autocomplete using metadata seeds Firecrawl extracted,
-    // same as the old pipeline.
-    const metadataSeeds = firecrawlExtraction.seeds;
-    const metadataAwareAutocompleteResults = await Promise.all([
-      metadataSeeds.length > 0 ? getAutocompleteKeywordSet(metadataSeeds, marketplace) : Promise.resolve([]),
-      metadataSeeds.length > 0 ? getGoogleAutocompleteKeywordSet(metadataSeeds) : Promise.resolve([]),
-      metadataSeeds.length > 0 ? getYoutubeAutocompleteKeywordSet(metadataSeeds) : Promise.resolve([]),
-      metadataSeeds.length > 0 ? getDuckDuckGoAutocompleteKeywordSet(metadataSeeds) : Promise.resolve([]),
-    ]);
-
-    const mergedAutocompleteResult = [...autocompleteResult, ...metadataAwareAutocompleteResults[0]];
-    const mergedGoogleAutocompleteResult = [...googleAutocompleteResult, ...metadataAwareAutocompleteResults[1]];
-    const mergedYoutubeAutocompleteResult = [...youtubeAutocompleteResult, ...metadataAwareAutocompleteResults[2]];
-    const mergedDuckDuckGoAutocompleteResult = [...duckDuckGoAutocompleteResult, ...metadataAwareAutocompleteResults[3]];
-
-    const { keywords: adsApiKeywords } = extractAsinCandidates(adsApiResult.candidates);
-    const { keywords: autocompleteKeywords } = extractAsinCandidates(mergedAutocompleteResult);
-    const { keywords: googleAutocompleteKeywords } = extractAsinCandidates(mergedGoogleAutocompleteResult);
-    const { keywords: youtubeAutocompleteKeywords } = extractAsinCandidates(mergedYoutubeAutocompleteResult);
-    const { keywords: duckDuckGoAutocompleteKeywords } = extractAsinCandidates(mergedDuckDuckGoAutocompleteResult);
-
-    let genreMetadataCandidates = buildGenreMetadataCandidates(bookMetadata);
-    if (genreMetadataCandidates.length === 0) {
-      genreMetadataCandidates = [
-        ...buildDescriptionMetadataCandidates(productPage.description, productPage.bulletPoints),
-        ...buildSyntheticGenreKeywords(bookTitle, productPage.description),
-      ];
-    }
-
-    let bookContentCandidates = buildBookContentCandidates(bookMetadata.commonTerms);
-    if (bookContentCandidates.length === 0) {
-      bookContentCandidates = buildDescriptionMetadataCandidates(productPage.description, productPage.bulletPoints);
-    }
-
-    const compTitleCandidates = buildCompTitleCandidates(productPage);
-    const deepCompNameCandidates = buildCompNameCandidates(relatedCompetitors.competitors);
-    const authorCatalogCandidates = buildAuthorCatalogCandidates(authorCatalogTitles);
-    const amazonRecsCandidates = buildAmazonRecommendationCandidates([
-      productPage.frequentlyBoughtTogether,
-      productPage.compareWithSimilar,
-    ]);
-    const firecrawlCandidates = buildFirecrawlCandidates(firecrawlExtraction.metadata);
-    const knownTagCandidates = buildKnownTagCandidates(knownTags);
-    const genreSeedTerms = [...genreMetadataCandidates.map((c) => c.text), ...knownTags];
-    const buyerIntentCandidates = buildBuyerIntentCandidates(genreSeedTerms, {
-      title: bookTitle,
-      author: authorName,
-    });
-    const descriptionCandidates = [
-      ...buildDescriptionCandidates(productPage.description, productPage.bulletPoints),
-      ...buildDescriptionPhraseCandidates(productPage.description),
-    ];
-
-    let qnaCandidates = buildQnaCandidates(qnaQuestions);
-    if (qnaCandidates.length === 0 && productPage.reviewSnippets.length > 0) {
-      qnaCandidates = buildReviewGenreIndicators(productPage.reviewSnippets);
-    }
-
-    let reviewLanguageCandidates = mineReviewLanguage([
-      ...productPage.reviewSnippets,
-      ...relatedCompetitors.reviewSnippets,
-      ...reviewBodies,
-    ]);
-    if (reviewLanguageCandidates.length === 0 && productPage.reviewSnippets.length > 0) {
-      reviewLanguageCandidates = buildReviewGenreIndicators(productPage.reviewSnippets);
-    }
-
-    let wikipediaCandidates = buildWikipediaCandidates(wikipediaCategories);
-    let wikidataCandidates = buildWikidataCandidates(wikidataGenres);
-    if (wikipediaCandidates.length === 0 && wikidataCandidates.length === 0) {
-      const syntheticGenres = buildSyntheticGenreKeywords(bookTitle, productPage.description);
-      if (syntheticGenres.length > 0) wikidataCandidates = syntheticGenres;
-    }
-
-    let locCandidates = buildLocCandidates(locSubjects);
-    if (locCandidates.length === 0) {
-      locCandidates = buildSyntheticGenreKeywords(bookTitle, productPage.description).slice(0, 5);
-    }
-
-    const [datamuseSynonymCandidates, goodreadsTags] = await Promise.all([
       getSynonymExpansionCandidates(genreSeedTerms),
-      getGoodreadsTags(productPage.isbn10, bookTitle, authorName),
     ]);
-    const synonymCandidates = [...datamuseSynonymCandidates, ...buildCuratedSynonymCandidates(genreSeedTerms)];
-    let goodreadsTagCandidates = buildGoodreadsTagCandidates(goodreadsTags);
-    if (goodreadsTagCandidates.length === 0 && productPage.reviewSnippets.length > 0) {
-      goodreadsTagCandidates = buildReviewGenreIndicators(productPage.reviewSnippets).slice(0, 5);
-    }
 
-    const reviewLanguagePhrases = reviewLanguageCandidates.map((c) => c.text);
-    const categorizedCandidates = buildCategorizedKeywordCandidates({
-      title: bookTitle,
-      author: authorName,
-      genreTerms: genreSeedTerms,
-      categoryPath: productPage.categoryPath ?? [],
-      competitors: relatedCompetitors.competitors,
-      compTitles: productPage.compTitles ?? [],
-      description: productPage.description,
-      bulletPoints: productPage.bulletPoints ?? [],
-      keyTropes,
-      goodreadsTags,
-      reviewLanguagePhrases,
-      enabledCategories: new Set(keywordCategories),
-    });
-
-    const sourceCandidateGroups: Partial<Record<KeywordSource, KeywordCandidate[]>> = {
-      "ads-api": adsApiKeywords,
-      autocomplete: autocompleteKeywords,
-      "google-autocomplete": googleAutocompleteKeywords,
-      "youtube-autocomplete": youtubeAutocompleteKeywords,
-      "duckduckgo-autocomplete": duckDuckGoAutocompleteKeywords,
-      "comp-title": compTitleCandidates,
-      "comp-name": deepCompNameCandidates,
-      "author-catalog": authorCatalogCandidates,
-      "user-tag": knownTagCandidates,
-      "genre-metadata": genreMetadataCandidates,
-      "book-content": bookContentCandidates,
-      "buyer-intent": buyerIntentCandidates,
-      "book-description": descriptionCandidates,
-      "review-language": reviewLanguageCandidates,
-      "customer-qna": qnaCandidates,
-      synonym: synonymCandidates,
-      wikipedia: wikipediaCandidates,
-      wikidata: wikidataCandidates,
-      "loc-subjects": locCandidates,
-      "goodreads-tags": goodreadsTagCandidates,
-      "amazon-recs": amazonRecsCandidates,
-      firecrawl: firecrawlCandidates,
+    // Autocomplete corpora occasionally return bare ASINs; those belong to
+    // product targeting, not the keyword list.
+    const liveGroups: Partial<Record<KeywordSource, KeywordCandidate[]>> = {
+      "ads-api": extractAsinCandidates(adsApiCandidates).keywords,
+      autocomplete: extractAsinCandidates(amazonAutocomplete).keywords,
+      "google-autocomplete": extractAsinCandidates(googleAutocomplete).keywords,
+      "youtube-autocomplete": extractAsinCandidates(youtubeAutocomplete).keywords,
+      "duckduckgo-autocomplete": extractAsinCandidates(duckDuckGoAutocomplete).keywords,
+      synonym: [...datamuseSynonyms, ...buildCuratedSynonymCandidates(genreSeedTerms)],
     };
 
-    const filteredCategorizedCandidates = categorizedCandidates.filter((c) =>
-      c.sources.some((source) => enabledSources.has(source))
+    const sourceCandidateGroups = { ...groups, ...liveGroups };
+    const contributingSources = ALL_KEYWORD_SOURCES.filter(
+      (source) => enabledSources.has(source) && (sourceCandidateGroups[source]?.length ?? 0) > 0
     );
+
     const merged = mergeKeywordCandidates(
       ...ALL_KEYWORD_SOURCES.filter((s) => enabledSources.has(s)).map((s) => sourceCandidateGroups[s] ?? []),
-      filteredCategorizedCandidates
-    );
-    const { tropes: tropesCandidates, compNames: compNameCandidates } = splitKeywordsByCategory(
-      collapseNearDuplicates(merged)
+      categorized.filter((c) => c.sources.some((source) => enabledSources.has(source)))
     );
 
-    const AI_SHORTLIST_MULTIPLIER = 1.6;
-    let tropesShortlist = scoreAndTierBids(tropesCandidates, defaultBid, knownTags);
-    tropesShortlist = boostScoresByDescriptionQuality(
-      tropesShortlist,
-      { description: productPage.description, bulletPoints: productPage.bulletPoints },
+    const { tropes, compNames } = splitKeywordsByCategory(collapseNearDuplicates(merged));
+
+    let tropesKeywords = boostScoresByDescriptionQuality(
+      scoreAndTierBids(tropes, defaultBid, knownTags),
+      { description: snapshot.description, bulletPoints: snapshot.bulletPoints },
       "book-description"
     ).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-    tropesShortlist = tropesShortlist.slice(0, Math.round(RECOMMENDED_MAX_KEYWORDS * AI_SHORTLIST_MULTIPLIER));
 
-    const scoredCompNames = scoreAndTierBids(compNameCandidates, defaultBid, knownTags);
-    const qualityBoostedCompNames = boostScoresByCompetitorQuality(
-      scoredCompNames,
-      relatedCompetitors.competitors,
+    let compNameKeywords = boostScoresByCompetitorQuality(
+      scoreAndTierBids(compNames, defaultBid, knownTags),
+      snapshot.competitors,
       0.2
-    );
-    const compNamesShortlist = qualityBoostedCompNames.slice(
-      0,
-      Math.round(COMP_NAME_MAX_KEYWORDS * AI_SHORTLIST_MULTIPLIER)
-    );
+    ).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
-    let tropesKeywords: KeywordCandidate[];
-    let compNameKeywords: KeywordCandidate[];
+    tropesKeywords = validateFinalKeywords(tropesKeywords, defaultBid).slice(0, BOOK_KEYWORD_MAX);
 
+    // When the crawl only found a comp or two, the "comparable author/title"
+    // bucket is mostly names that drifted in from page furniture — imprints,
+    // bookshops, unrelated authors with similar names. Drop those rather than
+    // bid on them.
+    const compDataHealth = assessCompDataHealth(snapshot.competitors);
+    compNameKeywords = filterHallucinatedCompKeywords(
+      validateFinalKeywords(compNameKeywords, defaultBid),
+      compDataHealth
+    ).slice(0, BOOK_COMP_NAME_MAX);
+
+    // Optional relevance pass. It reorders and drops off-topic candidates but
+    // never truncates the list — an AI that only mentions half the keywords
+    // shouldn't cost the user the other half.
+    let aiRanked = false;
     if (isAiRankingConfigured()) {
       const ranked = await rankKeywordsWithAi(
         {
-          title: bookTitle,
-          author: authorName,
+          title: snapshot.title,
+          author: snapshot.author ?? "",
+          seriesName: snapshot.seriesName,
           genreTerms: genreSeedTerms,
-          description: productPage.description,
-          pageMarkdown: firecrawlMarkdown,
+          description: snapshot.description,
+          pageMarkdown: snapshot.pageMarkdownExcerpt,
         },
-        tropesShortlist,
-        compNamesShortlist
+        tropesKeywords,
+        compNameKeywords
       );
       if (ranked) {
-        const combinedShortlist = [...tropesShortlist, ...compNamesShortlist];
-        tropesKeywords = mergeAiRanking(combinedShortlist, ranked, "tropes", RECOMMENDED_MAX_KEYWORDS);
-        compNameKeywords = mergeAiRanking(combinedShortlist, ranked, "comp-names", COMP_NAME_MAX_KEYWORDS);
-      } else {
-        tropesKeywords = tropesShortlist.slice(0, RECOMMENDED_MAX_KEYWORDS);
-        compNameKeywords = compNamesShortlist.slice(0, COMP_NAME_MAX_KEYWORDS);
+        aiRanked = true;
+        tropesKeywords = applyAiRelevance(tropesKeywords, ranked);
+        compNameKeywords = applyAiRelevance(compNameKeywords, ranked);
       }
-    } else {
-      tropesKeywords = tropesShortlist.slice(0, RECOMMENDED_MAX_KEYWORDS);
-      compNameKeywords = compNamesShortlist.slice(0, COMP_NAME_MAX_KEYWORDS);
     }
-
-    tropesKeywords = validateFinalKeywords(tropesKeywords, defaultBid);
-    compNameKeywords = validateFinalKeywords(compNameKeywords, defaultBid);
 
     const finalCandidates = [...tropesKeywords, ...compNameKeywords];
 
     if (finalCandidates.length === 0) {
       return Response.json(
-        { error: "No keyword candidates could be generated for this book. All sources failed, returned nothing, or were deselected." },
+        {
+          error:
+            "No keywords could be generated from this book's metadata. Try re-fetching the metadata, or add a few key tropes to seed the search.",
+        },
         { status: 502 }
       );
     }
 
-    const rows = finalCandidates.map((c) => ({
+    const rows = finalCandidates.map((candidate) => ({
       book_id: bookId,
       user_id: user.id,
-      text: c.text,
-      match_type: "phrase" as const,
-      category: c.category ?? null,
-      source: c.sources[0] ?? "generated",
-      bid: c.suggestedBid ?? defaultBid,
+      text: candidate.text,
+      match_type: pickMatchType(candidate),
+      category: candidate.category ?? null,
+      source: primaryKeywordSource(candidate),
+      bid: candidate.suggestedBid ?? defaultBid,
     }));
 
     const { data: inserted, error: insertError } = await supabase
@@ -422,11 +405,24 @@ export async function POST(
       return Response.json({ error: insertError.message }, { status: 400 });
     }
 
+    const insertedCount = inserted?.length ?? 0;
+
     return Response.json({
       success: true,
       generatedCount: finalCandidates.length,
-      insertedCount: inserted?.length ?? 0,
-      keywords: inserted,
+      insertedCount,
+      alreadyPresentCount: finalCandidates.length - insertedCount,
+      keywordCount: tropesKeywords.length,
+      compNameCount: compNameKeywords.length,
+      contributingSources,
+      bySource: countBy(rows.map((r) => r.source)),
+      byCategory: countBy(rows.map((r) => r.category).filter((c): c is string => !!c)),
+      byMatchType: countBy(rows.map((r) => r.match_type)),
+      genreTerms: snapshot.genreTerms.slice(0, 10),
+      compDataHealth,
+      aiRanked,
+      metadataCapturedAt: snapshot.capturedAt,
+      metadataRefreshed: loaded.captured,
     });
   } catch (err) {
     console.error("Error generating keywords:", err);
