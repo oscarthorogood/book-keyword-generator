@@ -14,8 +14,9 @@ export function Header({ isAdmin = false }: { isAdmin?: boolean }) {
   const pathname = usePathname();
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
-  // Don't show header on login page
-  if (pathname === "/login") {
+  // "/" renders its own full sidebar nav (including sign out), and /login has
+  // no session yet — the global header would duplicate or overlap both.
+  if (pathname === "/login" || pathname === "/") {
     return null;
   }
 

@@ -63,6 +63,8 @@ export interface GenerateRequest extends CampaignIdentity {
   keywordCategories?: KeywordCategory[];
   /** User-supplied tropes/themes/settings (e.g. "grumpy billionaire", "enemies to lovers") — the app can't reliably scrape these, so they seed the character-trope/relationship-trope/plot-device/setting categories directly. See buildKeyTropeCandidates. */
   keyTropes?: string[];
+  /** Book-centric flow: links the generated campaign to its parent book. */
+  bookId?: string;
 }
 
 export type KeywordSource =

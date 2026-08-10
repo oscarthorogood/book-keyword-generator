@@ -1,8 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Plus, Zap, Target } from "lucide-react";
-import { createBrowserClient } from "@supabase/ssr";
+import { ArrowLeft, Download, Plus, Sparkles, Zap, Target } from "lucide-react";
 
 interface Campaign {
   id: string;
@@ -14,6 +13,8 @@ interface Campaign {
   total_rows: number;
   daily_budget: number;
   created_at: string;
+  config_json?: { variant?: number } | null;
+  hasBulksheet?: boolean;
 }
 
 interface Book {
@@ -56,49 +57,18 @@ export default function BookDetailPage({
     async function loadBook() {
       try {
         setLoading(true);
-        const supabase = createBrowserClient(
-          process.env.NEXT_PUBLIC_SUPABASE_URL!,
-          process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-        );
+        const res = await fetch(`/api/books/${bookId}`);
+        const body = await res.json().catch(() => ({}));
 
-        const { data, error: err } = await supabase
-          .from("books")
-          .select(
-            `
-            id,
-            asin,
-            title,
-            author,
-            marketplace,
-            description,
-            campaign_count,
-            total_keywords,
-            total_spend,
-            created_at,
-            metadata_json,
-            campaigns (
-              id,
-              name,
-              status,
-              tropes_keyword_count,
-              comp_names_keyword_count,
-              product_target_count,
-              total_rows,
-              daily_budget,
-              created_at
-            )
-          `
-          )
-          .eq("id", bookId)
-          .single();
-
-        if (err) {
-          console.warn("Could not load book:", err.message);
-        } else if (data) {
-          setBook(data as Book);
+        if (!res.ok) {
+          console.warn("Could not load book:", body.error);
+          setBook(null);
+        } else {
+          setBook(body.book as Book);
         }
       } catch (err) {
         console.warn("Failed to load book:", err);
+        setBook(null);
       } finally {
         setLoading(false);
       }
@@ -195,7 +165,14 @@ export default function BookDetailPage({
                   className="flex items-center justify-between p-4 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors group"
                 >
                   <div className="flex-1">
-                    <p className="font-medium text-gray-900">{campaign.name}</p>
+                    <p className="font-medium text-gray-900">
+                      {campaign.name}
+                      {campaign.config_json?.variant != null && (
+                        <span className="ml-2 text-xs font-normal text-gray-500">
+                          v{campaign.config_json.variant}
+                        </span>
+                      )}
+                    </p>
                     <p className="text-xs text-gray-500">
                       {campaign.total_rows} rows · Created{" "}
                       {new Date(campaign.created_at).toLocaleDateString()}
@@ -225,6 +202,36 @@ export default function BookDetailPage({
                           {campaign.comp_names_keyword_count}
                         </div>
                       </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        type="button"
+                        disabled
+                        title="Improve — coming soon"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-400 cursor-not-allowed"
+                      >
+                        <Sparkles size={14} />
+                        Improve
+                      </button>
+                      {campaign.hasBulksheet ? (
+                        <a
+                          href={`/api/campaigns/${campaign.id}/download`}
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-700 hover:bg-gray-50 transition-colors"
+                        >
+                          <Download size={14} />
+                          Download
+                        </a>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled
+                          title="No bulksheet generated yet"
+                          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 text-gray-400 cursor-not-allowed"
+                        >
+                          <Download size={14} />
+                          Download
+                        </button>
+                      )}
                     </div>
                   </div>
                 </div>

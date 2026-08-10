@@ -45,6 +45,8 @@ export async function GET(
           product_target_count,
           total_rows,
           daily_budget,
+          config_json,
+          bulksheet_path,
           created_at
         )
       `
@@ -60,9 +62,18 @@ export async function GET(
       );
     }
 
+    // Don't leak the raw storage path to the client — it only ever needs to
+    // know whether a bulksheet exists; the download route re-signs it.
+    const campaigns = (book.campaigns ?? []).map(
+      ({ bulksheet_path, ...c }: Record<string, unknown>) => ({
+        ...c,
+        hasBulksheet: !!bulksheet_path,
+      })
+    );
+
     return Response.json({
       success: true,
-      book,
+      book: { ...book, campaigns },
     });
   } catch (err) {
     console.error("Error in get book:", err);

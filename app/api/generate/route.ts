@@ -11,7 +11,7 @@ import {
 } from "@/lib/bookMetadata";
 import { buildBulksheet, SpmAdGroup } from "@/lib/bulksheet";
 import { archiveBulksheet } from "@/lib/supabaseStorage";
-import { currentUser } from "@/lib/supabaseServer";
+import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import { saveCampaign } from "@/lib/campaignPersistence";
 import { getSynonymExpansionCandidates } from "@/lib/datamuse";
 import { isFirecrawlConfigured, scrapeMarkdown } from "@/lib/firecrawl";
@@ -263,9 +263,12 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
         .slice(0, 50)
     : [];
 
+  const bookId = typeof b.bookId === "string" && b.bookId.trim() ? b.bookId.trim() : undefined;
+
   return {
     value: {
       asin,
+      bookId,
       marketplace: b.marketplace as Marketplace,
       creatorInitials: b.creatorInitials.trim(),
       authorName: b.authorName.trim(),
@@ -323,6 +326,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: validated.error }, { status: 400 });
   }
   const request = validated.value;
+
+  if (request.bookId) {
+    const supabase = await supabaseServer();
+    const { data: book } = await supabase
+      .from("books")
+      .select("id")
+      .eq("id", request.bookId)
+      .eq("user_id", user.id)
+      .single();
+    if (!book) {
+      return NextResponse.json({ error: "Book not found." }, { status: 404 });
+    }
+  }
 
   // Phase 1.6: Generate deterministic request fingerprint for caching
   const requestFingerprint = generateRequestFingerprint(request);
@@ -955,6 +971,7 @@ export async function POST(req: NextRequest) {
   // Save campaign to database for history and re-running (Phase 3)
   await saveCampaign({
     userId: user.id,
+    bookId: request.bookId,
     asin: request.asin,
     campaignName,
     marketplace: request.marketplace,
@@ -975,6 +992,7 @@ export async function POST(req: NextRequest) {
       dailyBudget: request.dailyBudget,
       startDate: request.startDate,
       endDate: request.endDate,
+      variant: request.variant,
     },
   });
 
