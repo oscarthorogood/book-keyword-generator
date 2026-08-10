@@ -1,5 +1,6 @@
 import * as cheerio from "cheerio";
 import { extractAmazonMetadata, isFirecrawlConfigured, type AmazonPageMetadata } from "./firecrawl";
+import { fetchAmazonProductViaSerpApi, isSerpApiConfigured } from "./serpApi";
 import { KeywordCandidate, Marketplace, ProductPageData, RelatedCompetitor, RelatedCompetitorCrawl } from "./types";
 
 const AMAZON_DOMAINS: Record<Marketplace, string> = {
@@ -1057,7 +1058,7 @@ export function getProductPageUrl(asin: string, marketplace: Marketplace): strin
   return `https://www.${domain}/dp/${encodeURIComponent(asin)}`;
 }
 
-export async function scrapeProductPage(
+async function scrapeProductPageDirect(
   asin: string,
   marketplace: Marketplace
 ): Promise<ProductPageData> {
@@ -1249,6 +1250,47 @@ export async function scrapeProductPage(
     console.error(`${logPrefix} -> fetch threw:`, err instanceof Error ? err.message : err);
     return EMPTY_PRODUCT_PAGE;
   }
+}
+
+/**
+ * Scrapes the book's own Amazon product page for title/author/ISBN/series/
+ * price plus thematic context: "customers also bought" titles + their
+ * ASINs, category/best-seller placement text, and review excerpts.
+ * Best-effort — returns whatever it can find, empty arrays/undefined fields
+ * on total failure.
+ *
+ * When the direct scrape gets bot-checked (or otherwise comes back with no
+ * title), supplements from SerpApi's Amazon Product API if configured —
+ * same rationale as lib/amazonLookup.ts's autofill path: SerpApi fetches
+ * from its own infrastructure, sidestepping the CAPTCHA wall. This only
+ * fills in the fields SerpApi's product endpoint actually returns (title,
+ * description, bullets, category breadcrumbs, price/rating, ISBN/publisher
+ * details) — comp-title/ASIN crawling still depends on the direct scrape
+ * working, since that data isn't reliably present in SerpApi's response.
+ */
+export async function scrapeProductPage(
+  asin: string,
+  marketplace: Marketplace
+): Promise<ProductPageData> {
+  const direct = await scrapeProductPageDirect(asin, marketplace);
+
+  if ((direct.blocked || !direct.title) && isSerpApiConfigured()) {
+    const serpResult = await fetchAmazonProductViaSerpApi(asin, marketplace);
+    if (serpResult) {
+      const merged: ProductPageData = { ...direct };
+      for (const [key, value] of Object.entries(serpResult)) {
+        if (value === undefined || value === null) continue;
+        const current = (merged as unknown as Record<string, unknown>)[key];
+        const isEmpty = current === undefined || current === null || current === "" || (Array.isArray(current) && current.length === 0);
+        if (isEmpty) {
+          (merged as unknown as Record<string, unknown>)[key] = value;
+        }
+      }
+      return merged;
+    }
+  }
+
+  return direct;
 }
 
 const FIRST_HOP_ASIN_LIMIT = 5;
