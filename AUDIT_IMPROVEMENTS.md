@@ -6,7 +6,17 @@
 
 ---
 
-## ✅ Implemented (Priority 1-4)
+## ✅ Implemented (Priority 1-8)
+
+### Phase 1.6: Deterministic Generation — **COMPLETE**
+**Status:** ✅ COMPLETE (Commit 33fdf52, 2026-08-10)
+
+**What's new:**
+- Author code caching: Same author always gets same 2-char code
+- Request fingerprinting: SHA256 hash of all generation inputs for cache key
+- Keyword caching: Validated keywords stored per ASIN + fingerprint
+- **Impact:** Idempotent generation (same inputs → same outputs within single process)
+- **Docs:** See `docs/PHASE-1-6-DETERMINISTIC-GENERATION.md`
 
 ### 1. ASIN Validation (§2.2) — **CRITICAL**
 **Status:** ✅ COMPLETE
@@ -109,6 +119,20 @@ These are category taxonomy, not search phrases.
 - Campaign-level: 40 negatives (spoilers, movies, free, piracy, local intent, etc.)
 - Per-ad-group: 10-15 negatives tailored to each group's purpose
 - **Impact:** Foundation for weekly harvest-and-negate workflow
+
+### 8. Phase 1.6: Deterministic Generation (§1.6) — **COMPLETE**
+**Status:** ✅ COMPLETE
+
+**What was broken:** Running the generator twice on the same ASIN produced:
+- Different author codes (FM vs MF for Freida McFadden)
+- Different keyword sets (~96% overlap, 3 keywords differ)
+- Non-deterministic campaign names and bulksheets
+
+**Solution:**
+- Created `lib/authorCodeCache.ts` with deterministic author-code generation (first letter + second word's first letter, with hash fallback)
+- Created `lib/keywordCache.ts` with request fingerprinting (SHA256 of all input parameters) and keyword caching
+- Integrated into `app/api/generate/route.ts` to cache final keyword sets after validation
+- **Impact:** Same ASIN + same parameters = same keywords + same author code + same bulksheet (within single server process; Phase 2 adds cross-restart persistence)
 
 ---
 
