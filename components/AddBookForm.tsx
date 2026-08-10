@@ -7,7 +7,7 @@ const MARKETPLACES = ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const;
 
 interface AddBookFormProps {
   onBack: () => void;
-  onSuccess: () => void;
+  onSuccess: (bookId: string) => void;
 }
 
 interface BookMetadata {
@@ -88,15 +88,22 @@ export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
 
       const data = await res.json();
 
-      if (!res.ok) {
+      // A book already existing for this ASIN/marketplace isn't a failure —
+      // the point of entering an ASIN is to land on that book's detail page
+      // either way, so treat 409 the same as a successful create.
+      if (!res.ok && res.status !== 409) {
         throw new Error(data.error || "Failed to create book");
       }
 
+      const bookId = data.book?.id || data.bookId;
+      if (!bookId) {
+        throw new Error("Book was saved but no book ID was returned.");
+      }
+
       setStatus("success");
-      // Redirect after success
       setTimeout(() => {
-        onSuccess();
-      }, 1500);
+        onSuccess(bookId);
+      }, 800);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
       setStatus("error");

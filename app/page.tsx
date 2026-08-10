@@ -136,7 +136,18 @@ export default function Home() {
         {currentPage === "add-book" && (
           <AddBookForm
             onBack={() => setCurrentPage("dashboard")}
-            onSuccess={() => setCurrentPage("dashboard")}
+            onSuccess={(bookId) => {
+              setSelectedBook({
+                id: bookId,
+                asin: "",
+                title: "",
+                author: "",
+                marketplace: "",
+                total_keywords: 0,
+                created_at: "",
+              });
+              setCurrentPage("book-detail");
+            }}
           />
         )}
         {currentPage === "book-detail" && selectedBook && (
