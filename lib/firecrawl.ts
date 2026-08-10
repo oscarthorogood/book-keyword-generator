@@ -135,7 +135,10 @@ interface FirecrawlScrapeResponse {
   error?: string;
 }
 
-async function postScrape(body: Record<string, unknown>): Promise<FirecrawlScrapeResponse | null> {
+async function postScrape(
+  body: Record<string, unknown>,
+  timeoutMs: number
+): Promise<FirecrawlScrapeResponse | null> {
   const res = await fetchWithTimeout(
     "https://api.firecrawl.dev/v1/scrape",
     {
@@ -146,7 +149,7 @@ async function postScrape(body: Record<string, unknown>): Promise<FirecrawlScrap
       },
       body: JSON.stringify(body),
     },
-    FIRECRAWL_TIMEOUT_MS
+    timeoutMs
   );
 
   if (!res.ok) {
@@ -160,24 +163,38 @@ async function postScrape(body: Record<string, unknown>): Promise<FirecrawlScrap
  * Structured extraction of an Amazon book page.
  *
  * Firecrawl has shipped more than one request shape for structured
- * extraction (`formats: ["extract"]` with an `extract` block, and a
- * `json`-format variant), and which one an account gets depends on the API
- * version it's on. Rather than betting on one and silently returning nothing,
- * this tries the documented v1 shape first and falls back to the json-format
- * shape if that request is rejected — and reads the payload from whichever
- * key comes back.
+ * extraction: LLM extraction now lives under the `json` format with the
+ * schema in `jsonOptions`, and the older `extract` format with a top-level
+ * `extract` block is still accepted. Which one an account gets depends on the
+ * API version it's on, so this tries the current shape first and falls back
+ * to the legacy one — and reads the payload from whichever key comes back.
+ *
+ * Both shapes name the format as a *string*, which the nested-object form
+ * this used to send did not: `formats: [{ type: "json", … }]` belongs to the
+ * v2 endpoint and v1 rejected it outright with a 400, so the fallback attempt
+ * could never succeed and Amazon's bot checks had nothing to fall back to.
+ *
+ * `timeoutMs` bounds both attempts together, not each one: this runs inside a
+ * capture that has its own deadline (lib/bookSnapshot.ts), and a retry that
+ * starts after the budget is gone can only make the caller late.
  */
-export async function extractAmazonMetadata(url: string): Promise<AmazonPageMetadata> {
+export async function extractAmazonMetadata(
+  url: string,
+  timeoutMs: number = FIRECRAWL_TIMEOUT_MS
+): Promise<AmazonPageMetadata> {
   if (!FIRECRAWL_API_KEY) return {};
 
   const attempts: Record<string, unknown>[] = [
+    { url, formats: ["json"], jsonOptions: { schema: EXTRACTION_SCHEMA }, onlyMainContent: false },
     { url, formats: ["extract"], extract: { schema: EXTRACTION_SCHEMA }, onlyMainContent: false },
-    { url, formats: [{ type: "json", schema: EXTRACTION_SCHEMA }], onlyMainContent: false },
   ];
 
+  const endsAt = Date.now() + timeoutMs;
   for (const body of attempts) {
+    const remaining = endsAt - Date.now();
+    if (remaining <= 0) break;
     try {
-      const json = await postScrape(body);
+      const json = await postScrape(body, remaining);
       const extracted = json?.data?.extract ?? json?.data?.json ?? json?.data?.llm_extraction;
       if (extracted && Object.keys(extracted).length > 0) return extracted;
     } catch (err) {
@@ -193,11 +210,14 @@ export async function extractAmazonMetadata(url: string): Promise<AmazonPageMeta
  * AI relevance pass (lib/aiRanker.ts) — fuller review text and editorial copy
  * than the field-by-field extraction above captures.
  */
-export async function scrapeMarkdown(url: string): Promise<string | undefined> {
+export async function scrapeMarkdown(
+  url: string,
+  timeoutMs: number = FIRECRAWL_TIMEOUT_MS
+): Promise<string | undefined> {
   if (!FIRECRAWL_API_KEY) return undefined;
 
   try {
-    const json = await postScrape({ url, formats: ["markdown"], onlyMainContent: true });
+    const json = await postScrape({ url, formats: ["markdown"], onlyMainContent: true }, timeoutMs);
     return json?.data?.markdown;
   } catch (err) {
     console.error("[scrapeMarkdown] Firecrawl request failed:", err instanceof Error ? err.message : err);

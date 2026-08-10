@@ -6,7 +6,7 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { captureBookSnapshot, isUsableSnapshot, type BookSnapshot } from "./bookSnapshot";
+import { captureBookSnapshot, DEFAULT_CAPTURE_BUDGET_MS, isUsableSnapshot, type BookSnapshot } from "./bookSnapshot";
 import type { Marketplace } from "./types";
 
 export interface BookRecord {
@@ -95,7 +95,12 @@ export async function loadBookWithSnapshot(
     return { book, snapshot: book.metadata_json, captured: false };
   }
 
-  const snapshot = await captureBookSnapshot(book.asin, book.marketplace);
+  // Both callers of loadBookWithSnapshot (keyword generation's lazy
+  // re-capture, and the manual re-fetch route) run inside a route with a 60s
+  // maxDuration, same as "add a book" — the explicit budget leaves headroom
+  // so a slow scrape costs metadata instead of the whole request being
+  // killed with no response at all.
+  const snapshot = await captureBookSnapshot(book.asin, book.marketplace, { budgetMs: DEFAULT_CAPTURE_BUDGET_MS });
   const updated = await persistSnapshot(supabase, book, snapshot);
   return { book: updated, snapshot, captured: true };
 }

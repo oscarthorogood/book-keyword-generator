@@ -18,6 +18,16 @@ const CAPTURE_STEPS = [
   "Almost there — saving the book…",
 ];
 
+/** Fallback wording for a response that carried no error message of its own. */
+function describeHttpFailure(status: number): string {
+  if (status === 401) return "Your session has expired. Sign in again and retry.";
+  if (status === 504 || status === 408) {
+    return "Amazon took too long to respond, so the capture was cut short before the book could be saved. Try again — it usually works on a second attempt.";
+  }
+  if (status >= 500) return "The server hit an error while capturing this book. Try again in a moment.";
+  return "Could not add that book.";
+}
+
 interface AddBookFormProps {
   onBack: () => void;
   onSuccess: (bookId: string) => void;
@@ -63,7 +73,9 @@ export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
       // ASIN is to land on that book either way, so treat it as success.
       const bookId = data.book?.id ?? data.bookId;
       if (!res.ok && res.status !== 409) {
-        throw new Error(data.error || "Could not add that book.");
+        // A gateway timeout has no JSON body, so `data.error` is empty and the
+        // generic message told the user nothing about what to do next.
+        throw new Error(data.error || describeHttpFailure(res.status));
       }
       if (!bookId) {
         throw new Error("The book was saved but no ID came back. Refresh your library to find it.");

@@ -152,7 +152,11 @@ async function callSerpApi(params: Record<string, string>): Promise<JsonRecord |
   try {
     const res = await fetchWithTimeout(`${SERPAPI_ENDPOINT}?${query.toString()}`);
     if (!res.ok) {
-      console.error(`[serpApi] ${label} failed: HTTP ${res.status}`);
+      // SerpApi explains a rejected request in the body (`{"error": "…"}`) —
+      // a bare status told us a call was failing but never which parameter it
+      // objected to, which is not enough to fix anything.
+      const detail = await res.text().catch(() => "");
+      console.error(`[serpApi] ${label} failed: HTTP ${res.status}${detail ? ` — ${detail.slice(0, 300)}` : ""}`);
       return null;
     }
     const data = rec(await res.json());
