@@ -356,77 +356,62 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
+
+    if (!asin || !authorName || !bookTitle) {
+      setErrorMessage("Please fill in ASIN, Author, and Title");
+      return;
+    }
+
     setStatus("loading");
     setErrorMessage(null);
-    setSources(null);
-    setTropesKeywordCount(null);
-    setCompNameKeywordCount(null);
-    setProductTargetCount(null);
-    setManualKeywordCount(null);
-    setRecommendedRange(null);
-    setArchiveUrl(null);
-    setResultCampaignName(null);
 
     try {
-      const body: Record<string, unknown> = {
-        asin,
-        marketplace,
-        creatorInitials,
-        authorName,
-        bookTitle,
-        seriesName: seriesName || undefined,
-        seriesOrder: seriesOrder ? Number(seriesOrder) : undefined,
-        seriesTotal: seriesTotal ? Number(seriesTotal) : undefined,
-        variant: Number(variant) || 1,
-        dailyBudget: Number(dailyBudget),
-        startDate,
-        endDate: campaignDuration === "limited" ? endDate : undefined,
-        matchTypeStrategy: matchTypeStrategy !== "custom" ? matchTypeStrategy : undefined,
-        matchTypes,
-        knownTags: profileTags,
-        sources: selectedSources,
-        keywordTypes: selectedKeywordTypes,
-        keywordCategories: selectedKeywordCategories,
-        keyTropes,
-        manualKeywords,
-      };
-      if (useRrpBidding) {
-        body.bidEconomics = {
-          rrp: Number(rrp),
-          targetAcos: Number(targetAcosPct) / 100,
-          estConversionRate: Number(estConversionRatePct) / 100,
-        };
-      } else {
-        body.defaultBid = Number(defaultBid);
+      // Simplified: just save campaign basics, no generation
+      const normalizedAsin = normalizeAsinOrIsbn(asin);
+      if (!normalizedAsin) {
+        throw new Error("Invalid ASIN/ISBN format");
       }
 
-      const res = await fetch("/api/generate", {
+      const campaignName = buildCampaignName({
+        asin: normalizedAsin,
+        marketplace,
+        creatorInitials: creatorInitials || "XX",
+        authorName,
+        bookTitle,
+        seriesName: seriesName.trim() ? seriesName : undefined,
+        variant: Number(variant) || 1,
+      });
+
+      const res = await fetch("/api/campaigns/save", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
+        body: JSON.stringify({
+          asin: normalizedAsin,
+          campaignName,
+          marketplace,
+          authorName,
+          bookTitle,
+          seriesName: seriesName || null,
+          seriesOrder: seriesOrder ? parseInt(seriesOrder) : null,
+          seriesTotal: seriesTotal ? parseInt(seriesTotal) : null,
+          variant: Number(variant) || 1,
+        }),
       });
 
       if (!res.ok) {
         const errBody = await res.json().catch(() => ({}));
         setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
-        setSources(errBody.sources ?? null);
         setStatus("error");
         return;
       }
 
-      const data = await res.json();
-
-      setSources(data.sourceStatuses ?? null);
-      setTropesKeywordCount(data.tropesKeywordCount ?? 0);
-      setCompNameKeywordCount(data.compNameKeywordCount ?? 0);
-      setProductTargetCount(data.productTargetCount ?? 0);
-      setManualKeywordCount(data.manualKeywordCount ?? 0);
-      setRecommendedRange(data.recommendedRange ?? null);
-      setResultCampaignName(data.campaignName ?? null);
-      setAiRankingUsed(data.aiRankingUsed ?? false);
-      setArchiveUrl(data.archiveUrl ?? null);
-
       setStatus("success");
+      setErrorMessage(null);
+
+      // Redirect back to dashboard after 1.5 seconds
+      setTimeout(() => {
+        onBack();
+      }, 1500);
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Something went wrong.");
       setStatus("error");
@@ -477,64 +462,10 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
         </div>
 
         <form onSubmit={handleSubmit}>
-          <div className="mb-8">
-            {/* Progress Stepper */}
-            <div className="flex items-center justify-between mb-6">
-              {Array.from({ length: TOTAL_PAGES }, (_, i) => {
-                const page = (i + 1) as FormPage;
-                const isActive = page === currentPage;
-                const isComplete = page < currentPage;
-                return (
-                  <div key={page} className="flex items-center flex-1">
-                    <button
-                      type="button"
-                      onClick={() => setCurrentPage(page)}
-                      className="flex flex-col items-center flex-1"
-                    >
-                      <div
-                        className={`w-8 h-8 rounded-full flex items-center justify-center mb-2 transition-all ${
-                          isActive
-                            ? "bg-gray-900 text-white shadow-md"
-                            : isComplete
-                            ? "bg-gray-600 text-white"
-                            : "bg-gray-200 text-gray-600"
-                        }`}
-                      >
-                        {isComplete ? "✓" : page}
-                      </div>
-                      <span
-                        className={`text-xs font-medium text-center max-w-16 leading-tight ${
-                          isActive ? "text-gray-900 font-semibold" : "text-gray-600"
-                        }`}
-                      >
-                        {PAGE_TITLES[page]}
-                      </span>
-                    </button>
-                    {page < TOTAL_PAGES && (
-                      <div
-                        className="flex-1 h-0.5 mx-1 transition-all"
-                        style={{
-                          background: isComplete ? "var(--accent-green)" : "var(--line)",
-                        }}
-                      />
-                    )}
-                  </div>
-                );
-              })}
-            </div>
-            <div className="w-full h-1 bg-line rounded-full overflow-hidden">
-              <div
-                className="h-full transition-all"
-                style={{
-                  background: "var(--accent-blue)",
-                  width: `${(currentPage / TOTAL_PAGES) * 100}%`,
-                }}
-              />
-            </div>
-          </div>
+          {/* Progress Stepper - Hidden for simplified flow */}
 
           <div className="min-h-96">
-            {currentPage === 1 && (
+            {/* Simplified flow - only show first page for campaign creation */}
               <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 md:gap-6 items-start">
                 <div className="flex flex-col gap-5 md:gap-6">
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-2">
@@ -1154,8 +1085,9 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
               </div>
             </div>
             </div>
-            )}
 
+            {/* Pages 2-6 hidden in simplified flow */}
+            {false && (<>
             {currentPage === 2 && (
             <div className="flex flex-col gap-5 md:gap-6 max-w-2xl">
               <div className="card">
@@ -1753,36 +1685,27 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
               </div>
             </div>
             )}
+            </>
+            )}
           </div>
 
-          {/* Navigation */}
+          {/* Navigation - Simplified to only save campaign basics */}
           <div className="flex gap-3 mt-8 justify-between">
             <button
               type="button"
-              onClick={() => setCurrentPage((p) => (p > 1 ? ((p - 1) as FormPage) : p))}
-              disabled={currentPage === 1}
-              className="btn-pill-outline px-6 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
+              onClick={onBack}
+              className="btn-pill-outline px-6 py-2.5"
             >
-              ← Previous
+              ← Cancel
             </button>
 
-            {currentPage === TOTAL_PAGES ? (
-              <button
-                type="submit"
-                disabled={isLoading || matchTypes.length === 0 || selectedKeywordTypes.length === 0 || (campaignDuration === "limited" && !endDate)}
-                className="btn-pill-dark px-6 py-2.5"
-              >
-                {isLoading ? "Generating…" : "Generate Manual Bulksheet"}
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={() => setCurrentPage((p) => (p < TOTAL_PAGES ? ((p + 1) as FormPage) : p))}
-                className="btn-pill-dark px-6 py-2.5"
-              >
-                Next →
-              </button>
-            )}
+            <button
+              type="submit"
+              disabled={isLoading || !asin || !authorName || !bookTitle}
+              className="btn-pill-dark px-6 py-2.5"
+            >
+              {isLoading ? "Saving…" : "Save Campaign"}
+            </button>
           </div>
         </form>
 
