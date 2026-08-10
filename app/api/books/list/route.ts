@@ -24,7 +24,6 @@ export async function GET(request: Request) {
         title,
         author,
         marketplace,
-        campaign_count,
         total_keywords,
         created_at,
         metadata_json

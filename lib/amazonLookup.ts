@@ -221,20 +221,14 @@ export async function fetchAmazonBookMetadata(
     throw new Error("Invalid ASIN/ISBN format");
   }
 
-  // Determine if it's an ASIN or ISBN
-  // ASIN: starts with B0 and is 10 chars (may contain letters)
-  // ISBN-10: exactly 10 digits
-  // ISBN-13: exactly 13 digits
-  const isAsin = normalized.startsWith("B0") && normalized.length === 10;
+  // For print books the Amazon ASIN *is* the ISBN-10 (see lib/isbn.ts), so
+  // the normalized 10-char value always works as a /dp/ product page slug
+  // regardless of whether it's a "true" ASIN (often B0-prefixed) or a plain
+  // numeric ISBN-10 — scrape it either way rather than guessing from shape.
   const isIsbn10 = /^\d{10}$/.test(normalized);
   const isIsbn13 = /^\d{13}$/.test(normalized);
 
-  let amazonData: Partial<AmazonBookData> = { asin: normalized };
-
-  // If it's an ASIN, scrape Amazon directly (Amazon /dp/ URLs only work with ASINs)
-  if (isAsin) {
-    amazonData = await scrapeAmazonBook(normalized, marketplace);
-  }
+  const amazonData: Partial<AmazonBookData> = await scrapeAmazonBook(normalized, marketplace);
 
   // Enrich with metadata from other sources
   // For ISBNs, this will lookup Google Books/Open Library using the ISBN

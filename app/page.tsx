@@ -6,9 +6,8 @@ import { Folder, LogOut, Shield, ChevronLeft, ChevronRight } from "lucide-react"
 import BooksListDashboard from "@/components/BooksListDashboard";
 import AddBookForm from "@/components/AddBookForm";
 import BookDetailPage from "@/components/BookDetailPage";
-import CampaignGenerationForm from "@/components/CampaignGenerationForm";
 
-type Page = "dashboard" | "add-book" | "book-detail" | "create-campaign";
+type Page = "dashboard" | "add-book" | "book-detail";
 
 interface Book {
   id: string;
@@ -16,7 +15,6 @@ interface Book {
   title: string;
   author: string;
   marketplace: string;
-  campaign_count: number;
   total_keywords: number;
   created_at: string;
 }
@@ -26,7 +24,6 @@ export default function Home() {
   const [currentPage, setCurrentPage] = useState<Page>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [selectedBook, setSelectedBook] = useState<Book | null>(null);
-  const [selectedBookIdForCampaign, setSelectedBookIdForCampaign] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
 
@@ -139,7 +136,18 @@ export default function Home() {
         {currentPage === "add-book" && (
           <AddBookForm
             onBack={() => setCurrentPage("dashboard")}
-            onSuccess={() => setCurrentPage("dashboard")}
+            onSuccess={(bookId) => {
+              setSelectedBook({
+                id: bookId,
+                asin: "",
+                title: "",
+                author: "",
+                marketplace: "",
+                total_keywords: 0,
+                created_at: "",
+              });
+              setCurrentPage("book-detail");
+            }}
           />
         )}
         {currentPage === "book-detail" && selectedBook && (
@@ -148,19 +156,6 @@ export default function Home() {
             onBack={() => {
               setSelectedBook(null);
               setCurrentPage("dashboard");
-            }}
-            onCreateCampaign={(bookId) => {
-              setSelectedBookIdForCampaign(bookId);
-              setCurrentPage("create-campaign");
-            }}
-          />
-        )}
-        {currentPage === "create-campaign" && selectedBookIdForCampaign && (
-          <CampaignGenerationForm
-            bookId={selectedBookIdForCampaign}
-            onBack={() => {
-              setCurrentPage("book-detail");
-              setSelectedBookIdForCampaign(null);
             }}
           />
         )}

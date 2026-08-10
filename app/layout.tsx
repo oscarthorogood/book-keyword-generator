@@ -23,7 +23,7 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Amazon Book Ads Builder",
   description:
-    "Enter a book ASIN/ISBN, gather metadata, scrape keyword candidates from every source, and get an AI-reviewed shortlist for a Manual Sponsored Products campaign.",
+    "Enter a book ASIN/ISBN, gather metadata, and manage a curated keyword list for Amazon Ads targeting.",
 };
 
 export const viewport = {

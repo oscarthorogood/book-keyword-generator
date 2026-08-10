@@ -1,7 +1,13 @@
-import { looksLikeAsin } from "./productTargets";
 import { expandSynonyms } from "./synonyms";
 import { extractKeyPhrases } from "./textExtract";
 import { BookMetadata, KeywordCandidate, KeywordSource, ProductPageData, RelatedCompetitor } from "./types";
+
+const ASIN_PATTERN = /^[A-Z0-9]{10}$/i;
+
+/** True when a string is shaped like an Amazon ASIN (10 alphanumeric chars) — used to route ASIN-shaped "keywords" out of the keyword pool. */
+export function looksLikeAsin(text: string): boolean {
+  return ASIN_PATTERN.test(text.trim());
+}
 
 export function normalize(text: string): string {
   return text.replace(/\s+/g, " ").trim().toLowerCase();
@@ -344,12 +350,10 @@ export function buildDescriptionCandidates(
 }
 
 /**
- * Splits a finalized keyword list into the two Manual-campaign ad group
- * buckets the research blueprint recommends tracking separately: bare
- * comparable author/title names (high purchase intent, exact match only)
- * vs. everything else (thematic/tropes phrases, moderate bids, broader
- * match types). See lib/bulksheet.ts and the generate route for how each
- * bucket becomes its own Ad Group.
+ * Splits a finalized keyword list into two buckets: bare comparable
+ * author/title names (high purchase intent, exact match only) vs.
+ * everything else (thematic/tropes phrases, moderate bids, broader match
+ * types) — used to group keywords for review in the keyword manager.
  */
 export function splitKeywordsByCategory(keywords: KeywordCandidate[]): {
   tropes: KeywordCandidate[];

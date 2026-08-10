@@ -114,9 +114,7 @@ export async function POST(request: Request) {
         author: bookData.author,
         description: bookData.description,
         metadata_json: bookData.metadata_json,
-        campaign_count: 0,
         total_keywords: 0,
-        total_spend: 0,
       })
       .select()
       .single();

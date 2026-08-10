@@ -3,7 +3,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
 
 /**
  * GET /api/books/[id]
- * Get a specific book with all its campaigns
+ * Get a specific book
  */
 export async function GET(
   request: Request,
@@ -20,7 +20,6 @@ export async function GET(
 
     const supabase = await supabaseServer();
 
-    // Get book with campaigns
     const { data: book, error: bookError } = await supabase
       .from("books")
       .select(
@@ -31,24 +30,9 @@ export async function GET(
         author,
         marketplace,
         description,
-        campaign_count,
         total_keywords,
-        total_spend,
         created_at,
-        metadata_json,
-        campaigns (
-          id,
-          name,
-          status,
-          tropes_keyword_count,
-          comp_names_keyword_count,
-          product_target_count,
-          total_rows,
-          daily_budget,
-          config_json,
-          bulksheet_path,
-          created_at
-        )
+        metadata_json
       `
       )
       .eq("id", id)
@@ -62,18 +46,9 @@ export async function GET(
       );
     }
 
-    // Don't leak the raw storage path to the client — it only ever needs to
-    // know whether a bulksheet exists; the download route re-signs it.
-    const campaigns = (book.campaigns ?? []).map(
-      ({ bulksheet_path, ...c }: Record<string, unknown>) => ({
-        ...c,
-        hasBulksheet: !!bulksheet_path,
-      })
-    );
-
     return Response.json({
       success: true,
-      book: { ...book, campaigns },
+      book,
     });
   } catch (err) {
     console.error("Error in get book:", err);

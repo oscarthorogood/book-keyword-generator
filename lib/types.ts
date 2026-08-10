@@ -1,71 +1,6 @@
 export type MatchType = "broad" | "phrase" | "exact";
 
-/**
- * Match-type strategy (Phase 2.1) — determines which match types are included
- * in the campaign and how many rows are generated.
- *
- * - "phrase-only": Single match type (Phrase), 1/3 row count, lower cost
- * - "phrase-exact": Two match types (Phrase + Exact), 2/3 row count, moderate cost
- * - "all": All three match types (Broad + Phrase + Exact), 3x row count, highest cost
- */
-export type MatchTypeStrategy = "phrase-only" | "phrase-exact" | "all";
-
 export type Marketplace = "US" | "UK" | "CA" | "DE" | "FR" | "IT" | "ES";
-
-/**
- * Everything the naming convention needs to build
- * `PB_{initials}_{ASIN}_{Author}_{Series}_{Title}_{Country}_SPM_{variant}`.
- * Kept as a standalone interface so both the generate request and the
- * client-side name preview can share it.
- */
-export interface CampaignIdentity {
-  asin: string;
-  marketplace: Marketplace;
-  creatorInitials: string;
-  authorName: string;
-  bookTitle: string;
-  seriesName?: string;
-  /** Copy number for the "duplicate the winner" pattern (Copy 1, Copy 2, ...). */
-  variant: number;
-}
-
-/** Per-book bid economics — see lib/bidding.ts. RRP is required to derive a max CPC. */
-export interface BidEconomics {
-  /** Recommended retail price, in the marketplace's local currency. */
-  rrp: number;
-  /** Target ACOS as a fraction, e.g. 0.35 for 35%. */
-  targetAcos: number;
-  /** Expected click-to-order conversion rate as a fraction, e.g. 0.08 for 8%. */
-  estConversionRate: number;
-}
-
-export interface GenerateRequest extends CampaignIdentity {
-  dailyBudget: number;
-  startDate: string; // YYYY-MM-DD
-  endDate?: string; // YYYY-MM-DD
-  seriesOrder?: number; // Book position in series (1-based)
-  seriesTotal?: number; // Total books in series
-  /** Match-type strategy (Phase 2.1): which match types to include. Default: "all" for backward compat. */
-  matchTypeStrategy?: MatchTypeStrategy;
-  matchTypes: MatchType[];
-  bidEconomics?: BidEconomics;
-  /** Manual fallback/override when bid economics aren't supplied. */
-  defaultBid?: number;
-  /** User-reviewed/pruned tags from the Autofill book profile — see lib/keywordMerge.ts#buildKnownTagCandidates. */
-  knownTags?: string[];
-  /** Which keyword sources to fold into the candidate pool. Omitted = every source (see ALL_KEYWORD_SOURCES in the generate route). */
-  sources?: KeywordSource[];
-  /** Which ad-group buckets to build into the Bulksheet. Omitted = all three. */
-  keywordTypes?: KeywordGroupType[];
-  /** Free-typed keywords the user explicitly wants included — bypass scoring/caps, guaranteed a slot. See buildManualKeywordCandidates. */
-  manualKeywords?: string[];
-  /** Which of the 20 keyword-intent categories to generate — see lib/keywordCategories.ts. Omitted = every category. */
-  keywordCategories?: KeywordCategory[];
-  /** User-supplied tropes/themes/settings (e.g. "grumpy billionaire", "enemies to lovers") — the app can't reliably scrape these, so they seed the character-trope/relationship-trope/plot-device/setting categories directly. See buildKeyTropeCandidates. */
-  keyTropes?: string[];
-  /** Book-centric flow: links the generated campaign to its parent book. */
-  bookId?: string;
-}
 
 export type KeywordSource =
   | "ads-api"
@@ -92,9 +27,6 @@ export type KeywordSource =
   | "key-trope"
   | "amazon-recs"
   | "firecrawl";
-
-/** The three ad-group buckets a Manual campaign splits into — see the generate route and README "Campaign structure". */
-export type KeywordGroupType = "tropes" | "comp-names" | "product-targeting";
 
 /**
  * The 20-category keyword-intent taxonomy — see lib/keywordCategories.ts for
@@ -280,19 +212,3 @@ export interface RelatedCompetitorCrawl {
   reviewSnippets: string[];
 }
 
-export interface SourceStatus {
-  source: KeywordSource | "product-page";
-  ok: boolean;
-  count?: number;
-  error?: string;
-}
-
-/**
- * A comparable-title ASIN worth bidding on directly (Product Targeting),
- * as opposed to a text keyword. See lib/productTargets.ts.
- */
-export interface ProductTargetCandidate {
-  asin: string;
-  sources: KeywordSource[];
-  suggestedBid?: number;
-}
