@@ -222,8 +222,12 @@ export async function fetchAmazonBookMetadata(
   }
 
   // Determine if it's an ASIN or ISBN
+  // ASIN: starts with B0 and is 10 chars (may contain letters)
+  // ISBN-10: exactly 10 digits
+  // ISBN-13: exactly 13 digits
   const isAsin = normalized.startsWith("B0") && normalized.length === 10;
-  const isIsbn = normalized.length === 10 || normalized.length === 13;
+  const isIsbn10 = /^\d{10}$/.test(normalized);
+  const isIsbn13 = /^\d{13}$/.test(normalized);
 
   let amazonData: Partial<AmazonBookData> = { asin: normalized };
 
@@ -236,8 +240,8 @@ export async function fetchAmazonBookMetadata(
   // For ISBNs, this will lookup Google Books/Open Library using the ISBN
   // For ASINs that didn't return full data, enrich with additional sources
   const enrichment = await enrichBookMetadata({
-    isbn10: isIsbn && normalized.length === 10 ? normalized : amazonData.isbn10,
-    isbn13: isIsbn && normalized.length === 13 ? normalized : amazonData.isbn13,
+    isbn10: isIsbn10 ? normalized : amazonData.isbn10,
+    isbn13: isIsbn13 ? normalized : amazonData.isbn13,
     title: amazonData.title,
     author: amazonData.author,
   });
