@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { ArrowLeft, Download, Plus, Sparkles, Zap, Target } from "lucide-react";
+import KeywordManager from "./KeywordManager";
 
 interface Campaign {
   id: string;
@@ -143,6 +144,9 @@ export default function BookDetailPage({
             <p className="text-lg font-bold text-gray-900 mt-2">{book.total_keywords}</p>
           </div>
         </div>
+
+        {/* Keyword Manager */}
+        <KeywordManager bookId={bookId} />
 
         {/* Campaigns Section */}
         <div className="mb-8">
