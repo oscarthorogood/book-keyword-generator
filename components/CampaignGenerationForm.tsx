@@ -10,6 +10,7 @@ import type { KeywordCategory, KeywordGroupType, KeywordSource, MatchTypeStrateg
 
 interface CampaignGenerationFormProps {
   onBack: () => void;
+  bookId?: string;
 }
 
 type FormPage = 1 | 2 | 3 | 4 | 5 | 6;
@@ -88,7 +89,7 @@ function todayIso(): string {
   return new Date().toISOString().slice(0, 10);
 }
 
-export default function CampaignGenerationForm({ onBack }: CampaignGenerationFormProps) {
+export default function CampaignGenerationForm({ onBack, bookId }: CampaignGenerationFormProps) {
   const [currentPage, setCurrentPage] = useState<FormPage>(1);
 
   const [asin, setAsin] = useState("");
@@ -366,43 +367,67 @@ export default function CampaignGenerationForm({ onBack }: CampaignGenerationFor
     setErrorMessage(null);
 
     try {
-      // Simplified: just save campaign basics, no generation
-      const normalizedAsin = normalizeAsinOrIsbn(asin);
-      if (!normalizedAsin) {
-        throw new Error("Invalid ASIN/ISBN format");
-      }
+      // Book-centric flow: if bookId provided, create campaign for that book
+      // Otherwise, use legacy flow
+      if (bookId) {
+        // Create campaign for existing book
+        const campaignName = `Campaign ${Number(variant) || 1}`;
 
-      const campaignName = buildCampaignName({
-        asin: normalizedAsin,
-        marketplace,
-        creatorInitials: creatorInitials || "XX",
-        authorName,
-        bookTitle,
-        seriesName: seriesName.trim() ? seriesName : undefined,
-        variant: Number(variant) || 1,
-      });
+        const res = await fetch("/api/campaigns/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            bookId,
+            campaignName,
+            variant: Number(variant) || 1,
+          }),
+        });
 
-      const res = await fetch("/api/campaigns/save", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
+          setStatus("error");
+          return;
+        }
+      } else {
+        // Legacy flow: create book and campaign together
+        const normalizedAsin = normalizeAsinOrIsbn(asin);
+        if (!normalizedAsin) {
+          throw new Error("Invalid ASIN/ISBN format");
+        }
+
+        const campaignName = buildCampaignName({
           asin: normalizedAsin,
-          campaignName,
           marketplace,
+          creatorInitials: creatorInitials || "XX",
           authorName,
           bookTitle,
-          seriesName: seriesName || null,
-          seriesOrder: seriesOrder ? parseInt(seriesOrder) : null,
-          seriesTotal: seriesTotal ? parseInt(seriesTotal) : null,
+          seriesName: seriesName.trim() ? seriesName : undefined,
           variant: Number(variant) || 1,
-        }),
-      });
+        });
 
-      if (!res.ok) {
-        const errBody = await res.json().catch(() => ({}));
-        setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
-        setStatus("error");
-        return;
+        const res = await fetch("/api/campaigns/save", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            asin: normalizedAsin,
+            campaignName,
+            marketplace,
+            authorName,
+            bookTitle,
+            seriesName: seriesName || null,
+            seriesOrder: seriesOrder ? parseInt(seriesOrder) : null,
+            seriesTotal: seriesTotal ? parseInt(seriesTotal) : null,
+            variant: Number(variant) || 1,
+          }),
+        });
+
+        if (!res.ok) {
+          const errBody = await res.json().catch(() => ({}));
+          setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
+          setStatus("error");
+          return;
+        }
       }
 
       setStatus("success");

@@ -2,19 +2,34 @@
 
 import { useState } from "react";
 import { HomeIcon, Folder, Lock, Share2, Trash2, Palette, Bell, Settings, LogOut } from "lucide-react";
+import BooksListDashboard from "@/components/BooksListDashboard";
+import AddBookForm from "@/components/AddBookForm";
+import BookDetailPage from "@/components/BookDetailPage";
 import CampaignGenerationForm from "@/components/CampaignGenerationForm";
-import CampaignsDashboard from "@/components/CampaignsDashboard";
 
-type Page = "dashboard" | "form";
+type Page = "dashboard" | "add-book" | "book-detail" | "create-campaign";
+
+interface Book {
+  id: string;
+  asin: string;
+  title: string;
+  author: string;
+  marketplace: string;
+  campaign_count: number;
+  total_keywords: number;
+  created_at: string;
+}
 
 export default function Home() {
   const [currentPage, setCurrentPage] = useState<Page>("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [selectedBook, setSelectedBook] = useState<Book | null>(null);
+  const [selectedBookIdForCampaign, setSelectedBookIdForCampaign] = useState<string | null>(null);
 
   const navItems = [
     { icon: HomeIcon, label: "Home", section: "main" },
-    { icon: Folder, label: "All campaigns", section: "main" },
-    { icon: Lock, label: "Private campaigns", section: "main" },
+    { icon: Folder, label: "Books", section: "main" },
+    { icon: Lock, label: "Private", section: "main" },
     { icon: Share2, label: "Shared with me", section: "main" },
     { icon: Trash2, label: "Archived", section: "main" },
     { icon: Palette, label: "Design", section: "tools" },
@@ -42,7 +57,7 @@ export default function Home() {
             {sidebarOpen && (
               <div>
                 <div className="font-bold text-gray-900 text-sm">Ads Assistant</div>
-                <div className="text-xs text-gray-500">Campaign Manager</div>
+                <div className="text-xs text-gray-500">Book Manager</div>
               </div>
             )}
           </div>
@@ -54,12 +69,13 @@ export default function Home() {
             <button
               key={item.label}
               onClick={() => {
-                if (item.label === "All campaigns") {
+                if (item.label === "Books") {
                   setCurrentPage("dashboard");
+                  setSelectedBook(null);
                 }
               }}
               className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
-                currentPage === "dashboard" && item.label === "All campaigns"
+                (currentPage === "dashboard" || currentPage === "book-detail") && item.label === "Books"
                   ? "bg-gray-100 text-gray-900"
                   : "text-gray-600 hover:bg-gray-50"
               }`}
@@ -90,11 +106,43 @@ export default function Home() {
       </div>
 
       {/* Main Content */}
-      <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-72" : "ml-20"}`}>
-        {currentPage === "dashboard" ? (
-          <CampaignsDashboard onCreateNew={() => setCurrentPage("form")} />
-        ) : (
-          <CampaignGenerationForm onBack={() => setCurrentPage("dashboard")} />
+      <div className={`flex-1 transition-all duration-300 ${sidebarOpen ? "ml-64" : "ml-16"}`}>
+        {currentPage === "dashboard" && !selectedBook && (
+          <BooksListDashboard
+            onAddBook={() => setCurrentPage("add-book")}
+            onSelectBook={(book) => {
+              setSelectedBook(book);
+              setCurrentPage("book-detail");
+            }}
+          />
+        )}
+        {currentPage === "add-book" && (
+          <AddBookForm
+            onBack={() => setCurrentPage("dashboard")}
+            onSuccess={() => setCurrentPage("dashboard")}
+          />
+        )}
+        {currentPage === "book-detail" && selectedBook && (
+          <BookDetailPage
+            bookId={selectedBook.id}
+            onBack={() => {
+              setSelectedBook(null);
+              setCurrentPage("dashboard");
+            }}
+            onCreateCampaign={(bookId) => {
+              setSelectedBookIdForCampaign(bookId);
+              setCurrentPage("create-campaign");
+            }}
+          />
+        )}
+        {currentPage === "create-campaign" && selectedBookIdForCampaign && (
+          <CampaignGenerationForm
+            bookId={selectedBookIdForCampaign}
+            onBack={() => {
+              setCurrentPage("book-detail");
+              setSelectedBookIdForCampaign(null);
+            }}
+          />
         )}
       </div>
 

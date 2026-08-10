@@ -1,19 +1,18 @@
 import { createClient } from "@supabase/supabase-js";
 
 /**
- * POST /api/campaigns/save - Save campaign basics without generating keywords
- * Simplified flow: only collect book details, save to database
- * Users can then click "Generate" on the dashboard to run full generation
+ * POST /api/campaigns/save - Save campaign for a book
+ * Book-centric flow: campaign is created within a book context
+ * Users can manage multiple campaigns per book
  */
 export async function POST(request: Request) {
   try {
     const body = await request.json();
 
-    const { asin, campaignName, marketplace, authorName, bookTitle, seriesName, seriesOrder, seriesTotal, variant } =
-      body;
+    const { bookId, campaignName, variant } = body;
 
-    if (!asin || !campaignName || !marketplace || !authorName || !bookTitle) {
-      return Response.json({ error: "Missing required fields" }, { status: 400 });
+    if (!bookId || !campaignName) {
+      return Response.json({ error: "Missing required fields: bookId, campaignName" }, { status: 400 });
     }
 
     // Get user from auth
@@ -33,17 +32,11 @@ export async function POST(request: Request) {
     // For now, use a placeholder user ID - in production this would come from auth
     const userId = "placeholder-user-id";
 
-    // Create campaign record
+    // Create campaign record linked to book
     const { error: insertError } = await supabase.from("campaigns").insert({
       user_id: userId,
-      asin,
+      book_id: bookId,
       name: campaignName,
-      marketplace,
-      author_name: authorName,
-      book_title: bookTitle,
-      series_name: seriesName,
-      series_order: seriesOrder,
-      series_total: seriesTotal,
       variant: variant || 1,
       status: "draft",
       tropes_keyword_count: 0,
@@ -53,9 +46,6 @@ export async function POST(request: Request) {
       daily_budget: 0,
       match_type_strategy: "all",
       config_json: {
-        authorName,
-        bookTitle,
-        seriesName,
         variant,
       },
       created_at: new Date().toISOString(),
