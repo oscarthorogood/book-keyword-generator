@@ -1,9 +1,10 @@
 import { createClient } from "@supabase/supabase-js";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
+import { fetchAmazonBookMetadata } from "@/lib/amazonLookup";
 
 /**
  * POST /api/books/create
- * Create a new book by ASIN/ISBN and fetch metadata
+ * Create a new book by ASIN/ISBN and fetch metadata from Amazon
  */
 export async function POST(request: Request) {
   try {
@@ -43,18 +44,52 @@ export async function POST(request: Request) {
     // Placeholder user ID - in production this comes from auth
     const userId = "placeholder-user-id";
 
-    // TODO: Fetch book metadata from Amazon (title, author, categories, rating, etc.)
-    // For now, use placeholder data
-    const bookData = {
-      title: "Book Title",
-      author: "Book Author",
-      description: null,
-      metadata_json: {
-        fetched_at: new Date().toISOString(),
-        source: "amazon",
-        // Metadata will be populated by lookup service
-      },
-    };
+    // Fetch book metadata from Amazon and other sources
+    let bookData;
+    try {
+      const amazonData = await fetchAmazonBookMetadata(normalizedAsin, marketplace as any);
+      bookData = {
+        title: amazonData.title || "Unknown Title",
+        author: amazonData.author || "Unknown Author",
+        description: amazonData.description || null,
+        metadata_json: {
+          fetched_at: new Date().toISOString(),
+          source: "amazon",
+          asin: amazonData.asin,
+          isbn10: amazonData.isbn10,
+          isbn13: amazonData.isbn13,
+          price: amazonData.price,
+          rating: amazonData.rating,
+          reviewCount: amazonData.reviewCount,
+          publisher: amazonData.publisher,
+          publicationDate: amazonData.publicationDate,
+          pageCount: amazonData.pageCount,
+          language: amazonData.language,
+          dimensions: amazonData.dimensions,
+          categoryPath: amazonData.categoryPath,
+          bestSellerRanks: amazonData.bestSellerRanks,
+          bulletPoints: amazonData.bulletPoints,
+          coverImageUrl: amazonData.coverImageUrl,
+          qaCount: amazonData.qaCount,
+          googleBooksCategories: amazonData.googleBooksCategories,
+          openLibrarySubjects: amazonData.openLibrarySubjects,
+          goodreadsTags: amazonData.goodreadsTags,
+        },
+      };
+    } catch (lookupError) {
+      // Fallback if lookup fails
+      console.error("Error fetching Amazon metadata:", lookupError);
+      bookData = {
+        title: "Unknown Title",
+        author: "Unknown Author",
+        description: null,
+        metadata_json: {
+          fetched_at: new Date().toISOString(),
+          source: "amazon",
+          error: lookupError instanceof Error ? lookupError.message : "Lookup failed",
+        },
+      };
+    }
 
     // Check if book already exists
     const { data: existingBook } = await supabase
