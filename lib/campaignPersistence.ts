@@ -2,6 +2,7 @@ import { supabaseAdmin } from "./supabaseAdmin";
 
 export interface CampaignSave {
   userId: string;
+  bookId?: string;
   asin: string;
   campaignName: string;
   marketplace: string;
@@ -20,6 +21,7 @@ export interface CampaignSave {
  */
 export async function saveCampaign({
   userId,
+  bookId,
   asin,
   campaignName,
   marketplace,
@@ -60,6 +62,7 @@ export async function saveCampaign({
     // Insert campaign
     const { error } = await client.from("campaigns").insert({
       user_id: userId,
+      book_id: bookId,
       asin,
       name: campaignName,
       marketplace,

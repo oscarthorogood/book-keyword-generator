@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowLeft } from "lucide-react";
 import { normalizeAsinOrIsbn } from "@/lib/isbn";
 import { buildCampaignName } from "@/lib/naming";
@@ -267,6 +267,31 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
     setManualKeywords((prev) => prev.filter((k) => k !== keyword));
   }
 
+  // Book-centric flow: we already know the ASIN/author/title/marketplace
+  // from the book record, so prefill them instead of asking again. The user
+  // can still hit Autofill afterward to pull in richer metadata (series,
+  // price, categories) for the rest of the wizard.
+  useEffect(() => {
+    if (!bookId) return;
+    let cancelled = false;
+
+    fetch(`/api/books/${bookId}`)
+      .then((res) => res.json())
+      .then((body) => {
+        if (cancelled || !body?.book) return;
+        const book = body.book;
+        setAsin(book.asin ?? "");
+        setAuthorName(book.author ?? "");
+        setBookTitle(book.title ?? "");
+        if (book.marketplace) setMarketplace(book.marketplace);
+      })
+      .catch((err) => console.warn("Could not prefill from book:", err));
+
+    return () => {
+      cancelled = true;
+    };
+  }, [bookId]);
+
   async function handleAutofill() {
     const normalized = normalizeAsinOrIsbn(asin);
     if (!normalized) {
@@ -357,86 +382,80 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
-
-    // Book-centric flow: if bookId provided, create campaign for that book
-    // Otherwise, use legacy flow
-    if (!bookId && (!asin || !authorName || !bookTitle)) {
-      setErrorMessage("Please fill in ASIN, Author, and Title");
-      return;
-    }
-
     setStatus("loading");
     setErrorMessage(null);
+    setSources(null);
+    setTropesKeywordCount(null);
+    setCompNameKeywordCount(null);
+    setProductTargetCount(null);
+    setManualKeywordCount(null);
+    setRecommendedRange(null);
+    setArchiveUrl(null);
+    setResultCampaignName(null);
 
     try {
+      const body: Record<string, unknown> = {
+        asin,
+        marketplace,
+        creatorInitials,
+        authorName,
+        bookTitle,
+        seriesName: seriesName || undefined,
+        seriesOrder: seriesOrder ? Number(seriesOrder) : undefined,
+        seriesTotal: seriesTotal ? Number(seriesTotal) : undefined,
+        variant: Number(variant) || 1,
+        dailyBudget: Number(dailyBudget),
+        startDate,
+        endDate: campaignDuration === "limited" ? endDate : undefined,
+        matchTypeStrategy: matchTypeStrategy !== "custom" ? matchTypeStrategy : undefined,
+        matchTypes,
+        knownTags: profileTags,
+        sources: selectedSources,
+        keywordTypes: selectedKeywordTypes,
+        keywordCategories: selectedKeywordCategories,
+        keyTropes,
+        manualKeywords,
+      };
       if (bookId) {
-        // Create campaign for existing book
-        const campaignName = `Campaign ${Number(variant) || 1}`;
-
-        const res = await fetch("/api/campaigns/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            bookId,
-            campaignName,
-            variant: Number(variant) || 1,
-          }),
-        });
-
-        if (!res.ok) {
-          const errBody = await res.json().catch(() => ({}));
-          setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
-          setStatus("error");
-          return;
-        }
+        body.bookId = bookId;
+      }
+      if (useRrpBidding) {
+        body.bidEconomics = {
+          rrp: Number(rrp),
+          targetAcos: Number(targetAcosPct) / 100,
+          estConversionRate: Number(estConversionRatePct) / 100,
+        };
       } else {
-        // Legacy flow: create book and campaign together
-        const normalizedAsin = normalizeAsinOrIsbn(asin);
-        if (!normalizedAsin) {
-          throw new Error("Invalid ASIN/ISBN format");
-        }
-
-        const campaignName = buildCampaignName({
-          asin: normalizedAsin,
-          marketplace,
-          creatorInitials: creatorInitials || "XX",
-          authorName,
-          bookTitle,
-          seriesName: seriesName.trim() ? seriesName : undefined,
-          variant: Number(variant) || 1,
-        });
-
-        const res = await fetch("/api/campaigns/save", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            asin: normalizedAsin,
-            campaignName,
-            marketplace,
-            authorName,
-            bookTitle,
-            seriesName: seriesName || null,
-            seriesOrder: seriesOrder ? parseInt(seriesOrder) : null,
-            seriesTotal: seriesTotal ? parseInt(seriesTotal) : null,
-            variant: Number(variant) || 1,
-          }),
-        });
-
-        if (!res.ok) {
-          const errBody = await res.json().catch(() => ({}));
-          setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
-          setStatus("error");
-          return;
-        }
+        body.defaultBid = Number(defaultBid);
       }
 
-      setStatus("success");
-      setErrorMessage(null);
+      const res = await fetch("/api/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
 
-      // Redirect back to dashboard after 1.5 seconds
-      setTimeout(() => {
-        onBack();
-      }, 1500);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        setErrorMessage(errBody.error ?? `Request failed (${res.status}).`);
+        setSources(errBody.sources ?? null);
+        setStatus("error");
+        return;
+      }
+
+      const data = await res.json();
+
+      setSources(data.sourceStatuses ?? null);
+      setTropesKeywordCount(data.tropesKeywordCount ?? 0);
+      setCompNameKeywordCount(data.compNameKeywordCount ?? 0);
+      setProductTargetCount(data.productTargetCount ?? 0);
+      setManualKeywordCount(data.manualKeywordCount ?? 0);
+      setRecommendedRange(data.recommendedRange ?? null);
+      setResultCampaignName(data.campaignName ?? null);
+      setAiRankingUsed(data.aiRankingUsed ?? false);
+      setArchiveUrl(data.archiveUrl ?? null);
+
+      setStatus("success");
     } catch (err) {
       setErrorMessage(err instanceof Error ? err.message : "Something went wrong.");
       setStatus("error");
@@ -444,82 +463,6 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
   }
 
   const isLoading = status === "loading";
-
-  // Simplified form for book-centric flow
-  if (bookId) {
-    return (
-      <div className="min-h-screen bg-white flex flex-col">
-        {/* Header */}
-        <div className="bg-white border-b border-gray-200 px-8 py-6">
-          <button
-            onClick={onBack}
-            className="inline-flex items-center gap-2 text-gray-600 hover:text-gray-900 mb-4"
-          >
-            <ArrowLeft size={20} />
-            Back to Book
-          </button>
-          <h1 className="text-2xl font-bold text-gray-900">Create Campaign</h1>
-          <p className="text-sm text-gray-500 mt-1">
-            Give your new campaign a variant number. You can configure keywords and budget later.
-          </p>
-        </div>
-
-        {/* Main Content */}
-        <div className="flex-1 px-8 py-8">
-          <form onSubmit={handleSubmit} className="max-w-xl">
-            <div className="bg-gray-50 border border-gray-200 rounded-lg p-6 mb-6">
-              <p className="text-xs text-gray-600 font-medium mb-4">CAMPAIGN DETAILS</p>
-              <div>
-                <label className="block text-sm font-medium text-gray-900 mb-1.5">
-                  Campaign Variant
-                </label>
-                <input
-                  required
-                  value={variant}
-                  onChange={(e) => setVariant(e.target.value)}
-                  placeholder="e.g., 1, 2, A, etc."
-                  className="w-full px-4 py-2.5 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 bg-white text-sm"
-                />
-                <p className="text-xs text-gray-500 mt-1.5">
-                  Enter a variant identifier for this campaign
-                </p>
-              </div>
-            </div>
-
-            {status === "error" && errorMessage && (
-              <div className="mb-6 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
-                {errorMessage}
-              </div>
-            )}
-
-            {status === "success" && (
-              <div className="mb-6 p-4 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
-                Campaign created! Redirecting...
-              </div>
-            )}
-
-            <div className="flex gap-3 justify-between">
-              <button
-                type="button"
-                onClick={onBack}
-                className="px-6 py-2.5 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                Cancel
-              </button>
-
-              <button
-                type="submit"
-                disabled={isLoading || !variant}
-                className="bg-gray-900 hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed px-6 py-2.5 rounded-lg text-sm font-medium text-white transition-colors"
-              >
-                {isLoading ? "Creating…" : "Create Campaign"}
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    );
-  }
 
   const [recommendedMin] = recommendedRange?.split("-").map(Number) ?? [null];
   const belowRecommendedMin =
@@ -535,14 +478,14 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
             <button
               onClick={onBack}
               className="p-2 hover:bg-gray-100 rounded-lg transition-colors"
-              title="Back to campaigns"
+              title={bookId ? "Back to book" : "Back to campaigns"}
             >
               <ArrowLeft size={20} className="text-gray-600" />
             </button>
             <div className="logo-mark">PB</div>
             <div>
               <p className="brand-title text-base md:text-lg">Amazon Book Ads Builder</p>
-              <p className="eyebrow">Manual campaign generator</p>
+              <p className="eyebrow">{bookId ? "Prefilled from your book" : "Manual campaign generator"}</p>
             </div>
           </div>
           <span className="btn-pill-outline hidden sm:inline-flex" style={{ cursor: "default" }}>
@@ -563,10 +506,64 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
         </div>
 
         <form onSubmit={handleSubmit}>
-          {/* Progress Stepper - Hidden for simplified flow */}
+          <div className="mb-8">
+            {/* Progress Stepper */}
+            <div className="flex items-center justify-between mb-6">
+              {Array.from({ length: TOTAL_PAGES }, (_, i) => {
+                const page = (i + 1) as FormPage;
+                const isActive = page === currentPage;
+                const isComplete = page < currentPage;
+                return (
+                  <div key={page} className="flex items-center flex-1">
+                    <button
+                      type="button"
+                      onClick={() => setCurrentPage(page)}
+                      className="flex flex-col items-center flex-1"
+                    >
+                      <div
+                        className={`w-8 h-8 rounded-full flex items-center justify-center mb-2 transition-all ${
+                          isActive
+                            ? "bg-gray-900 text-white shadow-md"
+                            : isComplete
+                            ? "bg-gray-600 text-white"
+                            : "bg-gray-200 text-gray-600"
+                        }`}
+                      >
+                        {isComplete ? "✓" : page}
+                      </div>
+                      <span
+                        className={`text-xs font-medium text-center max-w-16 leading-tight ${
+                          isActive ? "text-gray-900 font-semibold" : "text-gray-600"
+                        }`}
+                      >
+                        {PAGE_TITLES[page]}
+                      </span>
+                    </button>
+                    {page < TOTAL_PAGES && (
+                      <div
+                        className="flex-1 h-0.5 mx-1 transition-all"
+                        style={{
+                          background: isComplete ? "var(--accent-green)" : "var(--line)",
+                        }}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+            <div className="w-full h-1 bg-line rounded-full overflow-hidden">
+              <div
+                className="h-full transition-all"
+                style={{
+                  background: "var(--accent-blue)",
+                  width: `${(currentPage / TOTAL_PAGES) * 100}%`,
+                }}
+              />
+            </div>
+          </div>
 
           <div className="min-h-96">
-            {/* Simplified flow - only show first page for campaign creation */}
+            {currentPage === 1 && (
               <div className="grid grid-cols-1 lg:grid-cols-[360px_1fr] gap-5 md:gap-6 items-start">
                 <div className="flex flex-col gap-5 md:gap-6">
                   <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 mb-2">
@@ -1186,9 +1183,8 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
               </div>
             </div>
             </div>
+            )}
 
-            {/* Pages 2-6 hidden in simplified flow */}
-            {false && (<>
             {currentPage === 2 && (
             <div className="flex flex-col gap-5 md:gap-6 max-w-2xl">
               <div className="card">
@@ -1786,27 +1782,36 @@ export default function CampaignGenerationForm({ onBack, bookId }: CampaignGener
               </div>
             </div>
             )}
-            </>
-            )}
           </div>
 
-          {/* Navigation - Simplified to only save campaign basics */}
+          {/* Navigation */}
           <div className="flex gap-3 mt-8 justify-between">
             <button
               type="button"
-              onClick={onBack}
-              className="btn-pill-outline px-6 py-2.5"
+              onClick={() => setCurrentPage((p) => (p > 1 ? ((p - 1) as FormPage) : p))}
+              disabled={currentPage === 1}
+              className="btn-pill-outline px-6 py-2.5 disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              ← Cancel
+              ← Previous
             </button>
 
-            <button
-              type="submit"
-              disabled={isLoading || !asin || !authorName || !bookTitle}
-              className="btn-pill-dark px-6 py-2.5"
-            >
-              {isLoading ? "Saving…" : "Save Campaign"}
-            </button>
+            {currentPage === TOTAL_PAGES ? (
+              <button
+                type="submit"
+                disabled={isLoading || matchTypes.length === 0 || selectedKeywordTypes.length === 0 || (campaignDuration === "limited" && !endDate)}
+                className="btn-pill-dark px-6 py-2.5"
+              >
+                {isLoading ? "Generating…" : "Generate Manual Bulksheet"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setCurrentPage((p) => (p < TOTAL_PAGES ? ((p + 1) as FormPage) : p))}
+                className="btn-pill-dark px-6 py-2.5"
+              >
+                Next →
+              </button>
+            )}
           </div>
         </form>
 
