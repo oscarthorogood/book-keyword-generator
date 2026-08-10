@@ -127,6 +127,26 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
     return { error: "Start Date must be in YYYY-MM-DD format." };
   }
 
+  // Validate end date if provided
+  let endDate: string | undefined = undefined;
+  if (typeof b.endDate === "string" && b.endDate.trim()) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(b.endDate)) {
+      return { error: "End Date must be in YYYY-MM-DD format." };
+    }
+    if (b.endDate <= b.startDate) {
+      return { error: "End Date must be after Start Date." };
+    }
+    // Max 1 year duration
+    const startDateObj = new Date(b.startDate);
+    const endDateObj = new Date(b.endDate);
+    const maxEndDate = new Date(startDateObj);
+    maxEndDate.setFullYear(maxEndDate.getFullYear() + 1);
+    if (endDateObj > maxEndDate) {
+      return { error: "Campaign duration cannot exceed 1 year." };
+    }
+    endDate = b.endDate;
+  }
+
   const seriesName = typeof b.seriesName === "string" && b.seriesName.trim() ? b.seriesName.trim() : undefined;
   const variant =
     typeof b.variant === "number" && Number.isInteger(b.variant) && b.variant > 0 ? b.variant : 1;
@@ -224,6 +244,7 @@ function validate(body: unknown): { value: GenerateRequest } | { error: string }
       variant,
       dailyBudget: b.dailyBudget,
       startDate: b.startDate,
+      endDate,
       matchTypes,
       bidEconomics,
       defaultBid,
@@ -820,10 +841,14 @@ export async function POST(req: NextRequest) {
   const buffer = await buildBulksheet({
     campaignName,
     asin: request.asin,
+    author: request.authorName,
+    bookTitle: request.bookTitle,
     dailyBudget: request.dailyBudget,
     startDate: request.startDate,
+    endDate: request.endDate,
     baseBid,
     adGroups,
+    includeMetadataSheet: true,
   });
 
   // Report counts for what's actually in the file — 0 for a deselected ad

@@ -74,6 +74,8 @@ export default function Home() {
   const [variant, setVariant] = useState("1");
   const [dailyBudget, setDailyBudget] = useState("10");
   const [startDate, setStartDate] = useState(todayIso());
+  const [endDate, setEndDate] = useState("");
+  const [campaignDuration, setCampaignDuration] = useState<"ongoing" | "limited">("ongoing");
   const [matchTypes, setMatchTypes] = useState<MatchType[]>(["broad", "phrase", "exact"]);
 
   const [selectedSources, setSelectedSources] = useState<KeywordSource[]>(
@@ -337,6 +339,7 @@ export default function Home() {
         variant: Number(variant) || 1,
         dailyBudget: Number(dailyBudget),
         startDate,
+        endDate: campaignDuration === "limited" ? endDate : undefined,
         matchTypes,
         knownTags: profileTags,
         sources: selectedSources,
@@ -1071,6 +1074,62 @@ export default function Home() {
                     </Field>
                   </div>
 
+                  <Field label="Campaign Duration">
+                    <div className="space-y-3">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <label className="option-card">
+                          <input
+                            type="radio"
+                            className="mt-0.5"
+                            checked={campaignDuration === "ongoing"}
+                            onChange={() => setCampaignDuration("ongoing")}
+                          />
+                          <span>
+                            Ongoing
+                            <span
+                              className="block text-xs font-normal mt-0.5"
+                              style={{ color: "var(--muted)" }}
+                            >
+                              No end date — campaign runs indefinitely
+                            </span>
+                          </span>
+                        </label>
+                        <label className="option-card">
+                          <input
+                            type="radio"
+                            className="mt-0.5"
+                            checked={campaignDuration === "limited"}
+                            onChange={() => setCampaignDuration("limited")}
+                          />
+                          <span>
+                            Limited Duration
+                            <span
+                              className="block text-xs font-normal mt-0.5"
+                              style={{ color: "var(--muted)" }}
+                            >
+                              Set an end date for this campaign
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                      {campaignDuration === "limited" && (
+                        <Field label="End Date">
+                          <input
+                            required
+                            type="date"
+                            value={endDate}
+                            onChange={(e) => setEndDate(e.target.value)}
+                            min={startDate}
+                            className="input"
+                          />
+                          <span className="field-hint">
+                            {endDate && startDate ? `${Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24))} days` : "Campaign duration"}
+                          </span>
+                        </Field>
+                      )}
+                    </div>
+                  </Field>
+
                   <Field label="Bid economics">
                     <div className="space-y-4">
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1392,6 +1451,18 @@ export default function Home() {
                       <p className="field-hint mb-2" style={{ marginTop: 0 }}>Campaign Start</p>
                       <p className="text-sm">{startDate}</p>
                     </div>
+                    {(campaignDuration === "limited" && endDate) && (
+                      <div>
+                        <p className="field-hint mb-2" style={{ marginTop: 0 }}>Campaign End</p>
+                        <p className="text-sm">{endDate}</p>
+                      </div>
+                    )}
+                    <div>
+                      <p className="field-hint mb-2" style={{ marginTop: 0 }}>Duration</p>
+                      <p className="text-sm capitalize">
+                        {campaignDuration === "ongoing" ? "Ongoing" : (endDate ? `${Math.ceil((new Date(endDate).getTime() - new Date(startDate).getTime()) / (1000 * 60 * 60 * 24))} days` : "—")}
+                      </p>
+                    </div>
                     <div>
                       <p className="field-hint mb-2" style={{ marginTop: 0 }}>Match Types</p>
                       <p className="text-sm capitalize">{matchTypes.join(", ")}</p>
@@ -1462,7 +1533,7 @@ export default function Home() {
             {currentPage === TOTAL_PAGES ? (
               <button
                 type="submit"
-                disabled={isLoading || matchTypes.length === 0 || selectedKeywordTypes.length === 0}
+                disabled={isLoading || matchTypes.length === 0 || selectedKeywordTypes.length === 0 || (campaignDuration === "limited" && !endDate)}
                 className="btn-pill-dark px-6 py-2.5"
               >
                 {isLoading ? "Generating…" : "Generate Manual Bulksheet"}
