@@ -1,25 +1,25 @@
 @import "tailwindcss";
 
 :root {
-  --bg-a: #efe9fa;
-  --bg-b: #f7ecf1;
-  --bg-c: #e9eff9;
-  --bg-mid: #f1eef7;
-  --foreground: #15131c;
-  --ink: #15131c;
-  --muted: #6f6b7a;
+  --bg-a: #ffffff;
+  --bg-b: #fafafa;
+  --bg-c: #f5f5f5;
+  --bg-mid: #ffffff;
+  --foreground: #111827;
+  --ink: #111827;
+  --muted: #6b7280;
   --panel: #ffffff;
-  --panel-muted: #f6f4fb;
-  --line: #e8e4f1;
+  --panel-muted: #f9fafb;
+  --line: #e5e7eb;
 
-  --accent-purple: #6f56f0;
-  --accent-purple-soft: #ece7fd;
-  --accent-green: #2fb87e;
-  --accent-green-soft: #e2f7ee;
-  --accent-yellow: #c9971c;
-  --accent-yellow-soft: #fbf1d7;
-  --accent-red: #d54f4f;
-  --accent-red-soft: #fbeaea;
+  --accent-purple: #1f2937;
+  --accent-purple-soft: #f3f4f6;
+  --accent-green: #374151;
+  --accent-green-soft: #f3f4f6;
+  --accent-yellow: #4b5563;
+  --accent-yellow-soft: #f9fafb;
+  --accent-red: #ef4444;
+  --accent-red-soft: #fee2e2;
 }
 
 @theme inline {
@@ -31,25 +31,25 @@
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg-a: #1b1826;
-    --bg-b: #1a1720;
-    --bg-c: #161721;
-    --bg-mid: #131218;
-    --foreground: #f3f1f8;
-    --ink: #f3f1f8;
-    --muted: #a09cae;
-    --panel: #1d1b26;
-    --panel-muted: #232130;
-    --line: #302d3d;
+    --bg-a: #1f2937;
+    --bg-b: #111827;
+    --bg-c: #0f172a;
+    --bg-mid: #111827;
+    --foreground: #f3f4f6;
+    --ink: #f3f4f6;
+    --muted: #9ca3af;
+    --panel: #1f2937;
+    --panel-muted: #111827;
+    --line: #374151;
 
-    --accent-purple: #a495ff;
-    --accent-purple-soft: #2c2748;
-    --accent-green: #4fd8a0;
-    --accent-green-soft: #16332a;
-    --accent-yellow: #e8c356;
-    --accent-yellow-soft: #362c14;
-    --accent-red: #ff8a8a;
-    --accent-red-soft: #3a1f20;
+    --accent-purple: #d1d5db;
+    --accent-purple-soft: #374151;
+    --accent-green: #9ca3af;
+    --accent-green-soft: #374151;
+    --accent-yellow: #6b7280;
+    --accent-yellow-soft: #4b5563;
+    --accent-red: #ef4444;
+    --accent-red-soft: #7f1d1d;
   }
 }
 
@@ -61,11 +61,7 @@ body {
   color: var(--foreground);
   font-family: var(--font-sans), Arial, Helvetica, sans-serif;
   min-height: 100%;
-  background:
-    radial-gradient(circle at 12% 8%, var(--bg-a), transparent 50%),
-    radial-gradient(circle at 88% 4%, var(--bg-b), transparent 42%),
-    radial-gradient(circle at 92% 92%, var(--bg-c), transparent 50%),
-    var(--bg-mid);
+  background: var(--bg-mid);
 }
 
 /* ---- Shared design-system classes ---- */
@@ -160,7 +156,7 @@ body {
 }
 
 .input:focus {
-  border-color: var(--accent-purple);
+  border-color: #4b5563;
   background: var(--panel);
 }
 
@@ -277,8 +273,8 @@ body {
 }
 
 .option-card:has(input:checked) {
-  border-color: var(--accent-purple);
-  background: var(--accent-purple-soft);
+  border-color: #374151;
+  background: #f3f4f6;
 }
 
 .stat-tile {
@@ -303,18 +299,23 @@ body {
 }
 
 .tone-purple {
-  background: var(--accent-purple-soft);
-  color: var(--accent-purple);
+  background: #f3f4f6;
+  color: #374151;
 }
 
 .tone-green {
-  background: var(--accent-green-soft);
-  color: var(--accent-green);
+  background: #f3f4f6;
+  color: #374151;
 }
 
 .tone-yellow {
-  background: var(--accent-yellow-soft);
-  color: var(--accent-yellow);
+  background: #f9fafb;
+  color: #4b5563;
+}
+
+.tone-blue {
+  background: #f3f4f6;
+  color: #374151;
 }
 
 .status-banner {

@@ -26,23 +26,23 @@ export default function Home() {
   const toolsNavItems = navItems.filter((item) => item.section === "tools");
 
   return (
-    <div className="flex min-h-screen bg-gradient-to-br from-slate-50 via-purple-50 to-blue-50">
+    <div className="flex min-h-screen bg-white">
       {/* Sidebar */}
       <div
         className={`${
           sidebarOpen ? "w-72" : "w-20"
-        } bg-white border-r border-slate-200 transition-all duration-300 flex flex-col fixed h-screen left-0 top-0 z-40 shadow-sm`}
+        } bg-white border-r border-gray-200 transition-all duration-300 flex flex-col fixed h-screen left-0 top-0 z-40`}
       >
         {/* Logo/Header */}
-        <div className="p-6 border-b border-slate-200">
+        <div className="p-6 border-b border-gray-200">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 bg-gradient-to-br from-purple-600 to-blue-600 rounded-xl flex items-center justify-center flex-shrink-0">
+            <div className="w-10 h-10 bg-gray-900 rounded-lg flex items-center justify-center flex-shrink-0">
               <span className="text-white font-bold text-lg">📚</span>
             </div>
             {sidebarOpen && (
               <div>
-                <div className="font-bold text-slate-900 text-sm">Ads Assistant</div>
-                <div className="text-xs text-slate-500">Campaign Manager</div>
+                <div className="font-bold text-gray-900 text-sm">Ads Assistant</div>
+                <div className="text-xs text-gray-500">Campaign Manager</div>
               </div>
             )}
           </div>
@@ -58,10 +58,10 @@ export default function Home() {
                   setCurrentPage("dashboard");
                 }
               }}
-              className={`w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium transition-all ${
+              className={`w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium transition-all ${
                 currentPage === "dashboard" && item.label === "All campaigns"
-                  ? "bg-gradient-to-r from-purple-100 to-blue-100 text-purple-600 border border-purple-200"
-                  : "text-slate-700 hover:bg-slate-100"
+                  ? "bg-gray-100 text-gray-900"
+                  : "text-gray-600 hover:bg-gray-50"
               }`}
             >
               <item.icon size={20} className="flex-shrink-0" />
@@ -71,18 +71,18 @@ export default function Home() {
         </nav>
 
         {/* Tools Navigation */}
-        <nav className="p-4 border-t border-slate-200 space-y-1">
+        <nav className="p-4 border-t border-gray-200 space-y-1">
           {toolsNavItems.map((item) => (
             <button
               key={item.label}
-              className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-slate-700 hover:bg-slate-100 transition-all"
+              className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all"
             >
               <item.icon size={20} className="flex-shrink-0" />
               {sidebarOpen && <span>{item.label}</span>}
             </button>
           ))}
 
-          <button className="w-full flex items-center gap-3 px-4 py-3 rounded-xl text-sm font-medium text-red-600 hover:bg-red-50 transition-all border border-red-200">
+          <button className="w-full flex items-center gap-3 px-4 py-3 rounded-lg text-sm font-medium text-gray-600 hover:bg-gray-50 transition-all">
             <LogOut size={20} className="flex-shrink-0" />
             {sidebarOpen && <span>Sign out</span>}
           </button>
@@ -101,7 +101,7 @@ export default function Home() {
       {/* Sidebar Toggle Button */}
       <button
         onClick={() => setSidebarOpen(!sidebarOpen)}
-        className="fixed bottom-8 left-8 w-12 h-12 bg-white border border-slate-200 rounded-xl hover:bg-slate-50 transition-all shadow-lg z-50 flex items-center justify-center text-slate-600"
+        className="fixed bottom-8 left-8 w-12 h-12 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-all z-50 flex items-center justify-center text-gray-600"
       >
         <svg
           className="w-5 h-5"

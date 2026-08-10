@@ -23,10 +23,10 @@ interface CampaignsDashboardProps {
 }
 
 const statusConfig = {
-  draft: { bg: "bg-amber-50", text: "text-amber-700", border: "border-amber-200", badge: "bg-amber-100" },
-  uploaded: { bg: "bg-blue-50", text: "text-blue-700", border: "border-blue-200", badge: "bg-blue-100" },
-  active: { bg: "bg-emerald-50", text: "text-emerald-700", border: "border-emerald-200", badge: "bg-emerald-100" },
-  archived: { bg: "bg-slate-50", text: "text-slate-700", border: "border-slate-200", badge: "bg-slate-100" },
+  draft: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", badge: "bg-gray-100" },
+  uploaded: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", badge: "bg-gray-100" },
+  active: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", badge: "bg-gray-100" },
+  archived: { bg: "bg-gray-50", text: "text-gray-700", border: "border-gray-200", badge: "bg-gray-100" },
 };
 
 export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardProps) {
@@ -77,20 +77,20 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
   const isEmpty = campaigns.length === 0;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-purple-50 to-blue-50">
+    <div className="min-h-screen bg-white">
       {/* Header */}
-      <div className="bg-white/70 backdrop-blur-xl border-b border-slate-200">
+      <div className="bg-white border-b border-gray-200">
         <div className="max-w-7xl mx-auto px-8 py-8">
           <div className="flex items-center justify-between">
             <div>
-              <h1 className="text-3xl font-bold bg-gradient-to-r from-purple-600 to-blue-600 bg-clip-text text-transparent">
+              <h1 className="text-3xl font-bold text-gray-900">
                 All campaigns
               </h1>
-              <p className="text-slate-600 mt-1">Manage your Amazon Ads campaigns</p>
+              <p className="text-gray-600 mt-1">Manage your Amazon Ads campaigns</p>
             </div>
             <button
               onClick={onCreateNew}
-              className="inline-flex items-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-600 to-blue-600 text-white font-semibold rounded-xl hover:shadow-lg hover:shadow-purple-500/20 transition-all duration-200 transform hover:scale-105"
+              className="inline-flex items-center gap-2 px-6 py-3 bg-gray-900 text-white font-semibold rounded-lg hover:bg-gray-800 transition-all"
             >
               <Plus size={20} />
               New campaign
@@ -108,79 +108,76 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
               <button
                 onClick={onCreateNew}
-                className="group relative overflow-hidden bg-gradient-to-br from-purple-600 to-purple-700 rounded-2xl p-8 text-white hover:shadow-xl transition-all duration-300 transform hover:scale-105"
+                className="bg-gray-900 rounded-lg p-8 text-white hover:bg-gray-800 transition-all flex flex-col items-center justify-center gap-3"
               >
-                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300 bg-gradient-to-br from-purple-500 to-blue-500"></div>
-                <div className="relative flex flex-col items-center justify-center gap-3">
-                  <div className="w-12 h-12 bg-white/20 rounded-xl flex items-center justify-center group-hover:bg-white/30 transition-colors">
-                    <FileText size={24} />
-                  </div>
-                  <span className="text-lg font-semibold">Create campaign</span>
-                  <span className="text-sm opacity-80">15+ keyword sources</span>
+                <div className="w-12 h-12 bg-white/10 rounded-lg flex items-center justify-center">
+                  <FileText size={24} />
                 </div>
+                <span className="text-lg font-semibold">Create campaign</span>
+                <span className="text-sm opacity-80">15+ keyword sources</span>
               </button>
 
-              <div className="bg-white rounded-2xl border border-slate-200 p-8 flex flex-col items-center justify-center gap-3 opacity-50 hover:opacity-75 transition-opacity cursor-not-allowed">
-                <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
-                  <Sparkles size={24} className="text-slate-400" />
+              <div className="bg-gray-50 rounded-lg border border-gray-200 p-8 flex flex-col items-center justify-center gap-3 opacity-50 hover:opacity-75 transition-opacity cursor-not-allowed">
+                <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                  <Sparkles size={24} className="text-gray-400" />
                 </div>
-                <span className="text-lg font-semibold text-slate-900">Template library</span>
-                <span className="text-sm text-slate-600">Coming soon</span>
+                <span className="text-lg font-semibold text-gray-900">Template library</span>
+                <span className="text-sm text-gray-600">Coming soon</span>
               </div>
 
-              <div className="bg-white rounded-2xl border border-slate-200 p-8 flex flex-col items-center justify-center gap-3 opacity-50 hover:opacity-75 transition-opacity cursor-not-allowed">
-                <div className="w-12 h-12 bg-slate-100 rounded-xl flex items-center justify-center">
-                  <Target size={24} className="text-slate-400" />
+              <div className="bg-gray-50 rounded-lg border border-gray-200 p-8 flex flex-col items-center justify-center gap-3 opacity-50 hover:opacity-75 transition-opacity cursor-not-allowed">
+                <div className="w-12 h-12 bg-gray-100 rounded-lg flex items-center justify-center">
+                  <Target size={24} className="text-gray-400" />
                 </div>
-                <span className="text-lg font-semibold text-slate-900">AI optimizer</span>
-                <span className="text-sm text-slate-600">Coming soon</span>
+                <span className="text-lg font-semibold text-gray-900">AI optimizer</span>
+                <span className="text-sm text-gray-600">Coming soon</span>
               </div>
             </div>
 
             {/* Features Overview */}
-            <div className="bg-white rounded-2xl border border-slate-200 p-12 shadow-sm hover:shadow-md transition-shadow">
+            <div className="bg-white rounded-lg border border-gray-200 p-12">
               <div className="max-w-3xl">
-                <h2 className="text-2xl font-bold text-slate-900 mb-3">
+                <h2 className="text-2xl font-bold text-gray-900 mb-3">
                   Generate Amazon Ads Campaigns in Minutes
                 </h2>
-                <p className="text-slate-600 mb-8 leading-relaxed">
+                <p className="text-gray-600 mb-8 leading-relaxed">
                   Create optimized Sponsored Products campaigns powered by 15+ data sources. Get budget-aware keyword selection, strategy recommendations, and ready-to-upload Excel bulksheets.
                 </p>
 
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
                   <div className="flex gap-4">
                     <div className="flex-shrink-0">
-                      <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-purple-100">
-                        <Zap className="h-6 w-6 text-purple-600" />
+                      <div className="flex items-center justify-center h-12 w-12 rounded-lg bg-gray-100">
+                        <Zap className="h-6 w-6 text-gray-700" />
                       </div>
                     </div>
                     <div>
-                      <h3 className="font-semibold text-slate-900">15+ Sources</h3>
-                      <p className="text-sm text-slate-600 mt-1">Amazon APIs, Google Books, Goodreads & more</p>
+                      <h3 className="font-semibold text-gray-900">15+ Sources</h3>
+                      <p className="text-sm text-gray-600 mt-1">Amazon APIs, Google Books, Goodreads & more</p>
                     </div>
                   </div>
 
                   <div className="flex gap-4">
                     <div className="flex-shrink-0">
-                      <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-blue-100">
-                        <Target className="h-6 w-6 text-blue-600" />
+                      <div className="flex items-center justify-center h-12 w-12 rounded-lg bg-gray-100">
+                        <Target className="h-6 w-6 text-gray-700" />
                       </div>
                     </div>
                     <div>
-                      <h3 className="font-semibold text-slate-900">3 Strategies</h3>
-                      <p className="text-sm text-slate-600 mt-1">Phrase-only, balanced, aggressive options</p>
+                      <h3 className="font-semibold text-gray-900">3 Strategies</h3>
+                      <p className="text-sm text-gray-600 mt-1">Phrase-only, balanced, aggressive options</p>
                     </div>
                   </div>
 
                   <div className="flex gap-4">
                     <div className="flex-shrink-0">
-                      <div className="flex items-center justify-center h-12 w-12 rounded-xl bg-emerald-100">
-                        <Sparkles className="h-6 w-6 text-emerald-600" />
+                      <div className="flex items-center justify-center h-12 w-12 rounded-lg bg-gray-100">
+                        <Sparkles className="h-6 w-6 text-gray-700" />
                       </div>
                     </div>
                     <div>
-                      <h3 className="font-semibold text-slate-900">Budget Control</h3>
-                      <p className="text-sm text-slate-600 mt-1">100% budget-aware keyword capping</p>
+                      <h3 className="font-semibold text-gray-900">Budget Control</h3>
+                      <p className="text-sm text-gray-600 mt-1">100% budget-aware keyword capping</p>
                     </div>
                   </div>
                 </div>
@@ -193,13 +190,13 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
             <div className="mb-8 space-y-4">
               <div className="flex items-center gap-3">
                 <div className="flex-1 relative">
-                  <Search className="absolute left-4 top-3.5 text-slate-400" size={20} />
+                  <Search className="absolute left-4 top-3.5 text-gray-400" size={20} />
                   <input
                     type="text"
                     placeholder="Search campaigns, ASIN..."
                     value={searchTerm}
                     onChange={(e) => setSearchTerm(e.target.value)}
-                    className="w-full pl-12 pr-4 py-3 border border-slate-200 rounded-xl focus:outline-none focus:border-purple-500 focus:ring-2 focus:ring-purple-100 bg-white transition-all"
+                    className="w-full pl-12 pr-4 py-3 border border-gray-200 rounded-lg focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-300 bg-white transition-all"
                   />
                 </div>
               </div>
@@ -212,8 +209,8 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
                     onClick={() => setFilterStatus(status)}
                     className={`px-4 py-2 rounded-lg text-sm font-medium transition-all whitespace-nowrap ${
                       filterStatus === status
-                        ? "bg-gradient-to-r from-purple-600 to-blue-600 text-white shadow-lg shadow-purple-500/20"
-                        : "bg-white text-slate-600 border border-slate-200 hover:bg-slate-50"
+                        ? "bg-gray-900 text-white"
+                        : "bg-white text-gray-600 border border-gray-200 hover:bg-gray-50"
                     }`}
                   >
                     {status.charAt(0).toUpperCase() + status.slice(1)}
@@ -226,55 +223,55 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
             {loading ? (
               <div className="flex items-center justify-center py-16">
                 <div className="text-center">
-                  <div className="animate-spin w-12 h-12 border-4 border-purple-200 border-t-purple-600 rounded-full mx-auto mb-4"></div>
-                  <p className="text-slate-600">Loading campaigns...</p>
+                  <div className="animate-spin w-12 h-12 border-4 border-gray-200 border-t-gray-700 rounded-full mx-auto mb-4"></div>
+                  <p className="text-gray-600">Loading campaigns...</p>
                 </div>
               </div>
             ) : filteredCampaigns.length === 0 ? (
-              <div className="text-center py-16 bg-white rounded-2xl border border-slate-200">
-                <FileText size={48} className="mx-auto text-slate-300 mb-4" />
-                <p className="text-slate-600">No campaigns found</p>
+              <div className="text-center py-16 bg-white rounded-lg border border-gray-200">
+                <FileText size={48} className="mx-auto text-gray-300 mb-4" />
+                <p className="text-gray-600">No campaigns found</p>
               </div>
             ) : (
-              <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden shadow-sm hover:shadow-md transition-shadow">
+              <div className="bg-white border border-gray-200 rounded-lg overflow-hidden">
                 <table className="w-full">
                   <thead>
-                    <tr className="border-b border-slate-200 bg-gradient-to-r from-slate-50 to-slate-50">
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Campaign</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">ASIN</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Keywords</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Budget</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Status</th>
-                      <th className="px-6 py-4 text-left text-sm font-semibold text-slate-900">Created</th>
-                      <th className="px-6 py-4 text-right text-sm font-semibold text-slate-900"></th>
+                    <tr className="border-b border-gray-200 bg-gray-50">
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Campaign</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">ASIN</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Keywords</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Budget</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Status</th>
+                      <th className="px-6 py-4 text-left text-sm font-semibold text-gray-900">Created</th>
+                      <th className="px-6 py-4 text-right text-sm font-semibold text-gray-900"></th>
                     </tr>
                   </thead>
-                  <tbody className="divide-y divide-slate-200">
+                  <tbody className="divide-y divide-gray-200">
                     {filteredCampaigns.map((campaign) => (
-                      <tr key={campaign.id} className="hover:bg-gradient-to-r hover:from-purple-50 hover:to-blue-50 transition-colors">
+                      <tr key={campaign.id} className="hover:bg-gray-50 transition-colors">
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-3">
-                            <div className="w-10 h-10 bg-gradient-to-br from-purple-100 to-blue-100 rounded-lg flex items-center justify-center flex-shrink-0">
-                              <FileText size={20} className="text-purple-600" />
+                            <div className="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center flex-shrink-0">
+                              <FileText size={20} className="text-gray-600" />
                             </div>
                             <div>
-                              <p className="font-semibold text-slate-900 text-sm">{campaign.name}</p>
-                              <p className="text-xs text-slate-500 mt-0.5">{campaign.id.slice(0, 8)}...</p>
+                              <p className="font-semibold text-gray-900 text-sm">{campaign.name}</p>
+                              <p className="text-xs text-gray-500 mt-0.5">{campaign.id.slice(0, 8)}...</p>
                             </div>
                           </div>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="font-mono text-sm text-slate-600 bg-slate-50 px-3 py-1 rounded-lg">
+                          <span className="font-mono text-sm text-gray-600 bg-gray-50 px-3 py-1 rounded-lg">
                             {campaign.asin}
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="inline-flex px-3 py-1.5 bg-purple-50 text-purple-700 rounded-lg text-xs font-semibold border border-purple-200">
+                          <span className="inline-flex px-3 py-1.5 bg-gray-50 text-gray-700 rounded-lg text-xs font-semibold border border-gray-200">
                             {campaign.total_rows} rows
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="text-sm font-semibold text-slate-900">
+                          <span className="text-sm font-semibold text-gray-900">
                             ${campaign.daily_budget?.toFixed(2) || "0.00"}
                           </span>
                         </td>
@@ -282,13 +279,13 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
                           <span
                             className={`inline-flex px-3 py-1.5 rounded-lg text-xs font-semibold border ${
                               statusConfig[campaign.status].badge
-                            } ${statusConfig[campaign.status].text} border-current`}
+                            } ${statusConfig[campaign.status].text}`}
                           >
                             {campaign.status.charAt(0).toUpperCase() + campaign.status.slice(1)}
                           </span>
                         </td>
                         <td className="px-6 py-4">
-                          <span className="text-sm text-slate-600">
+                          <span className="text-sm text-gray-600">
                             {new Date(campaign.created_at).toLocaleDateString("en-US", {
                               month: "short",
                               day: "numeric",
@@ -297,7 +294,7 @@ export default function CampaignsDashboard({ onCreateNew }: CampaignsDashboardPr
                           </span>
                         </td>
                         <td className="px-6 py-4 text-right">
-                          <button className="text-slate-400 hover:text-slate-600 transition-colors p-2 hover:bg-slate-100 rounded-lg">
+                          <button className="text-gray-400 hover:text-gray-600 transition-colors p-2 hover:bg-gray-100 rounded-lg">
                             <MoreVertical size={18} />
                           </button>
                         </td>
