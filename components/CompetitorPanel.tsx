@@ -7,6 +7,7 @@ import {
   CheckCircle2,
   Download,
   Filter,
+  ListChecks,
   Loader2,
   Plus,
   Search,
@@ -16,7 +17,14 @@ import {
 } from "lucide-react";
 
 type CompetitorAsinStatus = "active" | "paused" | "negative" | "archived" | "rejected";
-type CompetitorAsinSource = "manual" | "kdpradar" | "datadive" | "helium10" | "sellersprite" | "auto-crawl";
+type CompetitorAsinSource =
+  | "manual"
+  | "kdpradar"
+  | "datadive"
+  | "helium10"
+  | "sellersprite"
+  | "auto-crawl"
+  | "genre-preset";
 
 interface CompetitorAsinRow {
   id: string;
@@ -41,7 +49,15 @@ interface GenerateSummary {
   insertedCount: number;
 }
 
-const SOURCES: CompetitorAsinSource[] = ["manual", "kdpradar", "datadive", "helium10", "sellersprite", "auto-crawl"];
+const SOURCES: CompetitorAsinSource[] = [
+  "manual",
+  "kdpradar",
+  "datadive",
+  "helium10",
+  "sellersprite",
+  "auto-crawl",
+  "genre-preset",
+];
 const STATUSES: CompetitorAsinStatus[] = ["active", "paused", "negative", "archived", "rejected"];
 const PAGE_SIZE = 100;
 
@@ -106,6 +122,9 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
   const [summary, setSummary] = useState<GenerateSummary | null>(null);
 
   const [recalculatingBids, setRecalculatingBids] = useState(false);
+
+  const [applyingPresets, setApplyingPresets] = useState(false);
+  const [applyPresetsNotice, setApplyPresetsNotice] = useState<string | null>(null);
 
   const [refiltering, setRefiltering] = useState(false);
   const [refilterResult, setRefilterResult] = useState<string | null>(null);
@@ -216,6 +235,31 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
       await reload();
     } finally {
       setRecalculatingBids(false);
+    }
+  }
+
+  /** Applies matching preset competitor ASINs (task 4) — mirrors BookDetailPage's applyGenrePresets() for keywords. */
+  async function applyGenrePresets() {
+    setApplyingPresets(true);
+    setApplyPresetsNotice(null);
+    try {
+      const res = await fetch(`/api/books/${bookId}/competitors/apply-presets`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setApplyPresetsNotice(body.error || "Could not apply genre presets.");
+        return;
+      }
+      setApplyPresetsNotice(
+        body.message ??
+          (body.appliedCount > 0
+            ? `Applied ${body.appliedCount} preset competitor ASIN${body.appliedCount === 1 ? "" : "s"} from ${body.matchedGenres.join(", ")}.`
+            : "No new preset competitor ASINs to apply.")
+      );
+      if (body.appliedCount > 0) await reload();
+    } catch (err) {
+      setApplyPresetsNotice(err instanceof Error ? err.message : "Could not apply genre presets.");
+    } finally {
+      setApplyingPresets(false);
     }
   }
 
@@ -344,6 +388,24 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
           <span className="text-md font-semibold">{refiltering ? "Filtering…" : "Re-run filters"}</span>
         </button>
 
+        <button
+          onClick={applyGenrePresets}
+          disabled={applyingPresets}
+          className="action-card action-card-secondary"
+          title="Apply preset competitor ASINs from the genre library (spec task 4)"
+        >
+          <div className="flex items-start justify-between">
+            <span className="icon-tile">
+              {applyingPresets ? (
+                <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} />
+              ) : (
+                <ListChecks size={20} style={{ color: "var(--icon-active)" }} />
+              )}
+            </span>
+          </div>
+          <span className="text-md font-semibold">{applyingPresets ? "Applying…" : "Apply genre presets"}</span>
+        </button>
+
         <a
           href={`/api/books/${bookId}/competitors/export`}
           className="action-card action-card-secondary"
@@ -410,6 +472,13 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
         </div>
       )}
 
+      {applyPresetsNotice && (
+        <div className="alert mb-6" aria-live="polite">
+          <ListChecks size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
+          <p>{applyPresetsNotice}</p>
+        </div>
+      )}
+
       {error && (
         <div className="alert alert-error mb-4" role="alert">
           <AlertCircle size={20} className="mt-0.5 shrink-0" />
@@ -439,7 +508,7 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
           className="input w-auto"
           aria-label="Source for new competitor ASIN"
         >
-          {SOURCES.filter((source) => source !== "auto-crawl").map((source) => (
+          {SOURCES.filter((source) => source !== "auto-crawl" && source !== "genre-preset").map((source) => (
             <option key={source} value={source}>
               {labelForSource(source)}
             </option>

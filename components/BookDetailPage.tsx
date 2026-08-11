@@ -298,10 +298,12 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
               <option value="mixed">Broad + Phrase + Exact</option>
               <option value="phrase-only">Phrase-only (+ Exact for comps)</option>
             </select>
-            <button onClick={applyGenrePresets} disabled={applyingPresets} className="btn btn-secondary">
-              <ListChecks size={20} />
-              {applyingPresets ? "Applying…" : "Apply genre presets"}
-            </button>
+            {view === "keywords" && (
+              <button onClick={applyGenrePresets} disabled={applyingPresets} className="btn btn-secondary">
+                <ListChecks size={20} />
+                {applyingPresets ? "Applying…" : "Apply genre presets"}
+              </button>
+            )}
             <button onClick={refreshMetadata} disabled={refreshing} className="btn btn-secondary">
               <RefreshCw size={20} className={refreshing ? "animate-spin" : undefined} />
               {refreshing ? "Re-fetching…" : "Re-fetch metadata"}

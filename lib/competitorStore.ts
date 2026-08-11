@@ -155,6 +155,8 @@ export interface UpdateCompetitorAsinInput {
   bsr?: number | null;
   competitorCount?: number | null;
   meanRank?: number | null;
+  /** Cleared (set null) by a manual notes edit — see app/api/competitors/[id]/route.ts. */
+  presetCompetitorAsinId?: string | null;
 }
 
 /** Single-row edit, for inline status/bid/notes editing in the manager table. */
@@ -174,6 +176,7 @@ export async function updateCompetitorAsin(
   if (updates.bsr !== undefined) payload.bsr = updates.bsr;
   if (updates.competitorCount !== undefined) payload.competitor_count = updates.competitorCount;
   if (updates.meanRank !== undefined) payload.mean_rank = updates.meanRank;
+  if (updates.presetCompetitorAsinId !== undefined) payload.preset_competitor_asin_id = updates.presetCompetitorAsinId;
 
   const { data, error } = await supabase
     .from("competitor_asins")

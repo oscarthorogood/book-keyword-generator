@@ -18,11 +18,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await request.json();
-    const updates: { status?: CompetitorAsin["status"]; bid?: number | null; notes?: string | null } = {};
+    const updates: {
+      status?: CompetitorAsin["status"];
+      bid?: number | null;
+      notes?: string | null;
+      presetCompetitorAsinId?: string | null;
+    } = {};
 
     if (typeof body.status === "string" && STATUSES.includes(body.status)) updates.status = body.status;
     if (typeof body.bid === "number" || body.bid === null) updates.bid = body.bid;
-    if (typeof body.notes === "string" || body.notes === null) updates.notes = body.notes;
+    if (typeof body.notes === "string" || body.notes === null) {
+      updates.notes = body.notes;
+      // A manual edit to notes takes this row out of sync with its preset
+      // (sql/18-preset-competitor-asins.sql) — clear the link so a later
+      // library edit never clobbers what the user just typed, mirroring
+      // app/api/keywords/[id]/route.ts's preset_keyword_id handling.
+      updates.presetCompetitorAsinId = null;
+    }
 
     if (Object.keys(updates).length === 0) {
       return Response.json({ error: "No valid fields to update" }, { status: 400 });
