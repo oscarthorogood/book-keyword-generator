@@ -295,9 +295,9 @@ better one:
   exact fiction trope vocabulary, since it's crowd-tagged rather than
   inferred. Unverified against live Goodreads markup (same caveat as every
   other DOM-shape guess in this app) and routes through the same
-  `SCRAPER_PROXY_API_KEY` as the Amazon scrapes if configured, since it's
-  unconfirmed whether Goodreads (Amazon-owned, separate infra) blocks
-  cloud IPs the same way.
+  `SCRAPER_PROXY_API_KEY` / `SCRAPINGBEE_API_KEY` proxy as the Amazon
+  scrapes if configured, since it's unconfirmed whether Goodreads
+  (Amazon-owned, separate infra) blocks cloud IPs the same way.
 - **Google autocomplete sweep** (`getGoogleAutocompleteKeywordSet` in
   `lib/scrape.ts`) — the same alphabet-soup seeding, but against Google's own
   unofficial search-suggest endpoint instead of Amazon's, to surface what
@@ -500,8 +500,9 @@ sources carry real bid data).
 
 Optional:
 
-- `SCRAPER_PROXY_API_KEY` — see "Scraping from a cloud deployment" below.
-  Needed on Vercel/most cloud hosts; not needed for local dev.
+- `SCRAPER_PROXY_API_KEY` / `SCRAPINGBEE_API_KEY` — see "Scraping from a
+  cloud deployment" below. One of the two is needed on Vercel/most cloud
+  hosts; not needed for local dev.
 - `GEMINI_API_KEY` / `FIRECRAWL_API_KEY` — see "AI-assisted ranking" above.
   Neither is required; the app ranks keywords with the heuristic scorer
   alone when they're unset.
@@ -581,13 +582,16 @@ in `lib/scrape.ts`), and `/api/lookup` returns a "blocked" error you can see
 in the UI.
 
 The fix: set `SCRAPER_PROXY_API_KEY` to a [ScraperAPI](https://www.scraperapi.com)
-key (free tier is ~1,000 requests/month, plenty for single-user use). When
-set, `scrapeProductPage`'s fetch — and the Goodreads lookup in
-`lib/goodreads.ts` — route through ScraperAPI's residential/rotating-IP proxy
+key (free tier is ~1,000 requests/month, plenty for single-user use), or
+`SCRAPINGBEE_API_KEY` to a [ScrapingBee](https://www.scrapingbee.com) key
+instead (also a ~1,000 credit/month free tier). When either is set,
+`scrapeProductPage`'s fetch — and the Goodreads lookup in `lib/goodreads.ts`
+— route through that provider's residential/rotating-IP proxy
 (`resolveScraperProxyUrl` in `lib/scrape.ts`) instead of hitting the target
-directly; unset, both fall back to a direct fetch (fine for local dev). This
-is scoped to full-page HTML fetches only (all of which go through the shared
-rate limiter, audit log and CAPTCHA circuit breaker in `lib/fetchLog.ts`) —
+directly; if both are set, ScrapingBee takes priority; if neither is set,
+both fall back to a direct fetch (fine for local dev). This is scoped to
+full-page HTML fetches only (all of which go through the shared rate
+limiter, audit log and CAPTCHA circuit breaker in `lib/fetchLog.ts`) —
 **not** the autocomplete JSON
 endpoints (`getAutocompleteSuggestions`), which run
 dozens of times per generate call and would burn through a proxy's free tier
@@ -597,8 +601,8 @@ blocked on your deployment, the same `resolveScraperProxyUrl` pattern can be
 applied there — check server logs first (`[scrapeProductPage] ... -> HTTP
 ...` / `... bot/CAPTCHA check`) to confirm before spending proxy credits on it.
 
-To swap in a different proxy provider (ScrapingBee, ZenRows, Bright Data,
-etc.), edit `resolveScraperProxyUrl` in `lib/scrape.ts` — most use a similar
+To swap in yet another proxy provider (ZenRows, Bright Data, etc.), edit
+`resolveScraperProxyUrl` in `lib/scrape.ts` — most use a similar
 `?api_key=...&url=...` query-param shape.
 
 ## Known open items
