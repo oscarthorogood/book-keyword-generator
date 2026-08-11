@@ -341,11 +341,21 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
       )}
 
       {summary && (
-        <div className="alert alert-success mb-6" aria-live="polite">
-          <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
+        <div
+          className={`alert mb-6 ${summary.insertedCount > 0 ? "alert-success" : "alert-warning"}`}
+          aria-live="polite"
+        >
+          {summary.insertedCount > 0 ? (
+            <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
+          ) : (
+            <AlertCircle size={20} className="mt-0.5 shrink-0" />
+          )}
           <p>
-            Added {summary.insertedCount} new competitor ASIN{summary.insertedCount === 1 ? "" : "s"} from{" "}
-            {summary.candidateCount} found in this book&apos;s competitor crawl.
+            {summary.insertedCount > 0
+              ? `Added ${summary.insertedCount} new competitor ASIN${summary.insertedCount === 1 ? "" : "s"} from ${summary.candidateCount} found in this book's competitor crawl.`
+              : summary.candidateCount === 0
+              ? "No competitor ASINs were found in this book's cached crawl. Try clicking 'Re-fetch metadata' at the top of the page, or add ASINs manually below."
+              : `All ${summary.candidateCount} competitor ASINs found in the crawl are already tracked for this book.`}
           </p>
         </div>
       )}
