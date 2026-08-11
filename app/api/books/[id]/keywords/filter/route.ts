@@ -1,14 +1,23 @@
+import { applyAiRelevance, isAiRankingConfigured, rankKeywordsWithAi } from "@/lib/aiRanker";
 import { loadBookWithSnapshot } from "@/lib/bookStore";
 import { capAndRank } from "@/lib/keywordCapAndRank";
 import { buildFilterContext, filterKeywords, type FilterableKeyword } from "@/lib/keywordFilters";
+import { genreFamilySearchTerms } from "@/lib/genre";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
-import type { KeywordSource, MatchType } from "@/lib/types";
+import type { KeywordCandidate, KeywordSource, MatchType } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 /** Statuses the pipeline is allowed to change. A negative keyword is a human decision. */
 const REFILTERABLE_STATUSES = ["active", "paused", "rejected", "archived"];
+
+/**
+ * How many keywords per bucket the AI relevance re-filter judges at once.
+ * Mirrors the cap in keywords/generate/route.ts — the AI sees a shortlist,
+ * not the full set, to keep the call small and cheap.
+ */
+const AI_REVIEW_LIMIT = 80;
 
 interface KeywordRow {
   id: string;
@@ -17,6 +26,7 @@ interface KeywordRow {
   status: string;
   match_type: MatchType;
   bid: number | null;
+  category: string | null;
 }
 
 /**
@@ -28,6 +38,10 @@ interface KeywordRow {
  * keywords this book *already* has — the one-off migration for lists
  * generated before the pipeline existed, and the way to re-apply both after
  * the blocklists, the keyword budget, or the book's metadata change.
+ *
+ * When AI ranking is configured (GEMINI_API_KEY or OPENROUTER_API_KEY set),
+ * an additional AI relevance pass re-orders the surviving keywords before the
+ * cap-and-rank step so the best candidates are always in the active window.
  *
  * Only active/paused/rejected/archived rows are touched: a keyword a human
  * marked negative stays where they put it. A row already archived by a
@@ -63,7 +77,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const { data: rows, error } = await supabase
       .from("keywords")
-      .select("id, text, source, status, match_type, bid")
+      .select("id, text, source, status, match_type, bid, category")
       .eq("book_id", bookId)
       .eq("user_id", user.id)
       .in("status", REFILTERABLE_STATUSES);
@@ -126,6 +140,82 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       });
     }
 
+    // --- Optional AI relevance re-rank ---
+    // After the heuristic filter, run an AI pass over the surviving active
+    // keywords to refine their order before the cap-and-rank step. This
+    // ensures the best-matching candidates are always in the active window,
+    // not just whatever order they happened to be inserted in.
+    let aiRanked = false;
+    if (isAiRankingConfigured()) {
+      const familySearchTerms = genreFamilySearchTerms(snapshot.genreFamilies ?? []);
+      const genreSeedTerms = [...(snapshot.genreTerms ?? []).slice(0, 8), ...familySearchTerms.slice(0, 4)].filter(Boolean);
+
+      const activeOutcomes = outcomes.filter((o) => o.status === "active");
+
+      // Split into tropes vs comp-names by the keyword's category column,
+      // mirroring the generate route's splitKeywordsByCategory logic.
+      const tropesHead: KeywordCandidate[] = activeOutcomes
+        .filter((o) => o.row.category !== "comp-names")
+        .slice(0, AI_REVIEW_LIMIT)
+        .map((o) => ({
+          text: o.text,
+          sources: (o.row.source ? [o.row.source as KeywordSource] : []) as KeywordSource[],
+          category: o.row.category ?? undefined,
+        }));
+
+      const compHead: KeywordCandidate[] = activeOutcomes
+        .filter((o) => o.row.category === "comp-names")
+        .slice(0, AI_REVIEW_LIMIT)
+        .map((o) => ({
+          text: o.text,
+          sources: (o.row.source ? [o.row.source as KeywordSource] : []) as KeywordSource[],
+          category: o.row.category ?? undefined,
+        }));
+
+      if (tropesHead.length + compHead.length > 0) {
+        const ranked = await rankKeywordsWithAi(
+          {
+            title: snapshot.title,
+            author: snapshot.author ?? "",
+            seriesName: snapshot.seriesName,
+            genreTerms: genreSeedTerms,
+            description: snapshot.description,
+            pageMarkdown: snapshot.pageMarkdownExcerpt,
+          },
+          tropesHead,
+          compHead
+        ).catch((err: Error) => {
+          console.error("[filter] AI ranking failed:", err.message);
+          return null;
+        });
+
+        if (ranked) {
+          aiRanked = true;
+          // applyAiRelevance reorders within the slice and keeps "drop"
+          // verdicts out — those become paused (not hard-rejected) so the
+          // user can still override them.
+          const rerankedTropes = applyAiRelevance(tropesHead, ranked);
+          const rerankedComp = applyAiRelevance(compHead, ranked);
+
+          // Propagate AI scores back into the outcome list for cap-and-rank
+          const aiScoreMap = new Map<string, number>();
+          for (const c of [...rerankedTropes, ...rerankedComp]) {
+            aiScoreMap.set(c.text, c.score ?? 0);
+          }
+
+          // Anything the AI explicitly "dropped" (i.e. not in reranked) gets paused
+          const rerankedTexts = new Set([...rerankedTropes, ...rerankedComp].map((c) => c.text));
+          for (const outcome of activeOutcomes) {
+            if (!rerankedTexts.has(outcome.text) && (tropesHead.some(c => c.text === outcome.text) || compHead.some(c => c.text === outcome.text))) {
+              outcome.status = "paused";
+              outcome.reason = "Dropped by AI relevance filter as off-topic for this book.";
+              outcome.filter = "aiRelevance";
+            }
+          }
+        }
+      }
+    }
+
     // §5.11: the drop-rule pipeline alone still leaves keyword dumping — cap
     // the survivors at the book's keyword budget and rank the rest into a
     // backlog rather than reactivating every one of them. Ranked-out
@@ -164,6 +254,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       }));
 
     const archivedByCap = outcomes.filter((outcome) => outcome.filter === "capAndRank").length;
+    const pausedByAi = outcomes.filter((outcome) => outcome.filter === "aiRelevance").length;
 
     if (dryRun) {
       return Response.json({
@@ -173,6 +264,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         changed: updates.length,
         summary,
         archivedByCap,
+        pausedByAi,
+        aiRanked,
         preview: updates.slice(0, 50),
       });
     }
@@ -207,6 +300,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       changed,
       summary,
       archivedByCap,
+      pausedByAi,
+      aiRanked,
     });
   } catch (err) {
     console.error("Error filtering keywords:", err);
