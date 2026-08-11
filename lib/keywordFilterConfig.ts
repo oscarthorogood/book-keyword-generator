@@ -321,3 +321,100 @@ export const WEB_AUTOCOMPLETE_SOURCES = [
   "youtube-autocomplete",
   "duckduckgo-autocomplete",
 ];
+
+/**
+ * Machine-readable reason codes (brief §5.10). One codes field alongside the
+ * existing human-readable `reason` string, so runs stay auditable.
+ */
+export const REASON_CODES = [
+  "PRODUCT",
+  "GIFT_INTENT",
+  "BOILERPLATE",
+  "OFF_SUBGENRE",
+  "TONE_MISMATCH",
+  "NATIONALITY_MISMATCH",
+  "FRAGMENT",
+  "AUDIENCE_MISMATCH",
+  "FORMAT_NOT_OFFERED",
+  "LANGUAGE_MISMATCH",
+  "PLATFORM_META",
+  "TITLE_COLLISION",
+  "DUPLICATE",
+  "OVERBROAD",
+  "RANKED_OUT",
+] as const;
+export type ReasonCode = (typeof REASON_CODES)[number];
+
+// --- 5.1 Physical-product detector -----------------------------------------
+
+/** Unit/size/pack markers — a product listing, not a book. */
+export const PRODUCT_UNIT_PATTERNS: RegExp[] = [
+  /\b\d+\s?(g|kg|ml|l|fl ?oz|oz|cm|mm)\b/,
+  /\bpack of \d+\b/,
+  /\b\d+ ?pack\b/,
+  /\buk size \d+(-\d+)?\b/,
+  /\bsize [a-z0-9]+\b/,
+];
+
+/** Strong signal: this candidate names a physical product, not a book. */
+export const PRODUCT_NOUNS = [
+  "mug", "mugs", "jar", "keyring", "keychain", "socks", "sweater", "jumper",
+  "tea", "tea bags", "coffee", "sachets", "chocolate", "sweets", "biscuits",
+  "shortbread", "fudge", "tablet", "soap", "soaps", "candle", "tea towel",
+  "hat", "scarf", "flag", "sticker", "poster", "t shirt", "hoodie", "tote",
+  "ornament", "souvenir", "gift set",
+];
+
+/** Weak signal: material/colour tokens that co-occur with product listings. */
+export const PRODUCT_WEAK_SIGNALS = [
+  "ceramic", "woven", "knitted", "cotton", "navy", "purple", "cable",
+  "shawl neck", "glass dome", "fine soaps",
+];
+
+/** A candidate carrying any of these is unambiguously a book, whatever else it says. */
+export const BOOK_SIGNAL_WORDS = [
+  "book", "books", "novel", "fiction", "paperback", "kindle", "ebook",
+  "audiobook", "author", "series", "trilogy", "thriller", "mystery", "crime",
+  "whodunit",
+];
+
+// --- 5.2 Gift/marketplace intent --------------------------------------------
+
+/** Souvenir/gift-shop queries that fail the book-intent gate outright. */
+export const GIFT_INTENT_TERMS = [
+  "gifts", "gift", "gifts for foreigners", "gift set", "souvenir", "souvenirs",
+];
+
+// --- 5.3 Marketplace boilerplate --------------------------------------------
+
+export const MARKETPLACE_BOILERPLATE_TERMS = [
+  "shop the store", "on amazon", "amazon best sellers", "add to basket",
+  "add to cart", "free delivery", "prime", "see all results",
+  "customer reviews", "best sellers rank",
+];
+
+/** Sources this gate applies to (brief §5.2): marketplace/SERP scrapes with no book guarantee. */
+export const MARKETPLACE_SERP_SOURCES = ["serpapi-organic", "serpapi-related", "comp-name"];
+
+// --- 5.6 Fragment quality gate extension ------------------------------------
+
+/** Review-language patterns that mean "book-description" text is review-speak, not a query. */
+export const REVIEW_SPEAK_ADJECTIVES = ["gripping", "fascinating", "compelling", "stunning"];
+export const REVIEW_SPEAK_NOUNS = ["lead character", "instalment", "installment", "debut", "read"];
+
+// --- 5.7 Audience / format / language / platform guards --------------------
+
+export const AUDIENCE_MISMATCH_TERMS = ["for teens", "for kids", "young adult"];
+export const PLATFORM_META_TERMS = ["reddit", "tiktok", "booktok", "youtube", "quora"];
+
+// --- 5.8 Title-collision detection ------------------------------------------
+
+/** Collision vocabulary shared with the negative-keyword library (Appendix B): games, media, dictionary lookups. */
+export const TITLE_COLLISION_TERMS = [
+  "wow", "turtle wow", "patch notes", "class changes", "lyrics", "song", "band",
+  "game", "movie", "quotes", "meaning", "past tense", "asmr", "enterprise earth",
+  "soul rift", "the divine", "the last of us",
+];
+
+/** Numeric/word tails that are ambiguous rather than a clean collision — series book vs unrelated media. */
+export const AMBIGUOUS_TITLE_TAILS = ["two", "2", "ii", "part two", "part 2"];

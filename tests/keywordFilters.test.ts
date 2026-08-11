@@ -503,12 +503,24 @@ describe("filter 10 — description shaping", () => {
     expect(verdict("second body emerges", ["book-description"]).verdict).toBe("pause");
   });
 
-  it("keeps thematic noun phrases from the blurb, capped at phrase match", () => {
-    for (const keyword of ["celtic symbols", "tower block", "ancient symbology", "darkest secrets"]) {
+  it("drops bare two-word noun fragments with no profile/genre anchor (brief §5.6, §6 must_drop)", () => {
+    // "celtic symbols" reads as jewellery, not a book search; these are the
+    // brief's own must_drop examples for the FRAGMENT reason code.
+    for (const keyword of ["celtic symbols", "tower block", "ancient symbology"]) {
       const result = verdict(keyword, ["book-description"]);
-      expect(result.verdict).toBe("pass");
-      expect(result.matchTypeCeiling).toBe("phrase");
+      expect(result.verdict).toBe("reject");
+      expect(result.filter).toBe("descriptionShape");
     }
+  });
+
+  it("keeps thematic noun phrases that do carry a profile anchor, capped at phrase match", () => {
+    // "darkest secrets" alone has no anchor and is dropped above by the
+    // brief's short-fragment rule; paired with a genre/series token it still
+    // reads as a real query, so composing rather than shipping raw n-grams
+    // (the brief's own recommendation) keeps it.
+    const result = verdict("darkest secrets edinburgh crime thriller", ["book-description"]);
+    expect(result.verdict).toBe("pass");
+    expect(result.matchTypeCeiling).toBe("phrase");
   });
 
   it("keeps character names", () => {

@@ -32,6 +32,26 @@ export interface BookAnchors {
   bookIntent: string[];
   /** The genre phrase used to complete dangling modifiers ("fast paced scottish" → "… crime thriller"). */
   primaryGenrePhrase: string;
+  /** Explicit book profile (brief §2) — subgenre/tone/nationality/format guardrails. Optional: hand-built anchors (tests, older callers) may omit it; use `profileOf()` to read it with defaults filled in. */
+  profile?: BookProfile;
+}
+
+/**
+ * The book profile the brief (§2) recommends as an explicit per-book input:
+ * what subgenre/tone this book is (and isn't), what nationality it's about,
+ * and what formats it's actually sold in. Everything here is supplied by
+ * the caller rather than inferred — it's editorial judgement, not a scrape.
+ */
+export interface BookProfile {
+  genreCore: string[];
+  genreAdjacent: string[];
+  genreDeny: string[];
+  tone: string[];
+  toneDeny: string[];
+  nationality: string[];
+  audience: string;
+  formatsOffered: string[];
+  formatsNotOffered: string[];
 }
 
 export interface AnchorInput {
@@ -48,6 +68,22 @@ export interface AnchorInput {
   compTitles: string[];
   reviewSnippets?: string[];
   keyTropes?: string[];
+  /** Explicit book profile (brief §2). Optional per book; empty lists are a valid, if permissive, profile. */
+  bookProfile?: Partial<BookProfile>;
+}
+
+function defaultBookProfile(input: Partial<BookProfile> | undefined): BookProfile {
+  return {
+    genreCore: input?.genreCore ?? [],
+    genreAdjacent: input?.genreAdjacent ?? [],
+    genreDeny: input?.genreDeny ?? [],
+    tone: input?.tone ?? [],
+    toneDeny: input?.toneDeny ?? [],
+    nationality: input?.nationality ?? [],
+    audience: input?.audience ?? "adult",
+    formatsOffered: input?.formatsOffered ?? [],
+    formatsNotOffered: input?.formatsNotOffered ?? [],
+  };
 }
 
 /**
@@ -321,6 +357,7 @@ export function buildBookAnchors(input: AnchorInput): BookAnchors {
     comps: Array.from(comps),
     bookIntent: [...BOOK_INTENT_WORDS],
     primaryGenrePhrase,
+    profile: defaultBookProfile(input.bookProfile),
   };
 }
 
@@ -333,4 +370,9 @@ export function isForeignDemonym(word: string, anchors: BookAnchors): boolean {
 /** Every anchor that qualifies a keyword for relevance (i.e. excluding bookIntent). */
 export function qualifyingAnchors(anchors: BookAnchors): string[] {
   return [...anchors.bookSpecific, ...anchors.genre, ...anchors.setting, ...anchors.comps];
+}
+
+/** Reads `anchors.profile` with an empty (permissive) default filled in for hand-built anchors that omit it. */
+export function profileOf(anchors: BookAnchors): BookProfile {
+  return anchors.profile ?? defaultBookProfile(undefined);
 }

@@ -23,29 +23,43 @@
  * lib/keywordFilterConfig.ts.
  */
 
-import { buildBookAnchors, qualifyingAnchors, type AnchorInput, type BookAnchors } from "./keywordAnchors";
+import { buildBookAnchors, profileOf, qualifyingAnchors, type AnchorInput, type BookAnchors } from "./keywordAnchors";
 import {
   ALLOWED_GENRE_SYNONYMS,
   ALLOWLISTED_MODIFIER_PHRASES,
+  AMBIGUOUS_TITLE_TAILS,
+  AUDIENCE_MISMATCH_TERMS,
   BAD_SYNONYM_TERMS,
   BOOK_DOMAIN_WORDS,
   BOOK_INTENT_WORDS,
+  BOOK_SIGNAL_WORDS,
   DEMONYM_TERMS,
   DESCRIPTION_VERB_TOKENS,
   FORMAT_PATTERNS,
   GIFT_AUDIENCE_PAUSE_WORDS,
   GIFT_AUDIENCE_REJECT_WORDS,
+  GIFT_INTENT_TERMS,
   KINDLE_UNLIMITED_PATTERN,
   MARKET_LANGUAGES,
+  MARKETPLACE_BOILERPLATE_TERMS,
+  MARKETPLACE_SERP_SOURCES,
   METADATA_LABEL_TERMS,
   NON_MARKET_LANGUAGES,
   OFF_TOPIC_ENTITY_TERMS,
+  PLATFORM_META_TERMS,
+  PRODUCT_NOUNS,
+  PRODUCT_UNIT_PATTERNS,
+  PRODUCT_WEAK_SIGNALS,
+  type ReasonCode,
   REVIEW_FILLER_FRAGMENTS,
+  REVIEW_SPEAK_ADJECTIVES,
+  REVIEW_SPEAK_NOUNS,
   REVIEW_STOPWORDS,
   SEASONAL_TERMS,
   SEASON_WINDOWS,
   SELF_ANCHORED_SOURCES,
   SINGLE_WORD_PAUSE_TERMS,
+  TITLE_COLLISION_TERMS,
   UI_POLLUTION_TERMS,
   WEAK_CONNECTORS,
   WEB_AUTOCOMPLETE_SOURCES,
@@ -57,6 +71,8 @@ export type FilterVerdict = "pass" | "pause" | "reject";
 export interface FilterResult {
   verdict: FilterVerdict;
   reason?: string;
+  /** Machine-readable reason code (brief §5.10), alongside the human-readable reason. */
+  code?: ReasonCode;
   /** Set by phraseShape when a dangling modifier can be completed instead of dropped. */
   rewriteTo?: string;
   /** Set by the description-shaping filter: these are long-tail phrases, never Broad. */
@@ -222,6 +238,155 @@ export const offTopicEntityFilter: KeywordFilter = (keyword, context, sources) =
   return PASS;
 };
 
+// --- 3a. Physical products, gift/marketplace intent, boilerplate (§5.1-5.3) --
+
+/**
+ * SERP scraping for "scottish/british/irish" surfaces Amazon souvenir
+ * listings — mugs, tea, socks — that share a nationality token with the book
+ * but are not a book at all. Being a book is necessary but not sufficient
+ * (handled next by the SERP book-intent gate and the subgenre filter).
+ */
+export const physicalProductFilter: KeywordFilter = (keyword) => {
+  const unitMatch = PRODUCT_UNIT_PATTERNS.some((pattern) => pattern.test(keyword));
+  const strongNoun = firstMatch(keyword, PRODUCT_NOUNS);
+  const weakSignals = PRODUCT_WEAK_SIGNALS.filter((term) => containsTerm(keyword, term)).length;
+  const hasBookSignal = !!firstMatch(keyword, BOOK_SIGNAL_WORDS);
+
+  if (hasBookSignal) return PASS;
+
+  if (unitMatch || strongNoun || weakSignals >= 2) {
+    const signal = strongNoun ?? (unitMatch ? "unit/size/pack" : "material/colour tokens");
+    return { verdict: "reject", code: "PRODUCT", reason: `physical-product signal: "${signal}"` };
+  }
+
+  return PASS;
+};
+
+/**
+ * Marketplace/SERP scrapes carry no guarantee the result is a book at all —
+ * "british gifts" and "irish food" are pure gift/souvenir intent with no
+ * book signal to redeem them.
+ */
+export const bookIntentGateFilter: KeywordFilter = (keyword, context, sources) => {
+  if (!sources.some((source) => MARKETPLACE_SERP_SOURCES.includes(source))) return PASS;
+
+  const hasBookSignal = !!firstMatch(keyword, BOOK_SIGNAL_WORDS);
+  const hasComp = !!hasAnyAnchor(keyword, context.anchors.comps);
+  if (hasBookSignal || hasComp) return PASS;
+
+  const gift = firstMatch(keyword, GIFT_INTENT_TERMS);
+  if (gift) return { verdict: "reject", code: "GIFT_INTENT", reason: `gift/souvenir query, no book signal ("${gift}")` };
+
+  return { verdict: "reject", code: "GIFT_INTENT", reason: "marketplace/SERP result with no book or comp signal" };
+};
+
+/** Amazon page furniture ("shop the store on amazon") is not an author or title. */
+export const marketplaceBoilerplateFilter: KeywordFilter = (keyword) => {
+  const term = firstMatch(keyword, MARKETPLACE_BOILERPLATE_TERMS);
+  if (term) return { verdict: "reject", code: "BOILERPLATE", reason: `marketplace boilerplate: "${term}"` };
+  return PASS;
+};
+
+// --- 3b. Subgenre scoring against the book profile (§5.4) -------------------
+
+/**
+ * Scores a candidate against the book profile's genre_core / genre_adjacent
+ * / genre_deny lists. A deny-subgenre hit with no core/adjacent redemption
+ * is dropped outright; a deny hit alongside a core hit is ambiguous enough
+ * to review rather than decide automatically.
+ */
+export const subgenreFilter: KeywordFilter = (keyword, context) => {
+  const { genreCore, genreAdjacent, genreDeny } = profileOf(context.anchors);
+  if (genreCore.length === 0 && genreAdjacent.length === 0 && genreDeny.length === 0) return PASS;
+
+  const deny = firstMatch(keyword, genreDeny);
+  const core = firstMatch(keyword, genreCore);
+  const adjacent = firstMatch(keyword, genreAdjacent);
+
+  if (deny && core) {
+    return { verdict: "pause", code: "OFF_SUBGENRE", reason: `deny-subgenre "${deny}" alongside core-genre "${core}"` };
+  }
+  if (deny) {
+    return { verdict: "reject", code: "OFF_SUBGENRE", reason: `deny-subgenre term: "${deny}"` };
+  }
+  if (core || adjacent) return PASS;
+
+  return PASS;
+};
+
+// --- 3c. Tone & nationality guards for template sources (§5.5) --------------
+
+/**
+ * Template expansion (adjective × genre) is tone- and nationality-blind by
+ * construction: "heartwarming scottish crime fiction" is a real cell in the
+ * matrix and a contradiction in terms. Nationality only expands within the
+ * book profile's own nationality list.
+ */
+export const toneNationalityFilter: KeywordFilter = (keyword, context) => {
+  const { tone, toneDeny, nationality } = profileOf(context.anchors);
+
+  if (toneDeny.length > 0) {
+    const denyTone = firstMatch(keyword, toneDeny);
+    if (denyTone) return { verdict: "reject", code: "TONE_MISMATCH", reason: `tone_deny term: "${denyTone}"` };
+  }
+
+  if (nationality.length > 0) {
+    const offNationality = DEMONYM_TERMS.filter((term) => !nationality.includes(term));
+    const badDemonym = firstMatch(keyword, withoutAnchoredTerms(offNationality, context));
+    if (badDemonym) {
+      return { verdict: "reject", code: "NATIONALITY_MISMATCH", reason: `demonym outside the book's nationality: "${badDemonym}"` };
+    }
+  }
+
+  if (tone.length > 0 && firstMatch(keyword, tone)) return PASS;
+  return PASS;
+};
+
+// --- 3d. Audience / format / language / platform guards (§5.7) --------------
+
+export const audienceFormatPlatformFilter: KeywordFilter = (keyword, context) => {
+  const { audience, formatsNotOffered } = profileOf(context.anchors);
+
+  if (audience === "adult") {
+    const mismatch = firstMatch(keyword, AUDIENCE_MISMATCH_TERMS);
+    if (mismatch) return { verdict: "reject", code: "AUDIENCE_MISMATCH", reason: `audience mismatch: "${mismatch}"` };
+  }
+
+  const badFormat = formatsNotOffered.find((format) => containsTerm(keyword, format));
+  if (badFormat) return { verdict: "reject", code: "FORMAT_NOT_OFFERED", reason: `format not offered: "${badFormat}"` };
+
+  const platform = firstMatch(keyword, PLATFORM_META_TERMS);
+  if (platform) return { verdict: "pause", code: "PLATFORM_META", reason: `platform meta-intent: "${platform}"` };
+
+  return PASS;
+};
+
+// --- 3e. Title-collision detection for autocomplete sources (§5.8) ----------
+
+/**
+ * Autocomplete completions of the title that pick up a collision token
+ * (game/media/dictionary vocabulary already curated for the negative list)
+ * are dropped; ambiguous numeric tails ("scars of the past two") could be a
+ * series book or a collision, so they go to review instead of a decision.
+ */
+export const titleCollisionFilter: KeywordFilter = (keyword, context, sources) => {
+  if (!sources.some((source) => WEB_AUTOCOMPLETE_SOURCES.includes(source) || source === "google-autocomplete")) {
+    return PASS;
+  }
+  const title = context.anchors.bookSpecific.find((anchor) => keyword.startsWith(anchor));
+  if (!title) return PASS;
+
+  const collision = firstMatch(keyword, TITLE_COLLISION_TERMS);
+  if (collision) return { verdict: "reject", code: "TITLE_COLLISION", reason: `title-collision term: "${collision}"` };
+
+  const tail = keyword.slice(title.length).trim();
+  if (tail && AMBIGUOUS_TITLE_TAILS.includes(tail)) {
+    return { verdict: "pause", code: "TITLE_COLLISION", reason: `ambiguous tail on the title: "${tail}"` };
+  }
+
+  return PASS;
+};
+
 // --- 4. Review n-gram quality ---------------------------------------------
 
 /**
@@ -303,18 +468,41 @@ export const synonymQualityFilter: KeywordFilter = (keyword, context, sources) =
  * spirals"). Survivors are long-tail: specific enough for Phrase/Exact,
  * far too thin for Broad.
  */
-export const descriptionShapeFilter: KeywordFilter = (keyword, _context, sources) => {
+export const descriptionShapeFilter: KeywordFilter = (keyword, context, sources) => {
   if (!sources.includes("book-description")) return PASS;
 
   const tokens = words(keyword);
   const verb = tokens.find((token) => DESCRIPTION_VERB_TOKENS.includes(token));
   if (verb) {
     return tokens.length <= 2
-      ? { verdict: "reject", reason: `verb fragment: "${verb}"` }
-      : { verdict: "pause", reason: `reads as a sentence fragment ("${verb}")` };
+      ? { verdict: "reject", code: "FRAGMENT", reason: `verb fragment: "${verb}"` }
+      : { verdict: "pause", code: "FRAGMENT", reason: `reads as a sentence fragment ("${verb}")` };
   }
   if (WEAK_CONNECTORS.includes(tokens[tokens.length - 1])) {
-    return { verdict: "reject", reason: "ends on a connector" };
+    return { verdict: "reject", code: "FRAGMENT", reason: "ends on a connector" };
+  }
+
+  // §5.6: a bare numeral that isn't a year ("5 dci mcneill") is a scraped
+  // ordinal, not a query.
+  const bareNumeral = tokens.find((token) => /^\d+$/.test(token) && !/^(19|20)\d{2}$/.test(token));
+  if (bareNumeral) {
+    return { verdict: "reject", code: "FRAGMENT", reason: `bare numeral, not a year: "${bareNumeral}"` };
+  }
+
+  // Review-language patterns ("gripping ... instalment") are review-speak,
+  // not a search query.
+  const hasReviewAdjective = !!firstMatch(keyword, REVIEW_SPEAK_ADJECTIVES);
+  const hasReviewNoun = !!firstMatch(keyword, REVIEW_SPEAK_NOUNS);
+  if (hasReviewAdjective && hasReviewNoun) {
+    return { verdict: "reject", code: "FRAGMENT", reason: "review-language pattern (adjective + instalment/read)" };
+  }
+
+  // ≤2 meaningful tokens with no profile entity/genre anchor: a bare noun
+  // pair off the blurb ("body marked", "tower block") reads nothing like a
+  // search a reader would type.
+  const meaningful = tokens.filter((token) => !REVIEW_STOPWORDS.has(token));
+  if (meaningful.length <= 2 && !hasAnyAnchor(keyword, qualifyingAnchors(context.anchors))) {
+    return { verdict: "reject", code: "FRAGMENT", reason: "short fragment with no profile entity or genre token" };
   }
 
   return { verdict: "pass", matchTypeCeiling: "phrase" };
@@ -505,13 +693,20 @@ export const KEYWORD_FILTER_PIPELINE: Array<{ name: string; filter: KeywordFilte
   { name: "uiPollution", filter: uiPollutionFilter },
   { name: "languageMarket", filter: languageMarketFilter },
   { name: "offTopicEntity", filter: offTopicEntityFilter },
+  { name: "physicalProduct", filter: physicalProductFilter },
+  { name: "bookIntentGate", filter: bookIntentGateFilter },
+  { name: "marketplaceBoilerplate", filter: marketplaceBoilerplateFilter },
   { name: "reviewFragment", filter: reviewFragmentFilter },
   { name: "synonymQuality", filter: synonymQualityFilter },
+  { name: "subgenre", filter: subgenreFilter },
+  { name: "toneNationality", filter: toneNationalityFilter },
   { name: "descriptionShape", filter: descriptionShapeFilter },
   { name: "formatAvailability", filter: formatAvailabilityFilter },
+  { name: "audienceFormatPlatform", filter: audienceFormatPlatformFilter },
   { name: "seasonalGift", filter: seasonalGiftFilter },
   { name: "singleWord", filter: singleWordFilter },
   { name: "phraseShape", filter: phraseShapeFilter },
+  { name: "titleCollision", filter: titleCollisionFilter },
   { name: "anchorRelevance", filter: anchorRelevanceFilter },
 ];
 
@@ -524,6 +719,8 @@ export interface FilteredKeyword {
   /** Which filter decided, when the verdict isn't a plain pass. */
   filter?: string;
   reason?: string;
+  /** Machine-readable reason code (brief §5.10), set when the deciding filter has one. */
+  code?: ReasonCode;
   rewritten: boolean;
   /** Set when the deciding source caps how broadly the keyword may run. */
   matchTypeCeiling?: MatchType;
@@ -555,7 +752,7 @@ export function runKeywordFilters(keyword: FilterableKeyword, context: FilterCon
     const result = filter(text, context, sources);
 
     if (result.verdict !== "pass") {
-      return { text, originalText, verdict: result.verdict, filter: name, reason: result.reason, rewritten, matchTypeCeiling };
+      return { text, originalText, verdict: result.verdict, filter: name, reason: result.reason, code: result.code, rewritten, matchTypeCeiling };
     }
     if (result.rewriteTo) {
       text = normalizeKeyword(result.rewriteTo);
@@ -648,8 +845,8 @@ export function applyFiltersToCandidates(
   context: FilterContext
 ): {
   passed: Array<KeywordCandidate & { matchTypeCeiling?: MatchType }>;
-  paused: Array<KeywordCandidate & { filter?: string; reason?: string }>;
-  rejected: Array<KeywordCandidate & { filter?: string; reason?: string }>;
+  paused: Array<KeywordCandidate & { filter?: string; reason?: string; code?: ReasonCode }>;
+  rejected: Array<KeywordCandidate & { filter?: string; reason?: string; code?: ReasonCode }>;
   /** The raw per-keyword verdicts, for callers that need them (negative keyword building). */
   results: FilteredKeyword[];
   summary: FilterRunSummary;
@@ -660,8 +857,8 @@ export function applyFiltersToCandidates(
   const { results, summary } = filterKeywords(candidates, context);
 
   const passed: Array<KeywordCandidate & { matchTypeCeiling?: MatchType }> = [];
-  const paused: Array<KeywordCandidate & { filter?: string; reason?: string }> = [];
-  const rejected: Array<KeywordCandidate & { filter?: string; reason?: string }> = [];
+  const paused: Array<KeywordCandidate & { filter?: string; reason?: string; code?: ReasonCode }> = [];
+  const rejected: Array<KeywordCandidate & { filter?: string; reason?: string; code?: ReasonCode }> = [];
 
   for (const result of results) {
     const source = byText.get(normalizeKeyword(result.originalText)) ?? {
@@ -671,8 +868,8 @@ export function applyFiltersToCandidates(
     const candidate: KeywordCandidate = { ...source, text: result.text };
 
     if (result.verdict === "pass") passed.push({ ...candidate, matchTypeCeiling: result.matchTypeCeiling });
-    else if (result.verdict === "pause") paused.push({ ...candidate, filter: result.filter, reason: result.reason });
-    else rejected.push({ ...candidate, filter: result.filter, reason: result.reason });
+    else if (result.verdict === "pause") paused.push({ ...candidate, filter: result.filter, reason: result.reason, code: result.code });
+    else rejected.push({ ...candidate, filter: result.filter, reason: result.reason, code: result.code });
   }
 
   return { passed, paused, rejected, results, summary };

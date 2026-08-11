@@ -280,8 +280,8 @@ describe("bulksheet export", () => {
     );
     expect(autoCampaignRow).toBeDefined();
     expect(autoCampaignRow!["Campaign Targeting Type"]).toBe("auto");
-    // Default daily budget in this fixture is $10 — auto should be a small slice, not $10.
-    expect(Number(autoCampaignRow!["Daily Budget"])).toBeLessThan(10);
+    // Default daily budget in this fixture is $100 (brief F11) — auto should be a small slice, not $100.
+    expect(Number(autoCampaignRow!["Daily Budget"])).toBeLessThan(100);
 
     const autoCampaignName = autoCampaignRow!["Campaign Name"];
     const autoRows = rows.filter((row) => row["Campaign Name"] === autoCampaignName);
