@@ -615,6 +615,9 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                   </th>
                   <th scope="col">Competitor ASIN</th>
                   <th scope="col" className="hidden lg:table-cell">
+                    Title / author
+                  </th>
+                  <th scope="col" className="hidden lg:table-cell">
                     Source
                   </th>
                   <th scope="col" className="hidden lg:table-cell">
@@ -622,6 +625,12 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                   </th>
                   <th scope="col" className="hidden xl:table-cell">
                     Filter verdict
+                  </th>
+                  <th scope="col" className="hidden xl:table-cell">
+                    Price
+                  </th>
+                  <th scope="col" className="hidden xl:table-cell">
+                    BSR
                   </th>
                   <th scope="col">Bid</th>
                   <th scope="col">Status</th>
@@ -652,6 +661,16 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                     <td>
                       <p className="cell-primary">{asin.competitor_asin}</p>
                     </td>
+                    <td className="hidden lg:table-cell">
+                      {asin.title || asin.author ? (
+                        <>
+                          {asin.title && <p className="cell-primary">{asin.title}</p>}
+                          {asin.author && <p className="meta-line text-xs">{asin.author}</p>}
+                        </>
+                      ) : (
+                        <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                      )}
+                    </td>
                     <td className="hidden lg:table-cell">{labelForSource(asin.source)}</td>
                     <td className="hidden lg:table-cell">
                       <span className="meta-line text-xs">{asin.notes ?? "—"}</span>
@@ -668,6 +687,8 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                         <span style={{ color: "var(--text-placeholder)" }}>—</span>
                       )}
                     </td>
+                    <td className="hidden xl:table-cell">{asin.price !== null ? `$${asin.price.toFixed(2)}` : "—"}</td>
+                    <td className="hidden xl:table-cell">{asin.bsr !== null ? asin.bsr.toLocaleString() : "—"}</td>
                     <td>
                       <input
                         type="number"
