@@ -279,6 +279,47 @@ Rejected keywords are never exported.
 
 ---
 
+### GET /api/keywords/all
+
+**Purpose:** Every keyword across every one of the user's books, grouped by
+text (Enhancements spec §4 — the `/keywords` page). Read-only; negatives are
+excluded.
+
+**Response:** `{ books: [{ id, title }], keywords: AggregatedKeywordRow[] }`
+— see `lib/allKeywordsAggregate.ts` for the row shape (books, statuses,
+match types, sources, specificities per grouped keyword text).
+
+**Implementation:** `app/api/keywords/all/route.ts`
+
+---
+
+## Dashboard Endpoints (`/dashboard`, Enhancements spec §2)
+
+Each dashboard widget owns its own endpoint so one failing query never
+blanks the rest of the page.
+
+### GET /api/dashboard/keyword-stats
+
+Totals by status/match-type/source and the §1 specificity distribution
+across every book the user owns. **Implementation:**
+`app/api/dashboard/keyword-stats/route.ts`, aggregation in
+`lib/dashboardStats.ts#summarizeKeywordStats`.
+
+### GET /api/dashboard/genre-keywords
+
+Top active keywords grouped by each book's resolved primary genre.
+**Implementation:** `app/api/dashboard/genre-keywords/route.ts`, aggregation
+in `lib/dashboardStats.ts#topKeywordsByGenre`.
+
+### GET /api/dashboard/recent-books
+
+The 5 most recently added books with a capture-health badge (reused from
+the snapshot's own `capture.ok`/`capture.completeness`, not a new score).
+**Implementation:** `app/api/dashboard/recent-books/route.ts`, aggregation
+in `lib/dashboardStats.ts#recentBooksSummary`.
+
+---
+
 ## Admin Endpoints
 
 ### GET /api/admin/access

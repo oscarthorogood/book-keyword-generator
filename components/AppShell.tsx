@@ -3,31 +3,32 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, ChevronLeft, ChevronRight, LogOut, Plus, Shield } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, KeyRound, LayoutDashboard, LogOut, Shield } from "lucide-react";
 
-export type ShellSection = "books" | "add-book" | "access";
+// "presets" (§3) isn't in this union yet — no route exists for it to link
+// to. Add it back here (and to NAV_ITEMS below) once the preset-keyword
+// library ships; a nav item with nowhere real to go is worse than no item.
+export type ShellSection = "dashboard" | "books" | "keywords" | "access";
 
 interface AppShellProps {
   active: ShellSection;
-  /**
-   * Provided by the single-page builder at "/", which swaps views in state
-   * rather than navigating. Pages that are their own route (the access
-   * console) leave it out and get links back to "/" instead.
-   */
-  onNavigate?: (target: Exclude<ShellSection, "access">) => void;
   children: ReactNode;
 }
+
+const NAV_ITEMS: Array<{ section: Exclude<ShellSection, "access">; label: string; href: string; Icon: typeof BookOpen }> = [
+  { section: "dashboard", label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
+  { section: "books", label: "Books", href: "/books", Icon: BookOpen },
+  { section: "keywords", label: "Keywords", href: "/keywords", Icon: KeyRound },
+];
 
 /**
  * The app chrome: fixed 280px sidebar + fluid content (§3.2/§4.4).
  *
- * Shared by every authenticated page so the navigation, the collapse state
- * and the sign-out control are the same object everywhere — the access
- * console used to render a completely different top-bar layout, which meant
- * two sets of nav to keep in step and a visible seam when moving between
- * them.
+ * Every section is its own route now (Enhancements spec §2) — the sidebar
+ * is plain `Link`s, and every page owns its own data fetching rather than
+ * swapping views inside a single-page builder's local state.
  */
-export default function AppShell({ active, onNavigate, children }: AppShellProps) {
+export default function AppShell({ active, children }: AppShellProps) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
@@ -54,25 +55,6 @@ export default function AppShell({ active, onNavigate, children }: AppShellProps
 
   const iconColor = (section: ShellSection) =>
     active === section ? "var(--icon-active)" : "var(--icon-default)";
-
-  /** A nav row is a button when the page owns its own view state, a link when it doesn't. */
-  const navItem = (section: Exclude<ShellSection, "access">, label: string, Icon: typeof BookOpen) =>
-    onNavigate ? (
-      <button
-        onClick={() => onNavigate(section)}
-        className={itemClass(section)}
-        aria-current={active === section ? "page" : undefined}
-        title={sidebarOpen ? undefined : label}
-      >
-        <Icon size={20} className="shrink-0" style={{ color: iconColor(section) }} />
-        {sidebarOpen && <span>{label}</span>}
-      </button>
-    ) : (
-      <Link href="/" className={itemClass(section)} title={sidebarOpen ? undefined : label}>
-        <Icon size={20} className="shrink-0" style={{ color: iconColor(section) }} />
-        {sidebarOpen && <span>{label}</span>}
-      </Link>
-    );
 
   return (
     <div className="app-shell flex min-h-screen">
@@ -109,8 +91,18 @@ export default function AppShell({ active, onNavigate, children }: AppShellProps
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-6" aria-label="Main">
-          {navItem("books", "Books", BookOpen)}
-          {navItem("add-book", "Add book", Plus)}
+          {NAV_ITEMS.map(({ section, label, href, Icon }) => (
+            <Link
+              key={section}
+              href={href}
+              className={itemClass(section)}
+              aria-current={active === section ? "page" : undefined}
+              title={sidebarOpen ? undefined : label}
+            >
+              <Icon size={20} className="shrink-0" style={{ color: iconColor(section) }} />
+              {sidebarOpen && <span>{label}</span>}
+            </Link>
+          ))}
         </nav>
 
         {/* Bottom-pinned account area (§4.4). */}
