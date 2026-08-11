@@ -7,6 +7,7 @@ import { boostScoresByDescriptionQuality } from "@/lib/descriptionQuality";
 import { genreFamilySearchTerms, genreFamilyThemeTerms } from "@/lib/genre";
 import { buildGoodreadsTagCandidates } from "@/lib/goodreads";
 import { ALL_KEYWORD_CATEGORIES, buildCategorizedKeywordCandidates } from "@/lib/keywordCategories";
+import { capAndRank } from "@/lib/keywordCapAndRank";
 import { applyFiltersToCandidates, buildFilterContext } from "@/lib/keywordFilters";
 import {
   BOOK_COMP_NAME_MAX,
@@ -500,22 +501,52 @@ export async function POST(
     // "phrase-only" (never Broad, for cleaner search-term comparison data).
     const matchTypeProfile = loaded.book.match_type_profile ?? "mixed";
 
-    const activeRows = finalCandidates.map((candidate) => ({
+    const matchTypeOf = (candidate: ReviewedKeyword) =>
+      candidate.matchTypeCeiling && pickMatchType(candidate, matchTypeProfile) === "broad"
+        ? candidate.matchTypeCeiling
+        : pickMatchType(candidate, matchTypeProfile);
+
+    // §5.11: relevance filtering alone still leaves keyword dumping — cap the
+    // survivors at the book's keyword budget and rank the rest into a
+    // backlog rather than activating all of them. Ranked-out keywords are
+    // never rejects: they're plausible, just not in the top slice today, so
+    // they're archived (kept, inactive) instead of joining the rejected pile.
+    const { kept, backlog } = capAndRank(
+      finalCandidates.map((candidate) => ({
+        ...candidate,
+        matchType: matchTypeOf(candidate),
+        bid: candidate.suggestedBid ?? defaultBid,
+      })),
+      filterContext.anchors
+    );
+
+    const activeRows = kept.map((candidate) => ({
       book_id: bookId,
       user_id: user.id,
       text: candidate.text,
       // A phrase mined from the book's own blurb is long-tail by nature: it
       // is specific enough for Phrase/Exact and far too thin for Broad.
-      match_type:
-        candidate.matchTypeCeiling && pickMatchType(candidate, matchTypeProfile) === "broad"
-          ? candidate.matchTypeCeiling
-          : pickMatchType(candidate, matchTypeProfile),
+      match_type: matchTypeOf(candidate),
       category: candidate.category ?? null,
       source: primaryKeywordSource(candidate),
       bid: candidate.suggestedBid ?? defaultBid,
       status: "active",
       rejection_reason: null as string | null,
       rejected_by_filter: null as string | null,
+      specificity: scoreSpecificity(candidate, filterContext.anchors),
+    }));
+
+    const archivedRows = backlog.map((candidate) => ({
+      book_id: bookId,
+      user_id: user.id,
+      text: candidate.text,
+      match_type: matchTypeOf(candidate),
+      category: candidate.category ?? null,
+      source: primaryKeywordSource(candidate),
+      bid: candidate.suggestedBid ?? defaultBid,
+      status: "archived",
+      rejection_reason: candidate.reason,
+      rejected_by_filter: candidate.filter,
       specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
 
@@ -570,6 +601,7 @@ export async function POST(
     const negativeKeys = new Set(negativeRows.map((row) => `${row.text}|${row.match_type}`));
     const rows = [
       ...activeRows,
+      ...archivedRows.filter((row) => !negativeKeys.has(`${row.text}|${row.match_type}`)),
       ...reviewRows.filter((row) => !negativeKeys.has(`${row.text}|${row.match_type}`)),
       ...negativeRows,
     ];
@@ -640,6 +672,8 @@ export async function POST(
       alreadyPresentCount: rows.length - insertedCount,
       keywordCount: tropesKeywords.length,
       compNameCount: compNameKeywords.length,
+      activeCount: activeRows.length,
+      archivedCount: archivedRows.length,
       pausedCount: pausedCandidates.length,
       rejectedCount: rejectedCandidates.length,
       negativeCount: negatives.length,
