@@ -1,5 +1,6 @@
 import { isAiRankingConfigured, rankKeywordsWithAi } from "@/lib/aiRanker";
 import { loadBookWithSnapshot } from "@/lib/bookStore";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import { genreFamilySearchTerms } from "@/lib/genre";
 
@@ -151,8 +152,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       (outcome) => outcome.status !== outcome.row.status
     );
 
-    let changed = 0;
-    for (const outcome of updates) {
+    // Independent per-row updates: run with bounded concurrency rather than
+    // one at a time so a book with many changed ASINs doesn't pay a full
+    // network round trip per row, serially.
+    const UPDATE_CONCURRENCY = 8;
+    const updateOutcomes = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (outcome) => {
       const { error: updateError } = await supabase
         .from("competitor_asins")
         .update({ status: outcome.status, rejection_reason: outcome.reason, rejected_by_filter: outcome.filter })
@@ -161,10 +165,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
       if (updateError) {
         console.error(`[competitors filter] could not update ${outcome.row.id}:`, updateError.message);
-        continue;
+        return false;
       }
-      changed += 1;
-    }
+      return true;
+    });
+    const changed = updateOutcomes.filter(Boolean).length;
 
     return Response.json({ success: true, examined: asins.length, changed, aiRanked });
   } catch (err) {

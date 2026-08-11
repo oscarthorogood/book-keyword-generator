@@ -1,5 +1,6 @@
 import { applyAiRelevance, isAiRankingConfigured, rankKeywordsWithAi } from "@/lib/aiRanker";
 import { loadBookWithSnapshot } from "@/lib/bookStore";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { capAndRank } from "@/lib/keywordCapAndRank";
 import { buildFilterContext, filterKeywords, type FilterableKeyword } from "@/lib/keywordFilters";
 import { genreFamilySearchTerms } from "@/lib/genre";
@@ -271,9 +272,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     // One statement per row: Supabase has no bulk conditional update, and a
-    // full upsert would need every column of every row shipped back.
-    let changed = 0;
-    for (const update of updates) {
+    // full upsert would need every column of every row shipped back. The
+    // requests are independent, so they run with bounded concurrency instead
+    // of one at a time — a book with hundreds of changed keywords otherwise
+    // pays a full network round trip per row, serially.
+    const UPDATE_CONCURRENCY = 8;
+    const updateOutcomes = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (update) => {
       const { error: updateError } = await supabase
         .from("keywords")
         .update({
@@ -289,10 +293,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         // A rewrite can collide with a keyword that already exists at the new
         // text; that's a duplicate, not a failure worth aborting the run for.
         console.error(`[filter] could not update keyword ${update.id}:`, updateError.message);
-        continue;
+        return false;
       }
-      changed += 1;
-    }
+      return true;
+    });
+    const changed = updateOutcomes.filter(Boolean).length;
 
     return Response.json({
       success: true,

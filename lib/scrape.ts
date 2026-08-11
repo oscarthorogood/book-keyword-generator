@@ -1,4 +1,5 @@
 import * as cheerio from "cheerio";
+import { mapWithConcurrency } from "./concurrency";
 import { HostBlockedError, withRateLimit } from "./fetchLog";
 import { type AmazonPageMetadata } from "./firecrawl";
 import { extractListingHtmlMetadata, fallbackFormats } from "./listingMetadata";
@@ -157,31 +158,6 @@ export async function fetchPageHtml(
     console.error(`[fetchPageHtml] ${url} threw:`, err instanceof Error ? err.message : err);
     return { blocked: false };
   }
-}
-
-/**
- * Runs `fn` over `items` with at most `limit` in flight at once. Used to keep
- * the autocomplete sweep from firing dozens of simultaneous requests at
- * Amazon's unofficial endpoint (which risks getting the whole batch blocked)
- * while still finishing well inside a serverless function's time budget.
- */
-async function mapWithConcurrency<T, R>(
-  items: T[],
-  limit: number,
-  fn: (item: T) => Promise<R>
-): Promise<R[]> {
-  const results: R[] = new Array(items.length);
-  let nextIndex = 0;
-
-  async function worker() {
-    while (nextIndex < items.length) {
-      const current = nextIndex++;
-      results[current] = await fn(items[current]);
-    }
-  }
-
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
-  return results;
 }
 
 // Base terms plus format, series-order, and recency/bestseller modifiers —

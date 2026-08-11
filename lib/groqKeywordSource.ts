@@ -97,7 +97,7 @@ export async function buildGroqPersonaCandidates(
       const wordCount = normalized.split(/\s+/).filter(Boolean).length;
       candidates.push({
         text: normalized,
-        sources: ["groq-persona" as any],
+        sources: ["groq-persona" as const],
         intentSegment: classifyIntentSegment(normalized, book, compAuthors, compTitles),
         specificity: wordCount >= 3 ? 4 : 3,
       });

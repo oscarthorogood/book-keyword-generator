@@ -299,6 +299,13 @@ export async function POST(
     const librarySubjectsInput = asStrings(body.librarySubjects, 50);
     const criticsBlurbsInput = asStrings(body.criticsBlurbs, 30);
 
+    // Kicked off now and awaited only where each is used, so these two
+    // independent Supabase round trips overlap with the candidate-building
+    // work below (and, for the ASIN rows, with the live source fetches)
+    // instead of serializing in front of it.
+    const existingAsinRowsPromise = getCompetitorAsins(supabase, bookId, user.id);
+    const allowlistRowsPromise = supabase.from("filter_allowlist").select("keyword_text").eq("user_id", user.id);
+
     const filterContext = buildFilterContext({
       title: snapshot.title,
       asin: snapshot.asin,
@@ -328,20 +335,6 @@ export async function POST(
       filterContext.anchors.primaryGenrePhrase
     );
 
-    // Pull competitor titles/authors from tracked ASINs into comp-name candidates.
-    const existingAsinRows = await getCompetitorAsins(supabase, bookId, user.id);
-    const manualCompNames: KeywordCandidate[] = [];
-    for (const row of existingAsinRows) {
-      if (!row.notes) continue;
-      const parts = row.notes.split(" — ");
-      for (let part of parts) {
-        part = part.replace(/^(Frequently bought together|Similar title|Discovered via [\w-]+)/, "").trim();
-        if (part && part.length > 2) {
-          manualCompNames.push({ text: part, sources: ["comp-name"] });
-        }
-      }
-    }
-
     const seedTerms = [
       ...buildAutocompleteSeeds({
         title: snapshot.title,
@@ -364,6 +357,7 @@ export async function POST(
       personaLlmCandidates,
       groqPersonaCandidates,
       liveDecodoRows,
+      existingAsinRows,
     ] = await Promise.all([
       isAdsApiConfigured()
         ? getAdsApiKeywordRecommendations(snapshot.asin, snapshot.marketplace).catch((err: Error) => {
@@ -396,7 +390,23 @@ export async function POST(
             return [];
           })
         : Promise.resolve([]),
+      // Pull competitor titles/authors from tracked ASINs into comp-name
+      // candidates — an independent Supabase read, so it rides alongside the
+      // live source fetches rather than serializing in front of them.
+      existingAsinRowsPromise,
     ]);
+
+    const manualCompNames: KeywordCandidate[] = [];
+    for (const row of existingAsinRows) {
+      if (!row.notes) continue;
+      const parts = row.notes.split(" — ");
+      for (let part of parts) {
+        part = part.replace(/^(Frequently bought together|Similar title|Discovered via [\w-]+)/, "").trim();
+        if (part && part.length > 2) {
+          manualCompNames.push({ text: part, sources: ["comp-name"] });
+        }
+      }
+    }
 
     const serpApiBySource = (source: KeywordSource) =>
       serpApiResult.candidates.filter((candidate) => candidate.sources.includes(source));
@@ -624,7 +634,7 @@ export async function POST(
       specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
 
-    const { data: allowlistRows } = await supabase.from("filter_allowlist").select("keyword_text").eq("user_id", user.id);
+    const { data: allowlistRows } = await allowlistRowsPromise;
     const allowlistOverrides = new Set(
       findAllowlistOverrides(reviewRowsRaw, (allowlistRows ?? []).map((r) => r.keyword_text))
     );
