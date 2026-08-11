@@ -615,3 +615,48 @@ describe("batch behaviour", () => {
     expect(summary.byVerdict.pass).toBe(6);
   });
 });
+
+describe("filter — media-type collision (§5.1)", () => {
+  it("rejects a book-anchored title colliding with music/video vocabulary", () => {
+    expect(verdict("scars of the past guitar tab").verdict).toBe("reject");
+    expect(verdict("scars of the past full movie").verdict).toBe("reject");
+  });
+
+  it("does not fire when the keyword carries no book anchor", () => {
+    // Media vocabulary alone, with nothing tying it to this book, is left to
+    // the off-topic-entity filter rather than mediaTypeCollisionFilter.
+    const result = verdict("guitar tab");
+    expect(result.filter).not.toBe("mediaTypeCollision");
+  });
+});
+
+describe("filter — platform/marketplace noise (§5.4)", () => {
+  it("pauses a platform term alongside a book anchor and book intent", () => {
+    const result = verdict("scottish crime books netflix");
+    expect(result.verdict).toBe("pause");
+    expect(result.filter).toBe("platformNoise");
+  });
+
+  it("rejects platform navigation with no book anchor", () => {
+    const result = verdict("watch on netflix now");
+    expect(result.verdict).toBe("reject");
+    expect(result.filter).toBe("platformNoise");
+  });
+});
+
+describe("filter — author-surname disambiguation (§5.2)", () => {
+  it("passes the book's real author in the 'book series' shape", () => {
+    expect(verdict("jacqueline new book series").verdict).toBe("pass");
+  });
+
+  it("rejects an unrelated same-surname author", () => {
+    const result = verdict("sarah rankin book series");
+    expect(result.verdict).toBe("reject");
+    expect(result.filter).toBe("authorDisambiguation");
+  });
+
+  it("does not fire on generic genre phrases with no known surname", () => {
+    const result = verdict("police procedural books");
+    expect(result.filter).not.toBe("authorDisambiguation");
+  });
+});
