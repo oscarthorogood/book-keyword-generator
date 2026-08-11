@@ -354,3 +354,26 @@ Implement in this order:
 8. Tests for aggregation, DB/API, and UI.
 
 Only when all steps are complete and tests pass should you consider the competitor subsystem implemented.
+
+## Competitor-ASIN enhancements (post-implementation)
+
+Four follow-on tasks extend this subsystem, each landed as its own commit:
+
+1. **Minimal ASIN metadata** — Generate ASINs now fetches title/author/price/BSR
+   for each newly discovered ASIN via `scrapeProductPage` and records
+   `competitor_count`/`mean_rank` (source agreement across the crawl/live
+   discovery lists). See `sql/17-competitor-asin-metadata.sql`.
+2. **Bid decision system** — `lib/competitorBidding.ts`'s `computeCompetitorBid()`
+   scores price/BSR/competitor_count/mean_rank into a bid, used at generation
+   time and by a bulk "recalculate bids" action. See `docs/COMPETITOR-BIDDING.md`.
+3. **Competitors/Keywords page parity** — `lib/allCompetitorsAggregate.ts` +
+   `app/api/competitors/all/route.ts` mirror the keywords equivalents; the
+   global Competitors page is now the same aggregate cross-book table as
+   All Keywords instead of a per-book count summary.
+4. **Preset competitor ASINs by genre** — `preset_competitor_asins`
+   (`sql/18-preset-competitor-asins.sql`) reuses the `preset_genres`
+   hierarchy from §3 of this doc; `lib/presetCompetitorAsins.ts` mirrors
+   `lib/presetKeywords.ts`, including propagate-on-edit /
+   null-on-manual-edit. `lib/presetSeedData/presetCompetitorAsinSeed.ts` is
+   intentionally empty — no real competitor ASINs were available to seed
+   without risking a fabricated ASIN misdirecting a user's ad spend.

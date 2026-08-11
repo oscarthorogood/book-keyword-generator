@@ -5,6 +5,7 @@ import { AlertTriangle, Download, Plus, Trash2 } from "lucide-react";
 
 type MatchType = "broad" | "phrase" | "exact";
 type Tier = "a" | "b";
+type PresetTab = "keywords" | "competitorAsins";
 
 interface PresetKeywordRow {
   id: string;
@@ -15,11 +16,20 @@ interface PresetKeywordRow {
   author_references?: string[] | null;
 }
 
+interface PresetCompetitorAsinRow {
+  id: string;
+  genre_id: string;
+  competitor_asin: string;
+  notes: string | null;
+  tier: Tier;
+}
+
 interface PresetGenreRow {
   id: string;
   name: string;
   parent_id: string | null;
   keywords: PresetKeywordRow[];
+  competitorAsins: PresetCompetitorAsinRow[];
 }
 
 async function fetchGenres(): Promise<{ genres: PresetGenreRow[]; error: string | null; needsMigration?: boolean }> {
@@ -40,6 +50,8 @@ export default function PresetsPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [needsMigration, setNeedsMigration] = useState(false);
 
+  const [activeTab, setActiveTab] = useState<PresetTab>("keywords");
+
   const [selectedGenreId, setSelectedGenreId] = useState<string | null>(null);
   const [newGenreName, setNewGenreName] = useState("");
   const [newGenreParentId, setNewGenreParentId] = useState<string>("");
@@ -49,6 +61,11 @@ export default function PresetsPage() {
   const [newKeywordMatchType, setNewKeywordMatchType] = useState<MatchType>("phrase");
   const [newKeywordTier, setNewKeywordTier] = useState<Tier>("a");
   const [addingKeyword, setAddingKeyword] = useState(false);
+
+  const [newCompetitorAsin, setNewCompetitorAsin] = useState("");
+  const [newCompetitorAsinNotes, setNewCompetitorAsinNotes] = useState("");
+  const [newCompetitorAsinTier, setNewCompetitorAsinTier] = useState<Tier>("a");
+  const [addingCompetitorAsin, setAddingCompetitorAsin] = useState(false);
 
   const [importing, setImporting] = useState(false);
   const [importMessage, setImportMessage] = useState<string | null>(null);
@@ -158,20 +175,83 @@ export default function PresetsPage() {
     load();
   }
 
+  async function addCompetitorAsin() {
+    const competitorAsin = newCompetitorAsin.trim();
+    if (!competitorAsin || !selectedGenreId) return;
+    setAddingCompetitorAsin(true);
+    try {
+      const res = await fetch("/api/presets/competitor-asins", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          genreId: selectedGenreId,
+          competitorAsin,
+          notes: newCompetitorAsinNotes.trim() || null,
+          tier: newCompetitorAsinTier,
+        }),
+      });
+      if (res.ok) {
+        setNewCompetitorAsin("");
+        setNewCompetitorAsinNotes("");
+        load();
+      }
+    } finally {
+      setAddingCompetitorAsin(false);
+    }
+  }
+
+  async function deleteCompetitorAsin(id: string) {
+    await fetch(`/api/presets/competitor-asins/${id}`, { method: "DELETE" });
+    load();
+  }
+
+  async function updateCompetitorAsinTier(id: string, tier: Tier) {
+    await fetch(`/api/presets/competitor-asins/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ tier }),
+    });
+    load();
+  }
+
   return (
     <div className="flex min-h-screen flex-col bg-white">
       <header className="page-header flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="page-title">Preset Keywords by Genre</h1>
+          <h1 className="page-title">Presets by Genre</h1>
           <p className="page-subtitle mt-1">
-            A managed keyword library, applied to matching books with one click from the book page.
+            Managed keyword and competitor-ASIN libraries, applied to matching books with one click from the book
+            page.
           </p>
         </div>
-        <button onClick={importStarterLibrary} disabled={importing} className="btn btn-secondary">
-          <Download size={20} />
-          {importing ? "Importing…" : "Import starter library"}
-        </button>
+        {activeTab === "keywords" && (
+          <button onClick={importStarterLibrary} disabled={importing} className="btn btn-secondary">
+            <Download size={20} />
+            {importing ? "Importing…" : "Import starter library"}
+          </button>
+        )}
       </header>
+
+      <div className="page-body pb-0">
+        <div className="tabs" role="tablist" aria-label="Preset type">
+          <button
+            role="tab"
+            aria-selected={activeTab === "keywords"}
+            onClick={() => setActiveTab("keywords")}
+            className={`tab ${activeTab === "keywords" ? "tab-active" : ""}`}
+          >
+            Keywords
+          </button>
+          <button
+            role="tab"
+            aria-selected={activeTab === "competitorAsins"}
+            onClick={() => setActiveTab("competitorAsins")}
+            className={`tab ${activeTab === "competitorAsins" ? "tab-active" : ""}`}
+          >
+            Competitor ASINs
+          </button>
+        </div>
+      </div>
 
       {importMessage && (
         <div className="page-body pb-0">
@@ -207,7 +287,9 @@ export default function PresetsPage() {
                         className={`nav-item w-full text-left ${selectedGenreId === genre.id ? "nav-item-active" : ""}`}
                       >
                         {genre.name}
-                        <span className="meta-line ml-1 text-xs">({genre.keywords.length})</span>
+                        <span className="meta-line ml-1 text-xs">
+                          ({activeTab === "keywords" ? genre.keywords.length : genre.competitorAsins.length})
+                        </span>
                       </button>
                       {childrenOf(genre.id).length > 0 && (
                         <ul className="ml-3 space-y-1 border-l pl-2" style={{ borderColor: "var(--line)" }}>
@@ -218,7 +300,9 @@ export default function PresetsPage() {
                                 className={`nav-item w-full text-left ${selectedGenreId === sub.id ? "nav-item-active" : ""}`}
                               >
                                 {sub.name}
-                                <span className="meta-line ml-1 text-xs">({sub.keywords.length})</span>
+                                <span className="meta-line ml-1 text-xs">
+                                  ({activeTab === "keywords" ? sub.keywords.length : sub.competitorAsins.length})
+                                </span>
                               </button>
                             </li>
                           ))}
@@ -261,7 +345,10 @@ export default function PresetsPage() {
             <div>
               {!selectedGenre ? (
                 <div className="empty-state">
-                  <p>Select or create a genre to manage its preset keywords.</p>
+                  <p>
+                    Select or create a genre to manage its preset{" "}
+                    {activeTab === "keywords" ? "keywords" : "competitor ASINs"}.
+                  </p>
                 </div>
               ) : (
                 <div className="card p-5">
@@ -273,99 +360,210 @@ export default function PresetsPage() {
                     </button>
                   </div>
 
-                  <div className="mb-4 flex flex-wrap items-end gap-2">
-                    <div className="flex-1">
-                      <label className="mb-1 block text-xs" style={{ color: "var(--text-secondary)" }}>
-                        Keyword
-                      </label>
-                      <input
-                        value={newKeyword}
-                        onChange={(e) => setNewKeyword(e.target.value)}
-                        placeholder="e.g. cozy mystery series"
-                        className="input w-full"
-                        onKeyDown={(e) => e.key === "Enter" && addKeyword()}
-                      />
-                    </div>
-                    <select
-                      value={newKeywordMatchType}
-                      onChange={(e) => setNewKeywordMatchType(e.target.value as MatchType)}
-                      className="input w-auto"
-                      aria-label="Match type"
-                    >
-                      <option value="broad">Broad</option>
-                      <option value="phrase">Phrase</option>
-                      <option value="exact">Exact</option>
-                    </select>
-                    <select
-                      value={newKeywordTier}
-                      onChange={(e) => setNewKeywordTier(e.target.value as Tier)}
-                      className="input w-auto"
-                      aria-label="Tier"
-                      title="Tier A applies automatically; Tier B is applied paused for review"
-                    >
-                      <option value="a">Tier A (auto-apply)</option>
-                      <option value="b">Tier B (review first)</option>
-                    </select>
-                    <button onClick={addKeyword} disabled={addingKeyword || !newKeyword.trim()} className="btn btn-primary">
-                      <Plus size={16} />
-                      Add
-                    </button>
-                  </div>
+                  {activeTab === "keywords" ? (
+                    <>
+                      <div className="mb-4 flex flex-wrap items-end gap-2">
+                        <div className="flex-1">
+                          <label className="mb-1 block text-xs" style={{ color: "var(--text-secondary)" }}>
+                            Keyword
+                          </label>
+                          <input
+                            value={newKeyword}
+                            onChange={(e) => setNewKeyword(e.target.value)}
+                            placeholder="e.g. cozy mystery series"
+                            className="input w-full"
+                            onKeyDown={(e) => e.key === "Enter" && addKeyword()}
+                          />
+                        </div>
+                        <select
+                          value={newKeywordMatchType}
+                          onChange={(e) => setNewKeywordMatchType(e.target.value as MatchType)}
+                          className="input w-auto"
+                          aria-label="Match type"
+                        >
+                          <option value="broad">Broad</option>
+                          <option value="phrase">Phrase</option>
+                          <option value="exact">Exact</option>
+                        </select>
+                        <select
+                          value={newKeywordTier}
+                          onChange={(e) => setNewKeywordTier(e.target.value as Tier)}
+                          className="input w-auto"
+                          aria-label="Tier"
+                          title="Tier A applies automatically; Tier B is applied paused for review"
+                        >
+                          <option value="a">Tier A (auto-apply)</option>
+                          <option value="b">Tier B (review first)</option>
+                        </select>
+                        <button
+                          onClick={addKeyword}
+                          disabled={addingKeyword || !newKeyword.trim()}
+                          className="btn btn-primary"
+                        >
+                          <Plus size={16} />
+                          Add
+                        </button>
+                      </div>
 
-                  <div className="table-wrap overflow-x-auto">
-                    <table className="table table-dense">
-                      <thead>
-                        <tr>
-                          <th scope="col">Keyword</th>
-                          <th scope="col">Match</th>
-                          <th scope="col">Tier</th>
-                          <th scope="col">
-                            <span className="sr-only">Actions</span>
-                          </th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {selectedGenre.keywords.map((kw) => (
-                          <tr key={kw.id}>
-                            <td>
-                              <p className="cell-primary">{kw.keyword}</p>
-                              {kw.author_references && kw.author_references.length > 0 && (
-                                <p className="meta-line text-xs">Researched against: {kw.author_references.join(", ")}</p>
-                              )}
-                            </td>
-                            <td className="capitalize">{kw.match_type}</td>
-                            <td>
-                              <select
-                                value={kw.tier}
-                                onChange={(e) => updateKeywordTier(kw.id, e.target.value as Tier)}
-                                className="input input-sm w-auto"
-                                aria-label={`Tier for ${kw.keyword}`}
-                              >
-                                <option value="a">A</option>
-                                <option value="b">B</option>
-                              </select>
-                            </td>
-                            <td className="text-right">
-                              <button
-                                onClick={() => deleteKeyword(kw.id)}
-                                className="btn btn-tertiary btn-icon btn-sm"
-                                aria-label={`Delete ${kw.keyword}`}
-                              >
-                                <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
-                              </button>
-                            </td>
-                          </tr>
-                        ))}
-                        {selectedGenre.keywords.length === 0 && (
-                          <tr>
-                            <td colSpan={4} className="meta-line">
-                              No preset keywords yet.
-                            </td>
-                          </tr>
-                        )}
-                      </tbody>
-                    </table>
-                  </div>
+                      <div className="table-wrap overflow-x-auto">
+                        <table className="table table-dense">
+                          <thead>
+                            <tr>
+                              <th scope="col">Keyword</th>
+                              <th scope="col">Match</th>
+                              <th scope="col">Tier</th>
+                              <th scope="col">
+                                <span className="sr-only">Actions</span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedGenre.keywords.map((kw) => (
+                              <tr key={kw.id}>
+                                <td>
+                                  <p className="cell-primary">{kw.keyword}</p>
+                                  {kw.author_references && kw.author_references.length > 0 && (
+                                    <p className="meta-line text-xs">
+                                      Researched against: {kw.author_references.join(", ")}
+                                    </p>
+                                  )}
+                                </td>
+                                <td className="capitalize">{kw.match_type}</td>
+                                <td>
+                                  <select
+                                    value={kw.tier}
+                                    onChange={(e) => updateKeywordTier(kw.id, e.target.value as Tier)}
+                                    className="input input-sm w-auto"
+                                    aria-label={`Tier for ${kw.keyword}`}
+                                  >
+                                    <option value="a">A</option>
+                                    <option value="b">B</option>
+                                  </select>
+                                </td>
+                                <td className="text-right">
+                                  <button
+                                    onClick={() => deleteKeyword(kw.id)}
+                                    className="btn btn-tertiary btn-icon btn-sm"
+                                    aria-label={`Delete ${kw.keyword}`}
+                                  >
+                                    <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                            {selectedGenre.keywords.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="meta-line">
+                                  No preset keywords yet.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="mb-4 flex flex-wrap items-end gap-2">
+                        <div className="flex-1">
+                          <label className="mb-1 block text-xs" style={{ color: "var(--text-secondary)" }}>
+                            Competitor ASIN
+                          </label>
+                          <input
+                            value={newCompetitorAsin}
+                            onChange={(e) => setNewCompetitorAsin(e.target.value)}
+                            placeholder="e.g. B0H889WWGW"
+                            className="input w-full"
+                            onKeyDown={(e) => e.key === "Enter" && addCompetitorAsin()}
+                          />
+                        </div>
+                        <div className="flex-1">
+                          <label className="mb-1 block text-xs" style={{ color: "var(--text-secondary)" }}>
+                            Notes <span style={{ color: "var(--text-tertiary)" }}>(optional)</span>
+                          </label>
+                          <input
+                            value={newCompetitorAsinNotes}
+                            onChange={(e) => setNewCompetitorAsinNotes(e.target.value)}
+                            placeholder="e.g. title — author"
+                            className="input w-full"
+                            onKeyDown={(e) => e.key === "Enter" && addCompetitorAsin()}
+                          />
+                        </div>
+                        <select
+                          value={newCompetitorAsinTier}
+                          onChange={(e) => setNewCompetitorAsinTier(e.target.value as Tier)}
+                          className="input w-auto"
+                          aria-label="Tier"
+                          title="Tier A applies automatically; Tier B is applied paused for review"
+                        >
+                          <option value="a">Tier A (auto-apply)</option>
+                          <option value="b">Tier B (review first)</option>
+                        </select>
+                        <button
+                          onClick={addCompetitorAsin}
+                          disabled={addingCompetitorAsin || !newCompetitorAsin.trim()}
+                          className="btn btn-primary"
+                        >
+                          <Plus size={16} />
+                          Add
+                        </button>
+                      </div>
+
+                      <div className="table-wrap overflow-x-auto">
+                        <table className="table table-dense">
+                          <thead>
+                            <tr>
+                              <th scope="col">Competitor ASIN</th>
+                              <th scope="col">Notes</th>
+                              <th scope="col">Tier</th>
+                              <th scope="col">
+                                <span className="sr-only">Actions</span>
+                              </th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {selectedGenre.competitorAsins.map((ca) => (
+                              <tr key={ca.id}>
+                                <td>
+                                  <p className="cell-primary">{ca.competitor_asin}</p>
+                                </td>
+                                <td>
+                                  <span className="meta-line text-xs">{ca.notes ?? "—"}</span>
+                                </td>
+                                <td>
+                                  <select
+                                    value={ca.tier}
+                                    onChange={(e) => updateCompetitorAsinTier(ca.id, e.target.value as Tier)}
+                                    className="input input-sm w-auto"
+                                    aria-label={`Tier for ${ca.competitor_asin}`}
+                                  >
+                                    <option value="a">A</option>
+                                    <option value="b">B</option>
+                                  </select>
+                                </td>
+                                <td className="text-right">
+                                  <button
+                                    onClick={() => deleteCompetitorAsin(ca.id)}
+                                    className="btn btn-tertiary btn-icon btn-sm"
+                                    aria-label={`Delete ${ca.competitor_asin}`}
+                                  >
+                                    <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
+                                  </button>
+                                </td>
+                              </tr>
+                            ))}
+                            {selectedGenre.competitorAsins.length === 0 && (
+                              <tr>
+                                <td colSpan={4} className="meta-line">
+                                  No preset competitor ASINs yet.
+                                </td>
+                              </tr>
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </>
+                  )}
                 </div>
               )}
             </div>

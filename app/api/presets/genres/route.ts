@@ -16,13 +16,22 @@ export async function GET() {
 
     const supabase = await supabaseServer();
 
-    const [{ data: genres, error: genreError }, { data: keywords, error: keywordError }] = await Promise.all([
+    const [
+      { data: genres, error: genreError },
+      { data: keywords, error: keywordError },
+      { data: competitorAsins, error: competitorAsinError },
+    ] = await Promise.all([
       supabase.from("preset_genres").select("id, name, parent_id, created_at").eq("user_id", user.id).order("name"),
       supabase
         .from("preset_keywords")
         .select("id, genre_id, keyword, match_type, specificity, tier, author_references")
         .eq("user_id", user.id)
         .order("keyword"),
+      supabase
+        .from("preset_competitor_asins")
+        .select("id, genre_id, competitor_asin, notes, tier")
+        .eq("user_id", user.id)
+        .order("competitor_asin"),
     ]);
 
     if (genreError) {
@@ -63,9 +72,31 @@ export async function GET() {
       keywordsByGenre.get(kw.genre_id)!.push(kw);
     }
 
+    // sql/18 (preset_competitor_asins) not applied yet — degrade to an empty
+    // list rather than failing the whole page, same as the author_references
+    // retry above.
+    const competitorAsinsList = competitorAsinError
+      ? /relation .*preset_competitor_asins.* does not exist/i.test(competitorAsinError.message)
+        ? []
+        : null
+      : competitorAsins ?? [];
+    if (competitorAsinsList === null) {
+      return Response.json({ error: competitorAsinError!.message }, { status: 400 });
+    }
+
+    const competitorAsinsByGenre = new Map<string, typeof competitorAsinsList>();
+    for (const ca of competitorAsinsList) {
+      if (!competitorAsinsByGenre.has(ca.genre_id)) competitorAsinsByGenre.set(ca.genre_id, []);
+      competitorAsinsByGenre.get(ca.genre_id)!.push(ca);
+    }
+
     return Response.json({
       success: true,
-      genres: (genres ?? []).map((g) => ({ ...g, keywords: keywordsByGenre.get(g.id) ?? [] })),
+      genres: (genres ?? []).map((g) => ({
+        ...g,
+        keywords: keywordsByGenre.get(g.id) ?? [],
+        competitorAsins: competitorAsinsByGenre.get(g.id) ?? [],
+      })),
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";

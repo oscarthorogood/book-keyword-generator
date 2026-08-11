@@ -3,9 +3,11 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  Calculator,
   CheckCircle2,
   Download,
   Filter,
+  ListChecks,
   Loader2,
   Plus,
   Search,
@@ -15,7 +17,14 @@ import {
 } from "lucide-react";
 
 type CompetitorAsinStatus = "active" | "paused" | "negative" | "archived" | "rejected";
-type CompetitorAsinSource = "manual" | "kdpradar" | "datadive" | "helium10" | "sellersprite" | "auto-crawl";
+type CompetitorAsinSource =
+  | "manual"
+  | "kdpradar"
+  | "datadive"
+  | "helium10"
+  | "sellersprite"
+  | "auto-crawl"
+  | "genre-preset";
 
 interface CompetitorAsinRow {
   id: string;
@@ -26,6 +35,12 @@ interface CompetitorAsinRow {
   bid: number | null;
   rejection_reason: string | null;
   rejected_by_filter: string | null;
+  title: string | null;
+  author: string | null;
+  price: number | null;
+  bsr: number | null;
+  competitor_count: number | null;
+  mean_rank: number | null;
   created_at: string;
 }
 
@@ -34,7 +49,15 @@ interface GenerateSummary {
   insertedCount: number;
 }
 
-const SOURCES: CompetitorAsinSource[] = ["manual", "kdpradar", "datadive", "helium10", "sellersprite", "auto-crawl"];
+const SOURCES: CompetitorAsinSource[] = [
+  "manual",
+  "kdpradar",
+  "datadive",
+  "helium10",
+  "sellersprite",
+  "auto-crawl",
+  "genre-preset",
+];
 const STATUSES: CompetitorAsinStatus[] = ["active", "paused", "negative", "archived", "rejected"];
 const PAGE_SIZE = 100;
 
@@ -97,6 +120,11 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [summary, setSummary] = useState<GenerateSummary | null>(null);
+
+  const [recalculatingBids, setRecalculatingBids] = useState(false);
+
+  const [applyingPresets, setApplyingPresets] = useState(false);
+  const [applyPresetsNotice, setApplyPresetsNotice] = useState<string | null>(null);
 
   const [refiltering, setRefiltering] = useState(false);
   const [refilterResult, setRefilterResult] = useState<string | null>(null);
@@ -192,6 +220,47 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
     });
+  }
+
+  /** Bulk action (spec task 2): re-scores computeCompetitorBid() from each row's already-stored metadata. */
+  async function recalculateBids(ids?: string[]) {
+    setRecalculatingBids(true);
+    try {
+      await fetch(`/api/books/${bookId}/competitors/recalculate-bids`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ids ? { ids } : {}),
+      });
+      if (ids) setSelected(new Set());
+      await reload();
+    } finally {
+      setRecalculatingBids(false);
+    }
+  }
+
+  /** Applies matching preset competitor ASINs (task 4) — mirrors BookDetailPage's applyGenrePresets() for keywords. */
+  async function applyGenrePresets() {
+    setApplyingPresets(true);
+    setApplyPresetsNotice(null);
+    try {
+      const res = await fetch(`/api/books/${bookId}/competitors/apply-presets`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setApplyPresetsNotice(body.error || "Could not apply genre presets.");
+        return;
+      }
+      setApplyPresetsNotice(
+        body.message ??
+          (body.appliedCount > 0
+            ? `Applied ${body.appliedCount} preset competitor ASIN${body.appliedCount === 1 ? "" : "s"} from ${body.matchedGenres.join(", ")}.`
+            : "No new preset competitor ASINs to apply.")
+      );
+      if (body.appliedCount > 0) await reload();
+    } catch (err) {
+      setApplyPresetsNotice(err instanceof Error ? err.message : "Could not apply genre presets.");
+    } finally {
+      setApplyingPresets(false);
+    }
   }
 
   /** Pulls competitor ASINs from the same metadata crawl keyword generation uses (§ generate route). */
@@ -319,6 +388,24 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
           <span className="text-md font-semibold">{refiltering ? "Filtering…" : "Re-run filters"}</span>
         </button>
 
+        <button
+          onClick={applyGenrePresets}
+          disabled={applyingPresets}
+          className="action-card action-card-secondary"
+          title="Apply preset competitor ASINs from the genre library (spec task 4)"
+        >
+          <div className="flex items-start justify-between">
+            <span className="icon-tile">
+              {applyingPresets ? (
+                <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} />
+              ) : (
+                <ListChecks size={20} style={{ color: "var(--icon-active)" }} />
+              )}
+            </span>
+          </div>
+          <span className="text-md font-semibold">{applyingPresets ? "Applying…" : "Apply genre presets"}</span>
+        </button>
+
         <a
           href={`/api/books/${bookId}/competitors/export`}
           className="action-card action-card-secondary"
@@ -331,6 +418,24 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
           </div>
           <span className="text-md font-semibold">Export bulksheet</span>
         </a>
+
+        <button
+          onClick={() => recalculateBids()}
+          disabled={recalculatingBids || asins.length === 0}
+          className="action-card action-card-secondary"
+          title="Re-score every tracked ASIN's bid from its stored price/BSR/competitor-count signals"
+        >
+          <div className="flex items-start justify-between">
+            <span className="icon-tile">
+              {recalculatingBids ? (
+                <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} />
+              ) : (
+                <Calculator size={20} style={{ color: "var(--icon-active)" }} />
+              )}
+            </span>
+          </div>
+          <span className="text-md font-semibold">{recalculatingBids ? "Recalculating…" : "Recalculate bids"}</span>
+        </button>
       </div>
 
       {generateError && (
@@ -367,6 +472,13 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
         </div>
       )}
 
+      {applyPresetsNotice && (
+        <div className="alert mb-6" aria-live="polite">
+          <ListChecks size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
+          <p>{applyPresetsNotice}</p>
+        </div>
+      )}
+
       {error && (
         <div className="alert alert-error mb-4" role="alert">
           <AlertCircle size={20} className="mt-0.5 shrink-0" />
@@ -396,7 +508,7 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
           className="input w-auto"
           aria-label="Source for new competitor ASIN"
         >
-          {SOURCES.filter((source) => source !== "auto-crawl").map((source) => (
+          {SOURCES.filter((source) => source !== "auto-crawl" && source !== "genre-preset").map((source) => (
             <option key={source} value={source}>
               {labelForSource(source)}
             </option>
@@ -494,6 +606,14 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
               Mark {STATUS_LABELS[status].toLowerCase()}
             </button>
           ))}
+          <button
+            onClick={() => recalculateBids(Array.from(selected))}
+            disabled={recalculatingBids}
+            className="btn btn-secondary btn-sm"
+          >
+            <Calculator size={16} />
+            Recalculate bids
+          </button>
           <button onClick={bulkDelete} className="btn btn-destructive btn-sm">
             <Trash2 size={16} />
             Delete
@@ -564,6 +684,9 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                   </th>
                   <th scope="col">Competitor ASIN</th>
                   <th scope="col" className="hidden lg:table-cell">
+                    Title / author
+                  </th>
+                  <th scope="col" className="hidden lg:table-cell">
                     Source
                   </th>
                   <th scope="col" className="hidden lg:table-cell">
@@ -571,6 +694,12 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                   </th>
                   <th scope="col" className="hidden xl:table-cell">
                     Filter verdict
+                  </th>
+                  <th scope="col" className="hidden xl:table-cell">
+                    Price
+                  </th>
+                  <th scope="col" className="hidden xl:table-cell">
+                    BSR
                   </th>
                   <th scope="col">Bid</th>
                   <th scope="col">Status</th>
@@ -601,6 +730,16 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                     <td>
                       <p className="cell-primary">{asin.competitor_asin}</p>
                     </td>
+                    <td className="hidden lg:table-cell">
+                      {asin.title || asin.author ? (
+                        <>
+                          {asin.title && <p className="cell-primary">{asin.title}</p>}
+                          {asin.author && <p className="meta-line text-xs">{asin.author}</p>}
+                        </>
+                      ) : (
+                        <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                      )}
+                    </td>
                     <td className="hidden lg:table-cell">{labelForSource(asin.source)}</td>
                     <td className="hidden lg:table-cell">
                       <span className="meta-line text-xs">{asin.notes ?? "—"}</span>
@@ -617,6 +756,8 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                         <span style={{ color: "var(--text-placeholder)" }}>—</span>
                       )}
                     </td>
+                    <td className="hidden xl:table-cell">{asin.price !== null ? `$${asin.price.toFixed(2)}` : "—"}</td>
+                    <td className="hidden xl:table-cell">{asin.bsr !== null ? asin.bsr.toLocaleString() : "—"}</td>
                     <td>
                       <input
                         type="number"

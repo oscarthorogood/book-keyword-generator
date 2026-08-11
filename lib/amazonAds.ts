@@ -132,3 +132,21 @@ export function isAdsApiConfigured(): boolean {
 }
 
 export const SUPPORTED_MATCH_TYPES: MatchType[] = ["broad", "phrase", "exact"];
+
+export interface BidRange {
+  min: number;
+  max: number;
+}
+
+/**
+ * Fallback keyword/product-targeting bid bounds, used to clamp computed bids
+ * (lib/competitorBidding.ts) when no live Ads API bid-range data is
+ * available for the ASIN (see RawRecommendation.bid.rangeStart/rangeEnd
+ * above) — typical Sponsored Products bid floor/ceiling.
+ */
+export const DEFAULT_COMPETITOR_BID_RANGE: BidRange = { min: 0.2, max: 2.5 };
+
+/** Clamps a computed bid into a bid range, defaulting to DEFAULT_COMPETITOR_BID_RANGE. */
+export function clampBid(bid: number, range: BidRange = DEFAULT_COMPETITOR_BID_RANGE): number {
+  return Math.min(range.max, Math.max(range.min, bid));
+}
