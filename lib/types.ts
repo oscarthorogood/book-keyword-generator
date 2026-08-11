@@ -117,13 +117,24 @@ export interface KeywordCandidate {
   acos?: number;
 }
 
-/** A competitor ASIN attached to a book (competitor_asins table) — docs/CLAUDE-CODE-COMPETITORS.md. */
+/**
+ * A competitor ASIN attached to a book (competitor_asins table) —
+ * docs/CLAUDE-CODE-COMPETITORS.md. Managed the same way as a keyword
+ * (status workflow, filter verdict, bid) — see sql/16-competitor-asin-status-parity.sql.
+ */
 export interface CompetitorAsin {
   id: string;
   book_id: string;
   competitor_asin: string;
-  source: "manual" | "kdpradar" | "datadive" | "helium10" | "sellersprite";
+  /** "auto-crawl" is set by the Generate action from the book's own competitor crawl; the rest are manual/import sources. */
+  source: "manual" | "kdpradar" | "datadive" | "helium10" | "sellersprite" | "auto-crawl";
   notes: string | null;
+  status: "active" | "paused" | "negative" | "archived" | "rejected";
+  bid: number | null;
+  /** Why the re-run-filters pass rejected or paused this row. */
+  rejection_reason: string | null;
+  /** Which filter decided — asinFormat, selfAsin, … */
+  rejected_by_filter: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -149,12 +160,7 @@ export interface CompetitorKeyword {
   intent_segment: IntentSegment | null;
   match_type: MatchType;
   specificity: number | null;
-  status: "active" | "paused" | "negative" | "archived" | "rejected";
-  bid: number | null;
-  /** Why the re-run-filters pass rejected or paused this row (lib/keywordFilters.ts). */
-  rejection_reason: string | null;
-  /** Which filter decided — uiPollution, offTopicEntity, anchorRelevance, … */
-  rejected_by_filter: string | null;
+  status: "active" | "paused" | "archived";
   created_at: string;
   updated_at: string;
 }

@@ -7,17 +7,17 @@ interface BookCompetitorSummary {
   bookTitle: string;
   bookAuthor: string;
   competitorAsinCount: number;
-  competitorKeywordCount: number;
+  activeCompetitorAsinCount: number;
 }
 
 /**
  * GET /api/competitors/summary
  *
  * Per-book competitor stats for the global /competitors page (spec §5.2):
- * how many competitor ASINs are attached to each book and how many
- * competitor keywords have been imported for it. Read-only — the per-book
- * competitor panel (BookKeywordPanel mode="competitors") is where the data
- * is actually managed.
+ * how many competitor ASINs are attached to each book. Read-only — the
+ * per-book competitor panel (BookKeywordPanel mode="competitors") is where
+ * the data is actually managed. ASIN-only — the Competitors tab has no
+ * competitor-keyword concept.
  */
 export async function GET() {
   try {
@@ -32,19 +32,19 @@ export async function GET() {
       .eq("user_id", user.id);
     if (booksError) return Response.json({ error: booksError.message }, { status: 400 });
 
-    const [{ data: asinRows, error: asinError }, { data: keywordRows, error: keywordError }] = await Promise.all([
-      supabase.from("competitor_asins").select("book_id").eq("user_id", user.id),
-      supabase.from("competitor_keywords").select("book_id").eq("user_id", user.id),
-    ]);
+    const { data: asinRows, error: asinError } = await supabase
+      .from("competitor_asins")
+      .select("book_id, status")
+      .eq("user_id", user.id);
     if (asinError) return Response.json({ error: asinError.message }, { status: 400 });
-    if (keywordError) return Response.json({ error: keywordError.message }, { status: 400 });
 
     const asinCountByBook = new Map<string, number>();
-    for (const row of asinRows ?? []) asinCountByBook.set(row.book_id, (asinCountByBook.get(row.book_id) ?? 0) + 1);
-
-    const keywordCountByBook = new Map<string, number>();
-    for (const row of keywordRows ?? []) {
-      keywordCountByBook.set(row.book_id, (keywordCountByBook.get(row.book_id) ?? 0) + 1);
+    const activeAsinCountByBook = new Map<string, number>();
+    for (const row of asinRows ?? []) {
+      asinCountByBook.set(row.book_id, (asinCountByBook.get(row.book_id) ?? 0) + 1);
+      if (row.status === "active") {
+        activeAsinCountByBook.set(row.book_id, (activeAsinCountByBook.get(row.book_id) ?? 0) + 1);
+      }
     }
 
     const summary: BookCompetitorSummary[] = (books ?? []).map((book) => ({
@@ -52,7 +52,7 @@ export async function GET() {
       bookTitle: book.title,
       bookAuthor: book.author,
       competitorAsinCount: asinCountByBook.get(book.id) ?? 0,
-      competitorKeywordCount: keywordCountByBook.get(book.id) ?? 0,
+      activeCompetitorAsinCount: activeAsinCountByBook.get(book.id) ?? 0,
     }));
 
     return Response.json({ success: true, books: summary });

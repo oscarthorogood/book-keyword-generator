@@ -10,9 +10,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CompetitorAsin, CompetitorKeyword } from "./types";
 
-const COMPETITOR_ASIN_COLUMNS = "id, book_id, competitor_asin, source, notes, created_at, updated_at";
+const COMPETITOR_ASIN_COLUMNS =
+  "id, book_id, competitor_asin, source, notes, status, bid, rejection_reason, rejected_by_filter, created_at, updated_at";
 const COMPETITOR_KEYWORD_COLUMNS =
-  "id, book_id, competitor_asin, text, volume, rank, competitor_count, mean_rank, category, intent_segment, match_type, specificity, status, bid, rejection_reason, rejected_by_filter, created_at, updated_at";
+  "id, book_id, competitor_asin, text, volume, rank, competitor_count, mean_rank, category, intent_segment, match_type, specificity, status, created_at, updated_at";
 
 // --- competitor_asins --------------------------------------------------
 
@@ -82,6 +83,96 @@ export async function deleteCompetitorAsin(
 
   if (error) return { deleted: false, error: error.message };
   return { deleted: (data?.length ?? 0) > 0, error: null };
+}
+
+/** Delete by id alone (no book scope needed) — for /api/competitors/[id]. */
+export async function deleteCompetitorAsinById(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string
+): Promise<{ deleted: boolean; error: string | null }> {
+  const { data, error } = await supabase
+    .from("competitor_asins")
+    .delete()
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select("id");
+
+  if (error) return { deleted: false, error: error.message };
+  return { deleted: (data?.length ?? 0) > 0, error: null };
+}
+
+/** Bulk delete, for the manager's multi-select toolbar. */
+export async function deleteCompetitorAsins(
+  supabase: SupabaseClient,
+  bookId: string,
+  userId: string,
+  ids: string[]
+): Promise<{ deletedCount: number; error: string | null }> {
+  if (ids.length === 0) return { deletedCount: 0, error: null };
+
+  const { data, error } = await supabase
+    .from("competitor_asins")
+    .delete()
+    .eq("book_id", bookId)
+    .eq("user_id", userId)
+    .in("id", ids)
+    .select("id");
+
+  if (error) return { deletedCount: 0, error: error.message };
+  return { deletedCount: data?.length ?? 0, error: null };
+}
+
+/** Bulk status change, for the manager's multi-select toolbar — mirrors PATCH /api/books/[id]/keywords. */
+export async function updateCompetitorAsinsStatus(
+  supabase: SupabaseClient,
+  bookId: string,
+  userId: string,
+  ids: string[],
+  status: CompetitorAsin["status"]
+): Promise<{ updatedCount: number; error: string | null }> {
+  if (ids.length === 0) return { updatedCount: 0, error: null };
+
+  const { data, error } = await supabase
+    .from("competitor_asins")
+    .update({ status })
+    .eq("book_id", bookId)
+    .eq("user_id", userId)
+    .in("id", ids)
+    .select("id");
+
+  if (error) return { updatedCount: 0, error: error.message };
+  return { updatedCount: data?.length ?? 0, error: null };
+}
+
+export interface UpdateCompetitorAsinInput {
+  status?: CompetitorAsin["status"];
+  bid?: number | null;
+  notes?: string | null;
+}
+
+/** Single-row edit, for inline status/bid/notes editing in the manager table. */
+export async function updateCompetitorAsin(
+  supabase: SupabaseClient,
+  userId: string,
+  id: string,
+  updates: UpdateCompetitorAsinInput
+): Promise<{ data: CompetitorAsin | null; error: string | null }> {
+  const payload: Record<string, unknown> = {};
+  if (updates.status !== undefined) payload.status = updates.status;
+  if (updates.bid !== undefined) payload.bid = updates.bid;
+  if (updates.notes !== undefined) payload.notes = updates.notes;
+
+  const { data, error } = await supabase
+    .from("competitor_asins")
+    .update(payload)
+    .eq("id", id)
+    .eq("user_id", userId)
+    .select(COMPETITOR_ASIN_COLUMNS)
+    .single();
+
+  if (error) return { data: null, error: error.message };
+  return { data: data as CompetitorAsin, error: null };
 }
 
 // --- competitor_keywords ------------------------------------------------

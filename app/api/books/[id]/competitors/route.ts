@@ -1,7 +1,14 @@
-import { addCompetitorAsin, deleteCompetitorAsin, getCompetitorAsins } from "@/lib/competitorStore";
+import {
+  addCompetitorAsin,
+  deleteCompetitorAsin,
+  deleteCompetitorAsins,
+  getCompetitorAsins,
+  updateCompetitorAsinsStatus,
+} from "@/lib/competitorStore";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
 const VALID_SOURCES = ["manual", "kdpradar", "datadive", "helium10", "sellersprite"];
+const STATUSES = ["active", "paused", "negative", "archived", "rejected"];
 
 /**
  * GET /api/books/[id]/competitors
@@ -77,8 +84,44 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 }
 
 /**
+ * PATCH /api/books/[id]/competitors
+ * Bulk status change — mirrors PATCH /api/books/[id]/keywords.
+ * Body: { ids: string[], status: CompetitorAsinStatus }
+ */
+export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
+  try {
+    const { id: bookId } = await params;
+
+    const user = await currentUser();
+    if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+    const body = await request.json().catch(() => ({}));
+    const ids: string[] = Array.isArray(body.ids)
+      ? body.ids.filter((id: unknown): id is string => typeof id === "string")
+      : [];
+    if (ids.length === 0) return Response.json({ error: "No competitor ASINs selected" }, { status: 400 });
+
+    if (typeof body.status !== "string" || !STATUSES.includes(body.status)) {
+      return Response.json({ error: "A valid status is required" }, { status: 400 });
+    }
+
+    const supabase = await supabaseServer();
+    const { updatedCount, error } = await updateCompetitorAsinsStatus(supabase, bookId, user.id, ids, body.status);
+
+    if (error) return Response.json({ error }, { status: 400 });
+
+    return Response.json({ success: true, updatedCount });
+  } catch (err) {
+    console.error("Error bulk-updating competitor ASINs:", err);
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return Response.json({ error: message }, { status: 500 });
+  }
+}
+
+/**
  * DELETE /api/books/[id]/competitors
- * Body: { id: string } — removes one competitor ASIN row.
+ * Body: { id: string } — removes one row, or { ids: string[] } for the
+ * manager's multi-select toolbar.
  */
 export async function DELETE(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -88,10 +131,20 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await request.json().catch(() => ({}));
+    const supabase = await supabaseServer();
+
+    const ids: string[] = Array.isArray(body.ids)
+      ? body.ids.filter((id: unknown): id is string => typeof id === "string")
+      : [];
+    if (ids.length > 0) {
+      const { deletedCount, error } = await deleteCompetitorAsins(supabase, bookId, user.id, ids);
+      if (error) return Response.json({ error }, { status: 400 });
+      return Response.json({ success: true, deletedCount });
+    }
+
     const id = typeof body.id === "string" ? body.id : undefined;
     if (!id) return Response.json({ error: "id is required" }, { status: 400 });
 
-    const supabase = await supabaseServer();
     const { deleted, error } = await deleteCompetitorAsin(supabase, bookId, user.id, id);
 
     if (error) return Response.json({ error }, { status: 400 });
