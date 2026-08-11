@@ -31,7 +31,17 @@ interface Keyword {
   rejection_reason?: string | null;
   /** Which filter decided — uiPollution, offTopicEntity, anchorRelevance, … */
   rejected_by_filter?: string | null;
+  /** Broad (1) – Very specific (5), from lib/keywordSpecificity.ts. Null for rows generated before sql/09 or for negatives. */
+  specificity?: number | null;
 }
+
+const SPECIFICITY_LABELS: Record<number, string> = {
+  1: "Broad",
+  2: "Somewhat broad",
+  3: "Medium",
+  4: "Somewhat specific",
+  5: "Very specific",
+};
 
 interface GenerateSummary {
   insertedCount: number;
@@ -117,6 +127,8 @@ export default function KeywordManager({
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const [filterFilter, setFilterFilter] = useState<"all" | string>("all");
+  const [specificityFilter, setSpecificityFilter] = useState<"all" | number>("all");
+  const [specificitySort, setSpecificitySort] = useState<"none" | "asc" | "desc">("none");
   const [refiltering, setRefiltering] = useState(false);
   const [refilterResult, setRefilterResult] = useState<string | null>(null);
 
@@ -321,17 +333,21 @@ export default function KeywordManager({
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return keywords.filter((k) => {
+    const matched = keywords.filter((k) => {
       // A generate run produces more rejections than keepers, so the default
       // view is the list you'd actually work with; rejected has its own tab.
       if (statusFilter === "all" && k.status === "rejected") return false;
       if (statusFilter !== "all" && k.status !== statusFilter) return false;
       if (sourceFilter !== "all" && k.source !== sourceFilter) return false;
       if (filterFilter !== "all" && k.rejected_by_filter !== filterFilter) return false;
+      if (specificityFilter !== "all" && k.specificity !== specificityFilter) return false;
       if (term && !k.text.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [keywords, statusFilter, sourceFilter, filterFilter, search]);
+    if (specificitySort === "none") return matched;
+    const sorted = [...matched].sort((a, b) => (a.specificity ?? 0) - (b.specificity ?? 0));
+    return specificitySort === "desc" ? sorted.reverse() : sorted;
+  }, [keywords, statusFilter, sourceFilter, filterFilter, specificityFilter, specificitySort, search]);
 
   const page = visible.slice(0, visibleCount);
   const allPageSelected = page.length > 0 && page.every((k) => selected.has(k.id));
@@ -633,6 +649,22 @@ export default function KeywordManager({
             ))}
           </select>
         )}
+
+        <select
+          value={specificityFilter}
+          onChange={(e) =>
+            changeFilters(() => setSpecificityFilter(e.target.value === "all" ? "all" : Number(e.target.value)))
+          }
+          className="input w-auto"
+          aria-label="Filter by specificity"
+        >
+          <option value="all">Any specificity</option>
+          {[1, 2, 3, 4, 5].map((level) => (
+            <option key={level} value={level}>
+              {SPECIFICITY_LABELS[level]}
+            </option>
+          ))}
+        </select>
       </div>
 
       {selected.size > 0 && (
@@ -724,6 +756,22 @@ export default function KeywordManager({
                   <th scope="col" className="hidden xl:table-cell">
                     Filter verdict
                   </th>
+                  <th scope="col" className="hidden md:table-cell">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSpecificitySort((prev) =>
+                          prev === "none" ? "asc" : prev === "asc" ? "desc" : "none"
+                        )
+                      }
+                      className="flex items-center gap-1"
+                      aria-label="Sort by specificity"
+                      title="Broad → Specific"
+                    >
+                      Specificity
+                      {specificitySort !== "none" && <span aria-hidden="true">{specificitySort === "asc" ? "↑" : "↓"}</span>}
+                    </button>
+                  </th>
                   <th scope="col">Bid</th>
                   <th scope="col">Status</th>
                   <th scope="col">
@@ -776,6 +824,34 @@ export default function KeywordManager({
                           {keyword.rejection_reason && (
                             <span className="meta-line block text-xs">{keyword.rejection_reason}</span>
                           )}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                      )}
+                    </td>
+                    <td className="hidden md:table-cell">
+                      {keyword.specificity ? (
+                        <span
+                          className="inline-flex items-center gap-0.5"
+                          title={SPECIFICITY_LABELS[keyword.specificity]}
+                          aria-label={`Specificity: ${SPECIFICITY_LABELS[keyword.specificity]}`}
+                        >
+                          {[1, 2, 3, 4, 5].map((step) => (
+                            <span
+                              key={step}
+                              aria-hidden="true"
+                              style={{
+                                display: "inline-block",
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                background:
+                                  step <= keyword.specificity!
+                                    ? "var(--icon-active, currentColor)"
+                                    : "var(--border-default, #d1d5db)",
+                              }}
+                            />
+                          ))}
                         </span>
                       ) : (
                         <span style={{ color: "var(--text-placeholder)" }}>—</span>

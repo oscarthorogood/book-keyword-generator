@@ -1,5 +1,16 @@
 # Amazon Ads Assistant - System Improvements
 
+> **⚠️ HISTORICAL (§0.1 reconciliation, 2026-08-11):** This document describes
+> a single-page campaign **wizard** — `app/page.tsx` posting to
+> `app/api/generate/route.ts`, with budget/bid-economics/creator-initials/
+> end-date fields. Neither that route nor those fields exist in the current
+> tree. The app is now a book-library flow (`components/{AppShell,
+> BooksListDashboard,BookDetailPage,KeywordManager,AddBookForm}.tsx`,
+> `app/api/books/...`) as described in README.md. Treat everything below as
+> a record of work done on a UI shape that has since been replaced — code
+> over docs — not as a description of current behavior. Kept for history;
+> do not use it to plan new work.
+
 This document outlines all improvements made to the book entry and campaign management system based on analysis of the "Never Lie" by Freida McFadden test entry (08/10/2026).
 
 ## Overview of Changes

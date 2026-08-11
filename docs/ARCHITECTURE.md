@@ -9,7 +9,7 @@
 
 **Language/Framework:** TypeScript + Next.js 16 (React 19)  
 **Persistence:** Supabase (PostgreSQL) for auth + user data  
-**Output:** Amazon Ads Sponsored Products bulksheet (XLSX via ExcelJS)
+**Output:** Amazon Ads Sponsored Products bulksheet (CSV — see the reconciliation note below; `exceljs` is a dependency but unused in the current export path)
 
 **Current scope:** One-shot campaign generator. User inputs book metadata (ASIN, title, author, etc.) → system scrapes Amazon + external sources for keyword ideas → outputs a bulksheet ready to upload to Amazon Ads.
 
@@ -19,13 +19,27 @@
 
 ## 2. Data Flow: How a Bulksheet Is Generated
 
-### 2.1 Entry Point: `app/api/generate/route.ts`
+> **Reconciliation note (§0.1, 2026-08):** This section originally described a
+> single-page campaign wizard posting to `app/api/generate/route.ts`. That
+> route does not exist in the current tree and the wizard fields below
+> (start/end dates, creator initials) are historical — code wins over docs.
+> The live app is a book-library flow: books are created via
+> `POST /api/books/create`, and keyword generation is per-book at
+> `POST /api/books/[id]/keywords/generate`, with `GET .../keywords`,
+> `POST .../keywords/filter`, and `GET .../keywords/export` as the
+> supporting routes. See the README's "How it works" section for the
+> current, accurate flow. The rest of this section (steps 2–6) still
+> reflects the real pipeline shape; only the entry point and export format
+> below are corrected.
 
-POST `/api/generate` accepts `GenerateRequest` (see `lib/types.ts`):
-- **Book metadata:** ASIN, title, author, series name/order, marketplace
-- **Campaign settings:** daily budget, start/end dates, creator initials
-- **Bid economics:** RRP + target ACOS + conversion rate OR manual default bid
-- **Keyword preferences:** enabled sources, match types, manual keywords, key tropes
+### 2.1 Entry Point: `app/api/books/[id]/keywords/generate/route.ts`
+
+`POST /api/books/[id]/keywords/generate` regenerates keywords for an
+already-created book, using the snapshot captured when the book was added
+(see `lib/bookSnapshot.ts`) rather than accepting campaign settings in the
+request body. There is no start/end-date or creator-initials input in the
+current flow — those were wizard-era fields that did not survive into the
+book-library UI.
 
 ### 2.2 Keyword Generation Pipeline
 
@@ -61,10 +75,16 @@ POST `/api/generate` accepts `GenerateRequest` (see `lib/types.ts`):
    - Ad group multipliers (tropes: 0.75x, comp: 1.0x, product: 0.9x)
    - Match type multipliers (Broad: 0.7x, Phrase: 1.0x, Exact: 1.2x)
 
-6. Export:
-   - Build XLSX with Campaign / Ad Group / Product Ad / Keyword / Product Targeting rows
-   - Optional metadata sheet with series info, budget, dates
-   - Negative keywords starter list (foundation for Phase 3 harvest/negate)
+6. Export (`lib/bulksheet.ts`, `GET /api/books/[id]/keywords/export`):
+   - Build a CSV with Campaign / Ad Group / Keyword / Product Targeting rows
+     (`buildBulksheetRows` + `toCsv`/`buildBulksheetCsv`)
+   - **Known gap (§23.2):** the current CSV is a review sheet, not an
+     uploadable Amazon SP bulk file — it has no Product Ad row, no SKU/ASIN
+     column, and custom columns Amazon's bulk template doesn't expect. See
+     the Enhancements spec §23.2 for the fix (emit the official bulk
+     template, or ship a `*-review.csv` + `*-upload.xlsx` pair).
+   - Negative keywords starter list (`lib/negativeKeywords.ts`), currently
+     only attached to the descriptive campaign (§23.7 gap)
 ```
 
 ### 2.3 File Organization by Responsibility
@@ -246,6 +266,13 @@ ASIN validation happens at two points:
 
 ### 5.2 New Data Models Needed (Phase 2-3)
 
+> **Status check (§0.1):** none of the tables below exist yet — there is no
+> `lib/keywordCache.ts`, `author_code`, or `decision_log` in the current
+> tree, and generate runs are not cached or deterministic. Treat every
+> schema in this section as proposed, not implemented; reuse these
+> names/shapes when a section of the Enhancements spec needs one of them
+> instead of inventing a parallel table.
+
 ```sql
 -- Phase 1.6: Deterministic generation
 CREATE TABLE author_code (
@@ -355,7 +382,7 @@ CREATE TABLE action_log (
 | SerpApi Amazon Search | Related searches, competitor titles/authors | SerpApi (`engine=amazon`) | Optional (key) |
 | SerpApi Amazon Autocomplete | Search-bar suggestions | SerpApi (`engine=amazon_autocomplete`) | Optional (key) |
 | SerpApi Amazon Product | ASIN record, bought-together crawl | SerpApi (`engine=amazon_product`) | Optional (key) |
-| Claude API | Keyword ranking (optional) | LLM ranking service | Configured (optional) |
+| Google Gemini (`gemini-2.0-flash`) | Keyword ranking (optional) | `GEMINI_API_KEY` in `lib/aiRanker.ts` — **not** Claude, correcting the prior entry here | Configured (optional) |
 | **Amazon Ads API** | **Suggested bids, campaign state** | **⏳ NOT YET** | ⏳ Needed for Phase 3 |
 | Firecrawl | Fallback web scraping | Firecrawl API (optional) | Fallback |
 
@@ -426,7 +453,7 @@ Each bug fix needs a test fixture:
 **Environment variables needed:**
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase auth
 - `SCRAPER_PROXY_API_KEY` — Optional ScraperAPI for Amazon scraping (datacenter IP block workaround)
-- `CLAUDE_API_KEY` — Optional Claude API for keyword ranking
+- `GEMINI_API_KEY` — Optional Google Gemini key for keyword ranking (`lib/aiRanker.ts`); was previously and incorrectly documented here as `CLAUDE_API_KEY`
 - `FIRECRAWL_API_KEY` — Optional Firecrawl fallback scraping
 - ⏳ `AMAZON_ADS_CLIENT_ID`, `AMAZON_ADS_CLIENT_SECRET` — Needed for Phase 3
 

@@ -40,6 +40,7 @@ import {
   splitKeywordsByCategory,
 } from "@/lib/keywordMerge";
 import { validateFinalKeywords } from "@/lib/keywordValidation";
+import { scoreSpecificity } from "@/lib/keywordSpecificity";
 import { buildListingMetadataCandidates } from "@/lib/listingKeywords";
 import { buildFormatNegatives, buildNegativeKeywords } from "@/lib/negativeKeywords";
 import { buildBrandTargets, buildProductTargets } from "@/lib/productTargets";
@@ -510,6 +511,7 @@ export async function POST(
       status: "active",
       rejection_reason: null as string | null,
       rejected_by_filter: null as string | null,
+      specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
 
     const reviewRows = [
@@ -526,6 +528,7 @@ export async function POST(
       status,
       rejection_reason: candidate.reason ?? null,
       rejected_by_filter: candidate.filter ?? null,
+      specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
 
     const negativeRows = negatives.map((negative) => ({
@@ -539,6 +542,8 @@ export async function POST(
       status: "negative",
       rejection_reason: negative.reason,
       rejected_by_filter: null as string | null,
+      // Negatives aren't bid on, so a Broad-Specific rating doesn't apply.
+      specificity: null as number | null,
     }));
 
     // Negatives are keyed on (book, text, match_type) like everything else,
@@ -572,6 +577,30 @@ export async function POST(
       ({ data: inserted, error: insertError } = await supabase
         .from("keywords")
         .upsert(legacyRows, { onConflict: "book_id,text,match_type", ignoreDuplicates: true })
+        .select());
+    }
+
+    // sql/09-keyword-specificity.sql adds the specificity column. On a
+    // database that hasn't had it applied yet, drop it and retry rather
+    // than failing the whole run.
+    const needsSpecificityMigration = !!insertError && /specificity/i.test(insertError.message);
+
+    if (needsSpecificityMigration) {
+      console.error("[generate] specificity column missing — apply sql/09-keyword-specificity.sql:", insertError!.message);
+      const sourceRows = needsFilterMigration
+        ? activeRows.map(({ rejection_reason, rejected_by_filter, ...row }) => {
+            void rejection_reason;
+            void rejected_by_filter;
+            return row;
+          })
+        : rows;
+      const rowsWithoutSpecificity = sourceRows.map(({ specificity, ...row }) => {
+        void specificity;
+        return row;
+      });
+      ({ data: inserted, error: insertError } = await supabase
+        .from("keywords")
+        .upsert(rowsWithoutSpecificity, { onConflict: "book_id,text,match_type", ignoreDuplicates: true })
         .select());
     }
 

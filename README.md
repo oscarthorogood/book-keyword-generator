@@ -86,6 +86,14 @@ thematic keywords plus 120 comparable names) to review, filter, re-tier and
 prune — with the rejected candidates kept alongside it, each labelled with
 the filter that stopped it and why.
 
+Every keyword also gets a **Broad → Specific** rating (1–5, `lib/
+keywordSpecificity.ts`) shown as a sortable/filterable column: word count,
+anchor hits (title/author/series/character names), semantic category, and
+generic book-intent tokens ("books", "kindle", "read") all feed it, kept
+consistent with match-type assignment so a comparable-title keyword rarely
+reads as "Broad". Requires `sql/09-keyword-specificity.sql`; keywords
+generated before that migration show no rating.
+
 ### Relevance filtering
 
 Generation is source-led: every source contributes what it found. Nothing
