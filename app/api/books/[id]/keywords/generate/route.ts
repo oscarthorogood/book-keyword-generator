@@ -2,6 +2,7 @@ import { applyAiRelevance, isAiRankingConfigured, rankKeywordsWithAi } from "@/l
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
 import { listingRecordFromSnapshot, type BookSnapshot } from "@/lib/bookSnapshot";
 import { loadBookWithSnapshot } from "@/lib/bookStore";
+import { getCompetitorAsins } from "@/lib/competitorStore";
 import { assessCompDataHealth, filterHallucinatedCompKeywords } from "@/lib/compDataValidation";
 import { boostScoresByDescriptionQuality } from "@/lib/descriptionQuality";
 import { genreFamilySearchTerms, genreFamilyThemeTerms } from "@/lib/genre";
@@ -351,6 +352,20 @@ export async function POST(
       filterContext.anchors.primaryGenrePhrase
     );
 
+    // Get competitor ASINs manually added or generated to include them in comp-names
+    const existingAsinRows = await getCompetitorAsins(supabase, bookId, user.id);
+    const manualCompNames: KeywordCandidate[] = [];
+    for (const row of existingAsinRows) {
+      if (!row.notes) continue;
+      const parts = row.notes.split(" — ");
+      for (let part of parts) {
+        part = part.replace(/^(Frequently bought together|Similar title|Discovered via [\w-]+)/, "").trim();
+        if (part && part.length > 2) {
+           manualCompNames.push({ text: part, sources: ["comp-name"] });
+        }
+      }
+    }
+
     // Live sources: autocomplete engines are JSON endpoints that aren't
     // subject to Amazon's product-page bot wall, and SerpApi/the Ads API are
     // proper APIs — cheap enough to re-run on every generate.
@@ -483,7 +498,12 @@ export async function POST(
       decodo: decodoCandidates,
     };
 
-    const sourceCandidateGroups = { ...groups, ...liveGroups };
+    const sourceCandidateGroups: Partial<Record<KeywordSource, KeywordCandidate[]>> = { 
+      ...groups, 
+      ...liveGroups,
+      "comp-name": mergeKeywordCandidates(groups["comp-name"] ?? [], manualCompNames)
+    };
+    
     const contributingSources = ALL_KEYWORD_SOURCES.filter(
       (source) => enabledSources.has(source) && (sourceCandidateGroups[source]?.length ?? 0) > 0
     );
