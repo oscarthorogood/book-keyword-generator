@@ -342,6 +342,9 @@ export const REASON_CODES = [
   "DUPLICATE",
   "OVERBROAD",
   "RANKED_OUT",
+  "MEDIA_COLLISION",
+  "PLATFORM_NOISE",
+  "AUTHOR_DISAMBIGUATION",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
 
@@ -418,3 +421,65 @@ export const TITLE_COLLISION_TERMS = [
 
 /** Numeric/word tails that are ambiguous rather than a clean collision — series book vs unrelated media. */
 export const AMBIGUOUS_TITLE_TAILS = ["two", "2", "ii", "part two", "part 2"];
+
+// --- Media-type collision (§5.1) --------------------------------------------
+
+/**
+ * Music/TV/video vocabulary that autocomplete drags in alongside a book title
+ * that also happens to be a song, album or episode name — "the unforgiven
+ * guitar tab" (Metallica), "the unforgiven full movie", not the DS Mia
+ * McAllister novel.
+ */
+export const MEDIA_FORM_TERMS = [
+  "solo",
+  "guitar",
+  "bass",
+  "lyrics",
+  "tab",
+  "karaoke",
+  "acoustic",
+  "soundtrack",
+  "full movie",
+  "episode",
+  "season",
+  "trailer",
+];
+
+// --- Platform/marketplace noise (§5.4) --------------------------------------
+
+/**
+ * Streaming/social/marketplace platform vocabulary. On its own it's platform
+ * navigation, not book-shopping intent; only kept when the keyword also
+ * carries a clear book anchor (title/author/series plus book intent).
+ */
+export const PLATFORM_TERMS = [
+  "reddit",
+  "tiktok",
+  "booktok",
+  "youtube",
+  "facebook",
+  "instagram",
+  "twitter",
+  "x.com",
+  "netflix",
+  "britbox",
+  "hulu",
+  "disney+",
+  "prime video",
+  "kindle store",
+  "amazon co uk",
+  "amazon.co.uk",
+  "amazon.com",
+  "quora",
+];
+
+// --- Author-surname disambiguation (§5.2) -----------------------------------
+
+/**
+ * Matches phrases of the shape "[first] [last] mcallister book series" —
+ * autocomplete's habit of dragging in an unrelated author who shares a
+ * surname with a series character/comp. The captured name is checked against
+ * the book's actual author and its approved comp-author list.
+ */
+export const AUTHOR_DISAMBIGUATION_PATTERN =
+  /^([a-z]+ [a-z]+) (book series|books in order|series|books)$/;
