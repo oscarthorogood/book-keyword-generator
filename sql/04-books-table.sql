@@ -59,17 +59,20 @@ CREATE INDEX IF NOT EXISTS idx_campaigns_book_id
 ALTER TABLE books ENABLE ROW LEVEL SECURITY;
 
 -- Policy: Users can view only their own books
-CREATE POLICY IF NOT EXISTS "Users read own books" ON books
+DROP POLICY IF EXISTS "Users read own books" ON books;
+CREATE POLICY "Users read own books" ON books
   FOR SELECT
   USING (auth.uid() = user_id);
 
 -- Policy: Users can create books
-CREATE POLICY IF NOT EXISTS "Users create books" ON books
+DROP POLICY IF EXISTS "Users create books" ON books;
+CREATE POLICY "Users create books" ON books
   FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
 -- Policy: Users can update their own books
-CREATE POLICY IF NOT EXISTS "Users update own books" ON books
+DROP POLICY IF EXISTS "Users update own books" ON books;
+CREATE POLICY "Users update own books" ON books
   FOR UPDATE
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
@@ -86,7 +89,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER IF NOT EXISTS books_update_timestamp
+DROP TRIGGER IF EXISTS books_update_timestamp ON books;
+CREATE TRIGGER books_update_timestamp
   BEFORE UPDATE ON books
   FOR EACH ROW
   EXECUTE FUNCTION update_books_updated_at();

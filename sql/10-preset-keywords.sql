@@ -62,13 +62,16 @@ ALTER TABLE preset_genres ENABLE ROW LEVEL SECURITY;
 ALTER TABLE preset_keywords ENABLE ROW LEVEL SECURITY;
 ALTER TABLE book_preset_genres ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Users manage own preset genres" ON preset_genres
+DROP POLICY IF EXISTS "Users manage own preset genres" ON preset_genres;
+CREATE POLICY "Users manage own preset genres" ON preset_genres
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Users manage own preset keywords" ON preset_keywords
+DROP POLICY IF EXISTS "Users manage own preset keywords" ON preset_keywords;
+CREATE POLICY "Users manage own preset keywords" ON preset_keywords
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Users manage own book preset subscriptions" ON book_preset_genres
+DROP POLICY IF EXISTS "Users manage own book preset subscriptions" ON book_preset_genres;
+CREATE POLICY "Users manage own book preset subscriptions" ON book_preset_genres
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
 
 CREATE OR REPLACE FUNCTION update_preset_updated_at()
@@ -79,12 +82,14 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER IF NOT EXISTS preset_genres_update_timestamp
+DROP TRIGGER IF EXISTS preset_genres_update_timestamp ON preset_genres;
+CREATE TRIGGER preset_genres_update_timestamp
   BEFORE UPDATE ON preset_genres
   FOR EACH ROW
   EXECUTE FUNCTION update_preset_updated_at();
 
-CREATE TRIGGER IF NOT EXISTS preset_keywords_update_timestamp
+DROP TRIGGER IF EXISTS preset_keywords_update_timestamp ON preset_keywords;
+CREATE TRIGGER preset_keywords_update_timestamp
   BEFORE UPDATE ON preset_keywords
   FOR EACH ROW
   EXECUTE FUNCTION update_preset_updated_at();

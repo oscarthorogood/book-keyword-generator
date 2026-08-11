@@ -31,20 +31,24 @@ CREATE INDEX IF NOT EXISTS idx_keywords_book_status
 
 ALTER TABLE keywords ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Users read own keywords" ON keywords
+DROP POLICY IF EXISTS "Users read own keywords" ON keywords;
+CREATE POLICY "Users read own keywords" ON keywords
   FOR SELECT
   USING (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Users insert own keywords" ON keywords
+DROP POLICY IF EXISTS "Users insert own keywords" ON keywords;
+CREATE POLICY "Users insert own keywords" ON keywords
   FOR INSERT
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Users update own keywords" ON keywords
+DROP POLICY IF EXISTS "Users update own keywords" ON keywords;
+CREATE POLICY "Users update own keywords" ON keywords
   FOR UPDATE
   USING (auth.uid() = user_id)
   WITH CHECK (auth.uid() = user_id);
 
-CREATE POLICY IF NOT EXISTS "Users delete own keywords" ON keywords
+DROP POLICY IF EXISTS "Users delete own keywords" ON keywords;
+CREATE POLICY "Users delete own keywords" ON keywords
   FOR DELETE
   USING (auth.uid() = user_id);
 
@@ -56,7 +60,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER IF NOT EXISTS keywords_update_timestamp
+DROP TRIGGER IF EXISTS keywords_update_timestamp ON keywords;
+CREATE TRIGGER keywords_update_timestamp
   BEFORE UPDATE ON keywords
   FOR EACH ROW
   EXECUTE FUNCTION update_keywords_updated_at();
@@ -80,7 +85,8 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER IF NOT EXISTS keywords_sync_book_count
+DROP TRIGGER IF EXISTS keywords_sync_book_count ON keywords;
+CREATE TRIGGER keywords_sync_book_count
   AFTER INSERT OR UPDATE OR DELETE ON keywords
   FOR EACH ROW
   EXECUTE FUNCTION sync_book_keyword_count();
