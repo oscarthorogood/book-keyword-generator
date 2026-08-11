@@ -1,4 +1,5 @@
 import { loadBookWithSnapshot } from "@/lib/bookStore";
+import { computeCompetitorBid } from "@/lib/competitorBidding";
 import { getCompetitorAsins } from "@/lib/competitorStore";
 import { isApprovedAuthor } from "@/lib/manualCompetitors";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
@@ -221,7 +222,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       })
       .map(([asin, data]) => {
         const meta = metadataByAsin.get(asin);
-        const meanRank = data.positions.reduce((sum, p) => sum + p, 0) / data.positions.length;
+        const meanRankRaw = data.positions.reduce((sum, p) => sum + p, 0) / data.positions.length;
+        const meanRank = Number.isFinite(meanRankRaw) ? meanRankRaw : null;
         return {
           book_id: bookId,
           user_id: user.id,
@@ -233,7 +235,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           price: meta?.price ?? null,
           bsr: meta?.bsr ?? null,
           competitor_count: data.positions.length,
-          mean_rank: Number.isFinite(meanRank) ? meanRank : null,
+          mean_rank: meanRank,
+          bid: computeCompetitorBid({
+            price: meta?.price ?? null,
+            bsr: meta?.bsr ?? null,
+            competitorCount: data.positions.length,
+            meanRank,
+          }),
         };
       });
 

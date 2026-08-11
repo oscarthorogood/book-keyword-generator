@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
+  Calculator,
   CheckCircle2,
   Download,
   Filter,
@@ -26,6 +27,12 @@ interface CompetitorAsinRow {
   bid: number | null;
   rejection_reason: string | null;
   rejected_by_filter: string | null;
+  title: string | null;
+  author: string | null;
+  price: number | null;
+  bsr: number | null;
+  competitor_count: number | null;
+  mean_rank: number | null;
   created_at: string;
 }
 
@@ -97,6 +104,8 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [summary, setSummary] = useState<GenerateSummary | null>(null);
+
+  const [recalculatingBids, setRecalculatingBids] = useState(false);
 
   const [refiltering, setRefiltering] = useState(false);
   const [refilterResult, setRefilterResult] = useState<string | null>(null);
@@ -192,6 +201,22 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
     });
+  }
+
+  /** Bulk action (spec task 2): re-scores computeCompetitorBid() from each row's already-stored metadata. */
+  async function recalculateBids(ids?: string[]) {
+    setRecalculatingBids(true);
+    try {
+      await fetch(`/api/books/${bookId}/competitors/recalculate-bids`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ids ? { ids } : {}),
+      });
+      if (ids) setSelected(new Set());
+      await reload();
+    } finally {
+      setRecalculatingBids(false);
+    }
   }
 
   /** Pulls competitor ASINs from the same metadata crawl keyword generation uses (§ generate route). */
@@ -331,6 +356,24 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
           </div>
           <span className="text-md font-semibold">Export bulksheet</span>
         </a>
+
+        <button
+          onClick={() => recalculateBids()}
+          disabled={recalculatingBids || asins.length === 0}
+          className="action-card action-card-secondary"
+          title="Re-score every tracked ASIN's bid from its stored price/BSR/competitor-count signals"
+        >
+          <div className="flex items-start justify-between">
+            <span className="icon-tile">
+              {recalculatingBids ? (
+                <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} />
+              ) : (
+                <Calculator size={20} style={{ color: "var(--icon-active)" }} />
+              )}
+            </span>
+          </div>
+          <span className="text-md font-semibold">{recalculatingBids ? "Recalculating…" : "Recalculate bids"}</span>
+        </button>
       </div>
 
       {generateError && (
@@ -494,6 +537,14 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
               Mark {STATUS_LABELS[status].toLowerCase()}
             </button>
           ))}
+          <button
+            onClick={() => recalculateBids(Array.from(selected))}
+            disabled={recalculatingBids}
+            className="btn btn-secondary btn-sm"
+          >
+            <Calculator size={16} />
+            Recalculate bids
+          </button>
           <button onClick={bulkDelete} className="btn btn-destructive btn-sm">
             <Trash2 size={16} />
             Delete
