@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft, CheckCircle2, RefreshCw } from "lucide-react";
+import { AlertTriangle, ArrowLeft, CheckCircle2, ListChecks, RefreshCw } from "lucide-react";
 import KeywordManager from "./KeywordManager";
 
 /** The slice of the stored snapshot (books.metadata_json) this page renders. */
@@ -84,7 +84,11 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [applyingPresets, setApplyingPresets] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  // Bumped after applying presets to force KeywordManager to refetch —
+  // simpler than threading a second imperative refresh path through it.
+  const [keywordManagerKey, setKeywordManagerKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -120,6 +124,33 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
       setNotice(err instanceof Error ? err.message : "Could not re-fetch the metadata.");
     } finally {
       setRefreshing(false);
+    }
+  }
+
+  async function applyGenrePresets() {
+    setApplyingPresets(true);
+    setNotice(null);
+    try {
+      const res = await fetch(`/api/books/${bookId}/keywords/apply-presets`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setNotice(body.error || "Could not apply genre presets.");
+        return;
+      }
+      setNotice(
+        body.message ??
+          (body.appliedCount > 0
+            ? `Applied ${body.appliedCount} preset keyword${body.appliedCount === 1 ? "" : "s"} from ${body.matchedGenres.join(", ")}.`
+            : "No new preset keywords to apply.")
+      );
+      if (body.appliedCount > 0) {
+        await reloadBook();
+        setKeywordManagerKey((k) => k + 1);
+      }
+    } catch (err) {
+      setNotice(err instanceof Error ? err.message : "Could not apply genre presets.");
+    } finally {
+      setApplyingPresets(false);
     }
   }
 
@@ -224,10 +255,16 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
               {book.author} · {book.total_keywords} keyword{book.total_keywords === 1 ? "" : "s"}
             </p>
           </div>
-          <button onClick={refreshMetadata} disabled={refreshing} className="btn btn-secondary">
-            <RefreshCw size={20} className={refreshing ? "animate-spin" : undefined} />
-            {refreshing ? "Re-fetching…" : "Re-fetch metadata"}
-          </button>
+          <div className="flex gap-2">
+            <button onClick={applyGenrePresets} disabled={applyingPresets} className="btn btn-secondary">
+              <ListChecks size={20} />
+              {applyingPresets ? "Applying…" : "Apply genre presets"}
+            </button>
+            <button onClick={refreshMetadata} disabled={refreshing} className="btn btn-secondary">
+              <RefreshCw size={20} className={refreshing ? "animate-spin" : undefined} />
+              {refreshing ? "Re-fetching…" : "Re-fetch metadata"}
+            </button>
+          </div>
         </div>
       </header>
 
@@ -329,6 +366,7 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
         </section>
 
         <KeywordManager
+          key={keywordManagerKey}
           bookId={bookId}
           metadataCapturedAt={snapshot.capturedAt}
           metadataReady={!captureFailed}

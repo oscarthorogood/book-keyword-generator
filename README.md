@@ -373,6 +373,32 @@ marketplace its link points at. Cross-marketplace comparison (does this book
 rank differently on .com vs .co.uk?) would mean capturing the same ASIN
 across multiple domains, which isn't built.
 
+## Navigation
+
+The sidebar is **Dashboard** (an overview across every book — keyword stats,
+specificity distribution, top keywords by genre, recent books) → **Books**
+→ **Keywords** (every keyword across every book, grouped by text, with a
+Books column) → **Presets** (a managed keyword library organized by
+genre/sub-genre — see below). Every section is its own route; there's no
+single-page view-swapping builder anymore.
+
+## Preset keywords by genre
+
+`/presets` is a library of keywords organized under genres and sub-genres
+you define. **Apply genre presets** on a book page (next to **Re-fetch
+metadata**) matches the book's resolved genre against that library and
+inserts the matching preset keywords through the same merge/dedup/filter
+pipeline generation uses — presets are trusted but not exempt, so a preset
+that doesn't fit a specific book still gets rejected and stays visible with
+its reason, the same as any generated candidate.
+
+Each preset keyword carries a tier: **Tier A** applies automatically; **Tier
+B** is inserted paused for manual review regardless of what the filter
+pipeline decides. Editing a preset keyword's text or match type propagates
+to every book that applied it — unless that book's copy was hand-edited
+afterward, which clears the link so propagation can never overwrite a
+manual edit. Requires `sql/10-preset-keywords.sql`.
+
 ## Setup
 
 ```bash

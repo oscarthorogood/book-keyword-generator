@@ -621,7 +621,7 @@ const SIGNATURE_STOPWORDS = new Set(["a", "an", "the", "of", "and", "or", "for"]
  * that exact-text matching misses ("wizard school books" vs "wizard schools
  * book"), so they don't split budget across near-identical keyword slots.
  */
-function dedupeSignature(text: string): string {
+export function dedupeSignature(text: string): string {
   const words = text
     .replace(/[^a-z0-9\s]/g, "")
     .split(" ")

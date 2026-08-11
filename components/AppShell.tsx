@@ -3,12 +3,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, ChevronLeft, ChevronRight, KeyRound, LayoutDashboard, LogOut, Shield } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, KeyRound, LayoutDashboard, ListChecks, LogOut, Shield } from "lucide-react";
 
-// "presets" (§3) isn't in this union yet — no route exists for it to link
-// to. Add it back here (and to NAV_ITEMS below) once the preset-keyword
-// library ships; a nav item with nowhere real to go is worse than no item.
-export type ShellSection = "dashboard" | "books" | "keywords" | "access";
+export type ShellSection = "dashboard" | "books" | "keywords" | "presets" | "access";
 
 interface AppShellProps {
   active: ShellSection;
@@ -19,6 +16,7 @@ const NAV_ITEMS: Array<{ section: Exclude<ShellSection, "access">; label: string
   { section: "dashboard", label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
   { section: "books", label: "Books", href: "/books", Icon: BookOpen },
   { section: "keywords", label: "Keywords", href: "/keywords", Icon: KeyRound },
+  { section: "presets", label: "Presets", href: "/presets", Icon: ListChecks },
 ];
 
 /**

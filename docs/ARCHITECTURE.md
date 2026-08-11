@@ -399,7 +399,9 @@ CREATE TABLE action_log (
 ### Phase 2 (Generator improvements)
 - 2.1: Match-type strategy (default to Phrase only)
 - 2.2: Budget-aware keyword capping
-- 2.3: Template library split (Tier A safe / Tier B gated)
+- ✅ 2.3: Template library split (Tier A safe / Tier B gated) — implemented as
+  the Enhancements spec §3 preset keyword library (`/presets`,
+  `sql/10-preset-keywords.sql`, `lib/presetKeywords.ts`)
 - 2.4: Access-model cluster (KU/Prime gating)
 - 2.5: Expanded comp-title sourcing
 - 2.6: Two-tier ASIN targeting (Exact + Expanded)

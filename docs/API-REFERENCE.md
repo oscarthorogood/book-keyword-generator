@@ -320,6 +320,52 @@ in `lib/dashboardStats.ts#recentBooksSummary`.
 
 ---
 
+## Preset Keyword Endpoints (`/presets`, Enhancements spec §3)
+
+### GET/POST /api/presets/genres
+
+- `GET` — the user's genre tree, each genre's preset keywords nested.
+- `POST` — `{ name, parentId? }` creates a genre or sub-genre.
+
+**Implementation:** `app/api/presets/genres/route.ts`
+
+### PATCH/DELETE /api/presets/genres/[id]
+
+Rename (`{ name }`) or delete a genre. Deleting cascades to its preset
+keywords, but keywords already applied to books stay on those books
+(`preset_keyword_id` is `SET NULL`, not cascaded).
+
+**Implementation:** `app/api/presets/genres/[id]/route.ts`
+
+### POST /api/presets/keywords
+
+`{ genreId, keyword, matchType?, tier? }` adds a keyword to a genre.
+**Implementation:** `app/api/presets/keywords/route.ts`
+
+### PATCH/DELETE /api/presets/keywords/[id]
+
+`PATCH` — `{ keyword?, matchType?, tier? }`. Editing `keyword` or
+`matchType` propagates the change to every book keyword still carrying this
+preset's `preset_keyword_id` (a book where the user hand-edited that
+keyword already had the link cleared, so propagation can't clobber it).
+Returns `propagatedCount`.
+
+`DELETE` — removes the preset; applied book keywords are left in place as
+ordinary manual keywords.
+
+**Implementation:** `app/api/presets/keywords/[id]/route.ts`
+
+### POST /api/books/[id]/keywords/apply-presets
+
+Matches the book's resolved genre against the preset library and inserts
+the matching keywords through the standard merge/filter pipeline (source
+`genre-preset`). Tier B presets are always inserted `paused`. Response:
+`{ matchedGenres, appliedCount, activeCount, pausedCount }`.
+
+**Implementation:** `app/api/books/[id]/keywords/apply-presets/route.ts`
+
+---
+
 ## Admin Endpoints
 
 ### GET /api/admin/access
