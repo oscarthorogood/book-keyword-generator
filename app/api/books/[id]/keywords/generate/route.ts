@@ -51,6 +51,7 @@ import { getSerpApiKeywordCandidates } from "@/lib/serpApiKeywords";
 import { buildSearchTermReportCandidates, parseSearchTermReportRows } from "@/lib/searchTermImport";
 import { buildReverseAsinCandidates, parseReverseAsinRows } from "@/lib/reverseAsin";
 import { buildDecodoCandidates, parseDecodoRows } from "@/lib/decodoSource";
+import { fetchDecodoKeywordRows, isDecodoConfigured } from "@/lib/decodoClient";
 import { buildPersonaLlmCandidates } from "@/lib/llmPersonaSource";
 import { buildStorygraphTagsCandidates } from "@/lib/storygraphTags";
 import { buildLibrarySubjectsCandidates } from "@/lib/librarySubjects";
@@ -377,6 +378,7 @@ export async function POST(
       duckDuckGoAutocomplete,
       serpApiResult,
       personaLlmCandidates,
+      liveDecodoRows,
     ] = await Promise.all([
       isAdsApiConfigured()
         ? getAdsApiKeywordRecommendations(snapshot.asin, snapshot.marketplace).catch((err: Error) => {
@@ -397,6 +399,16 @@ export async function POST(
           return [] as KeywordCandidate[];
         }
       ),
+      // Live Decodo: only runs when no manual decodoRows were supplied in the
+      // request body — manual input always wins, since that's the user having
+      // final say over what feeds the pipeline — and gracefully degrades to
+      // [] on any failure so a Decodo outage never blocks generation.
+      decodoRows.length === 0 && isDecodoConfigured()
+        ? fetchDecodoKeywordRows(serpApiSeeds, snapshot.marketplace).catch((err: Error) => {
+            console.error("[generate] live Decodo fetch failed:", err.message);
+            return [];
+          })
+        : Promise.resolve([]),
     ]);
 
     const serpApiBySource = (source: KeywordSource) =>
@@ -425,6 +437,11 @@ export async function POST(
         ? buildDecodoCandidates(
             { title: snapshot.title, author: snapshot.author, seriesName: snapshot.seriesName },
             parseDecodoRows(decodoRows)
+          )
+        : liveDecodoRows.length > 0
+        ? buildDecodoCandidates(
+            { title: snapshot.title, author: snapshot.author, seriesName: snapshot.seriesName },
+            liveDecodoRows
           )
         : [];
 
