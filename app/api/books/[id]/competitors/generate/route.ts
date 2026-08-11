@@ -1,5 +1,6 @@
 import { loadBookWithSnapshot } from "@/lib/bookStore";
 import { getCompetitorAsins } from "@/lib/competitorStore";
+import { isApprovedAuthor } from "@/lib/manualCompetitors";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import {
   buildAutocompleteSeeds,
@@ -7,6 +8,7 @@ import {
   getDuckDuckGoAutocompleteKeywordSet,
   getGoogleAutocompleteKeywordSet,
   getYoutubeAutocompleteKeywordSet,
+  scrapeProductPage,
 } from "@/lib/scrape";
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
 import { getSerpApiKeywordCandidates } from "@/lib/serpApiKeywords";
@@ -20,6 +22,10 @@ export const runtime = "nodejs";
 export const maxDuration = 60;
 
 const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
+
+/** Bounds on the live scrapeProductPage metadata pass — a generate run can surface far more ASINs than are worth fetching within the serverless timeout. */
+const MAX_METADATA_FETCHES = 40;
+const METADATA_CONCURRENCY = 5;
 
 /**
  * POST /api/books/[id]/competitors/generate
@@ -54,28 +60,38 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const existingAsins = new Set(existing.map((row) => row.competitor_asin.toUpperCase()));
     const ownAsin = (snapshot.asin ?? book.asin ?? "").toUpperCase();
 
-    const candidates = new Map<string, { notes: string | null; source: string }>();
+    // `positions` records the 1-based index this ASIN was found at within
+    // each discovery list it appeared in — used below to compute
+    // competitor_count (distinct source agreement) and mean_rank (average
+    // position) per sql/17-competitor-asin-metadata.sql, the same shape as
+    // aggregateReverseAsinRows' competitorCount/meanRank in lib/reverseAsin.ts.
+    const candidates = new Map<string, { notes: string | null; source: string; positions: number[] }>();
 
-    const addCandidate = (asinRaw: string | undefined, notes: string | null, source: string) => {
+    const addCandidate = (asinRaw: string | undefined, notes: string | null, source: string, position: number) => {
       const asin = asinRaw?.toUpperCase();
-      if (!asin || !ASIN_PATTERN.test(asin) || asin === ownAsin || existingAsins.has(asin) || candidates.has(asin)) return;
-      candidates.set(asin, { notes, source });
+      if (!asin || !ASIN_PATTERN.test(asin) || asin === ownAsin || existingAsins.has(asin)) return;
+      const entry = candidates.get(asin);
+      if (entry) {
+        entry.positions.push(position);
+      } else {
+        candidates.set(asin, { notes, source, positions: [position] });
+      }
     };
 
     // 1. Snapshot sources
-    for (const competitor of snapshot.competitors ?? []) {
+    (snapshot.competitors ?? []).forEach((competitor, i) => {
       const notes = [competitor.title, competitor.author].filter(Boolean).join(" — ") || null;
-      addCandidate(competitor.asin, notes, "auto-crawl");
-    }
-    for (const asinRaw of snapshot.compAsins ?? []) {
-      addCandidate(asinRaw, "Related listing", "auto-crawl");
-    }
-    for (const item of snapshot.frequentlyBoughtTogether ?? []) {
-      addCandidate(item.asin, item.title ? `Frequently bought together — ${item.title}` : "Frequently bought together", "auto-crawl");
-    }
-    for (const item of snapshot.compareWithSimilar ?? []) {
-      addCandidate(item.asin, item.title ? `Similar title — ${item.title}` : "Similar title", "auto-crawl");
-    }
+      addCandidate(competitor.asin, notes, "auto-crawl", i + 1);
+    });
+    (snapshot.compAsins ?? []).forEach((asinRaw, i) => {
+      addCandidate(asinRaw, "Related listing", "auto-crawl", i + 1);
+    });
+    (snapshot.frequentlyBoughtTogether ?? []).forEach((item, i) => {
+      addCandidate(item.asin, item.title ? `Frequently bought together — ${item.title}` : "Frequently bought together", "auto-crawl", i + 1);
+    });
+    (snapshot.compareWithSimilar ?? []).forEach((item, i) => {
+      addCandidate(item.asin, item.title ? `Similar title — ${item.title}` : "Similar title", "auto-crawl", i + 1);
+    });
 
     const totalCrawled = candidates.size;
 
@@ -148,22 +164,78 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     for (const [source, candidatesList] of Object.entries(liveGroups)) {
       const extracted = extractAsinCandidates(candidatesList);
-      for (const asin of extracted.asins) {
-        addCandidate(asin, `Discovered via ${source}`, source);
-      }
+      extracted.asins.forEach((asin, i) => addCandidate(asin, `Discovered via ${source}`, source, i + 1));
     }
 
     if (candidates.size === 0) {
       return Response.json({ success: true, candidateCount: totalCrawled, insertedCount: 0 });
     }
 
-    const rows = Array.from(candidates.entries()).map(([asin, data]) => ({
-      book_id: bookId,
-      user_id: user.id,
-      competitor_asin: asin,
-      source: data.source,
-      notes: data.notes,
-    }));
+    // 3. Minimal metadata (spec task 1) — reuse scrapeProductPage (lib/scrape.ts),
+    // same source the comp-crawl itself uses, rather than a new fetcher.
+    // Best-effort and bounded: a book can surface far more candidates than
+    // are worth a live product-page fetch per Generate run.
+    const asinsToEnrich = Array.from(candidates.keys()).slice(0, MAX_METADATA_FETCHES);
+    const metadataByAsin = new Map<string, { title?: string; author?: string; price?: number; bsr?: number }>();
+    for (let i = 0; i < asinsToEnrich.length; i += METADATA_CONCURRENCY) {
+      const batch = asinsToEnrich.slice(i, i + METADATA_CONCURRENCY);
+      const pages = await Promise.all(
+        batch.map((asin) =>
+          scrapeProductPage(asin, snapshot.marketplace).catch((err: Error) => {
+            console.error(`[generate] metadata fetch failed for ${asin}:`, err.message);
+            return null;
+          })
+        )
+      );
+      batch.forEach((asin, j) => {
+        const page = pages[j];
+        if (!page) return;
+        metadataByAsin.set(asin, {
+          title: page.title,
+          author: page.author,
+          price: page.price,
+          bsr: page.bestSellerRanks?.[0]?.rank,
+        });
+      });
+    }
+
+    // Drop candidates whose fetched author is (a) the book's own author —
+    // e.g. a box set/omnibus edition of the seed book isn't a competitor —
+    // or (b) an already-tracked author for this book: isApprovedAuthor()
+    // recognizes the book's own name and this book's approved comp-author
+    // list (lib/manualCompetitors.ts), so once one ASIN from a given
+    // approved author is tracked, later Generate runs skip piling on more
+    // ASINs from that same author.
+    const bookAuthor = snapshot.author ?? "";
+    const existingAuthors = new Set(
+      existing.map((row) => row.author?.trim().toLowerCase()).filter((a): a is string => Boolean(a))
+    );
+    const rows = Array.from(candidates.entries())
+      .filter(([asin]) => {
+        const meta = metadataByAsin.get(asin);
+        if (!meta?.author) return true;
+        const normalizedAuthor = meta.author.trim().toLowerCase();
+        if (bookAuthor && normalizedAuthor === bookAuthor.trim().toLowerCase()) return false;
+        if (isApprovedAuthor(meta.author, bookAuthor, ownAsin) && existingAuthors.has(normalizedAuthor)) return false;
+        return true;
+      })
+      .map(([asin, data]) => {
+        const meta = metadataByAsin.get(asin);
+        const meanRank = data.positions.reduce((sum, p) => sum + p, 0) / data.positions.length;
+        return {
+          book_id: bookId,
+          user_id: user.id,
+          competitor_asin: asin,
+          source: data.source,
+          notes: data.notes,
+          title: meta?.title ?? null,
+          author: meta?.author ?? null,
+          price: meta?.price ?? null,
+          bsr: meta?.bsr ?? null,
+          competitor_count: data.positions.length,
+          mean_rank: Number.isFinite(meanRank) ? meanRank : null,
+        };
+      });
 
     const { data, error } = await supabase
       .from("competitor_asins")

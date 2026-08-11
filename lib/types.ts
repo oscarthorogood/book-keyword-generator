@@ -137,6 +137,15 @@ export interface CompetitorAsin {
   rejection_reason: string | null;
   /** Which filter decided — asinFormat, selfAsin, … */
   rejected_by_filter: string | null;
+  /** Best-effort product metadata captured when the ASIN was generated (sql/17-competitor-asin-metadata.sql). */
+  title: string | null;
+  author: string | null;
+  price: number | null;
+  bsr: number | null;
+  /** Number of distinct discovery sources that surfaced this ASIN in one Generate ASINs run. */
+  competitor_count: number | null;
+  /** Average 1-based position across the discovery lists this ASIN appeared in. */
+  mean_rank: number | null;
   created_at: string;
   updated_at: string;
 }
