@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle } from "lucide-react";
+import { AlertTriangle, X } from "lucide-react";
 import Link from "next/link";
 
 interface SharedKeyword {
@@ -19,6 +19,13 @@ interface SharedKeyword {
 export default function CannibalizationPanel({ bookId, onResolved }: { bookId: string; onResolved?: () => void }) {
   const [shared, setShared] = useState<SharedKeyword[] | null>(null);
   const [resolvingText, setResolvingText] = useState<string | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+  const [dismissedForBookId, setDismissedForBookId] = useState(bookId);
+
+  if (dismissedForBookId !== bookId) {
+    setDismissedForBookId(bookId);
+    setDismissed(false);
+  }
 
   useEffect(() => {
     let active = true;
@@ -50,15 +57,24 @@ export default function CannibalizationPanel({ bookId, onResolved }: { bookId: s
     }
   }
 
-  if (!shared || shared.length === 0) return null;
+  if (!shared || shared.length === 0 || dismissed) return null;
 
   return (
     <div className="alert alert-error mb-6" role="alert">
       <AlertTriangle size={20} className="mt-0.5 shrink-0" />
       <div className="min-w-0 flex-1">
-        <p className="alert-title">
-          {shared.length} keyword{shared.length === 1 ? " is" : "s are"} also active on another book
-        </p>
+        <div className="flex items-start justify-between gap-2">
+          <p className="alert-title">
+            {shared.length} keyword{shared.length === 1 ? " is" : "s are"} also active on another book
+          </p>
+          <button
+            onClick={() => setDismissed(true)}
+            aria-label="Hide this warning"
+            className="btn btn-tertiary btn-sm shrink-0 p-1"
+          >
+            <X size={16} />
+          </button>
+        </div>
         <p className="mt-1 mb-2">
           Same keyword, active on two books, competes against itself in Amazon&apos;s auction.
         </p>
