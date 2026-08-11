@@ -26,13 +26,27 @@ export interface CapAndRankOptions {
 const DEFAULT_MAX_KEYWORDS_TOTAL = 150;
 const DEFAULT_MAX_PER_AD_GROUP = 50;
 
-/** Source trust tiers from the brief's §1 table — highest first. */
+/**
+ * Source trust tiers from the brief's §1 table — highest first. Highest:
+ * search-term-report/reverse-asin/decodo (proven or scored external signal).
+ * High: comp-name/comp-title/persona-llm. Medium: book-description/
+ * listing-metadata/storygraph-tags/library-subjects/critics-blurbs. Lowest:
+ * serpapi-organic/serpapi-related.
+ */
 const SOURCE_TIER: Record<string, number> = {
+  "search-term-report": 12,
+  "reverse-asin": 12,
+  decodo: 12,
   "listing-metadata": 10,
   "genre-metadata": 9,
   "comp-name": 9,
+  "comp-title": 9,
+  "persona-llm": 9,
   "buyer-intent": 8,
   "book-description": 7,
+  "storygraph-tags": 7,
+  "library-subjects": 7,
+  "critics-blurbs": 7,
   "genre-preset": 6,
   "google-autocomplete": 5,
   "youtube-autocomplete": 5,
@@ -41,6 +55,19 @@ const SOURCE_TIER: Record<string, number> = {
   "serpapi-organic": 2,
   "serpapi-related": 2,
 };
+
+/**
+ * Small bonus for candidates carrying real performance data (Search Term
+ * Report clicks/orders) — proven buyer behaviour beats a heuristic score.
+ * Scaled by orders, capped at +3 so it nudges rather than dominates ranking.
+ */
+function performanceBoost(candidate: KeywordCandidate): number {
+  if (candidate.orders === undefined && candidate.clicks === undefined) return 0;
+  const orders = candidate.orders ?? 0;
+  const clicks = candidate.clicks ?? 0;
+  const boost = orders * 1 + (clicks > 0 && orders === 0 ? 0.25 : 0);
+  return Math.min(3, Math.max(0, boost));
+}
 
 const BUYER_INTENT_TOKENS = ["book", "books", "novel", "series", "best", "new", "bestselling"];
 
@@ -91,6 +118,7 @@ export function scoreForRank(
 
   score += matchTypeScore(candidate.matchType);
   score += bidTier(candidate.bid);
+  score += performanceBoost(candidate);
 
   return score;
 }

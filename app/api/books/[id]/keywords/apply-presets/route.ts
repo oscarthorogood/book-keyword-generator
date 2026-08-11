@@ -102,6 +102,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const filterContext = buildFilterContext({
       title: snapshot.title,
+      asin: snapshot.asin,
       author: snapshot.author,
       seriesName: snapshot.seriesName,
       description: snapshot.description,

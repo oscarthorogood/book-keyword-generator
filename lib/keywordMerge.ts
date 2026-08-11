@@ -1,4 +1,5 @@
 import { cleanTaxonomyTerms, isCategoryNoise } from "./genre";
+import { manualCompetitors } from "./manualCompetitors";
 import { expandSynonyms } from "./synonyms";
 import { extractKeyPhrases } from "./textExtract";
 import { BookMetadata, KeywordCandidate, KeywordSource, MatchType, RelatedCompetitor } from "./types";
@@ -191,6 +192,31 @@ export function buildCompNameCandidates(competitors: RelatedCompetitor[]): Keywo
       const title = normalize(competitor.title);
       if (isUsableKeyword(title)) texts.add(title);
     }
+  }
+  return Array.from(texts).map((text) => ({ text, sources: ["comp-name" as const] }));
+}
+
+/**
+ * Comparable-author/title candidates from the manually curated library
+ * (lib/manualCompetitors.ts), keyed by this book's ASIN. Editorial rather
+ * than scraped — the same list backs authorDisambiguationFilter's approved
+ * comp-author allowlist and the persona-llm mention list, so a name only
+ * needs curating once. "expensive" authors are tagged so the caller can
+ * start their bids low and cap their keyword count tighter (see
+ * lib/keywordCapAndRank.ts).
+ */
+export function buildManualCompetitorCandidates(asin: string | undefined): KeywordCandidate[] {
+  const entry = asin ? manualCompetitors[asin] : undefined;
+  if (!entry) return [];
+
+  const texts = new Set<string>();
+  for (const author of entry.authors) {
+    const normalized = normalize(author.name);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
+  }
+  for (const title of entry.titles) {
+    const normalized = normalize(title);
+    if (isUsableKeyword(normalized)) texts.add(normalized);
   }
   return Array.from(texts).map((text) => ({ text, sources: ["comp-name" as const] }));
 }

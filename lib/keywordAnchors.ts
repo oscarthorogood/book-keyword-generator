@@ -18,6 +18,7 @@ import {
   DEMONYM_TERMS,
   UI_POLLUTION_TERMS,
 } from "./keywordFilterConfig";
+import { manualCompetitors } from "./manualCompetitors";
 
 export interface BookAnchors {
   /** Title, author, series, character names — the things only this book is about. */
@@ -68,6 +69,8 @@ export interface AnchorInput {
   compTitles: string[];
   reviewSnippets?: string[];
   keyTropes?: string[];
+  /** The book's own ASIN, used to pull its manually curated comps (lib/manualCompetitors.ts) into the anchor set. */
+  asin?: string;
   /** Explicit book profile (brief §2). Optional per book; empty lists are a valid, if permissive, profile. */
   bookProfile?: Partial<BookProfile>;
 }
@@ -334,6 +337,13 @@ export function buildBookAnchors(input: AnchorInput): BookAnchors {
     pushAnchor(comps, coreTitle(competitor.title), 4);
   }
   for (const title of input.compTitles) pushAnchor(comps, coreTitle(title), 4);
+  const manualEntry = input.asin ? manualCompetitors[input.asin] : undefined;
+  if (manualEntry) {
+    for (const author of manualEntry.authors) {
+      for (const variant of authorAnchors(author.name)) pushAnchor(comps, variant, 4);
+    }
+    for (const title of manualEntry.titles) pushAnchor(comps, coreTitle(title), 4);
+  }
   // Comparable authors readers name in reviews ("better than Ian Rankin") are
   // only trusted when the crawl already knows them as comps, so a stray
   // capitalised phrase in a review can't invent an anchor.

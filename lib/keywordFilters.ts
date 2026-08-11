@@ -29,6 +29,7 @@ import {
   ALLOWLISTED_MODIFIER_PHRASES,
   AMBIGUOUS_TITLE_TAILS,
   AUDIENCE_MISMATCH_TERMS,
+  AUTHOR_DISAMBIGUATION_PATTERN,
   BAD_SYNONYM_TERMS,
   BOOK_DOMAIN_WORDS,
   BOOK_INTENT_WORDS,
@@ -43,10 +44,12 @@ import {
   MARKET_LANGUAGES,
   MARKETPLACE_BOILERPLATE_TERMS,
   MARKETPLACE_SERP_SOURCES,
+  MEDIA_FORM_TERMS,
   METADATA_LABEL_TERMS,
   NON_MARKET_LANGUAGES,
   OFF_TOPIC_ENTITY_TERMS,
   PLATFORM_META_TERMS,
+  PLATFORM_TERMS,
   PRODUCT_NOUNS,
   PRODUCT_UNIT_PATTERNS,
   PRODUCT_WEAK_SIGNALS,
@@ -64,6 +67,7 @@ import {
   WEAK_CONNECTORS,
   WEB_AUTOCOMPLETE_SOURCES,
 } from "./keywordFilterConfig";
+import { isApprovedAuthor } from "./manualCompetitors";
 import type { KeywordCandidate, Marketplace, MatchType } from "./types";
 
 export type FilterVerdict = "pass" | "pause" | "reject";
@@ -98,6 +102,10 @@ export interface FilterContext {
   hasTranslationEdition?: boolean;
   /** Injectable for tests and for judging season windows deterministically. */
   now: Date;
+  /** The book's real author, for authorDisambiguationFilter. */
+  actualAuthor?: string;
+  /** The book's own ASIN, for the manual-competitors approved-comp-author lookup. */
+  asin?: string;
 }
 
 export type KeywordFilter = (keyword: string, context: FilterContext, sources: string[]) => FilterResult;
@@ -385,6 +393,74 @@ export const titleCollisionFilter: KeywordFilter = (keyword, context, sources) =
   }
 
   return PASS;
+};
+
+// --- 3f. Media-type collision (§5.1) ----------------------------------------
+
+/**
+ * Autocomplete drags a book title that also happens to be a song/album/
+ * episode name into music/TV/video vocabulary — "the unforgiven guitar tab"
+ * (Metallica), "the unforgiven full movie". Only fires when the keyword also
+ * carries one of this book's own title/author/series anchors, so genuinely
+ * unrelated media queries are left to offTopicEntityFilter.
+ */
+export const mediaTypeCollisionFilter: KeywordFilter = (keyword, context) => {
+  const media = firstMatch(keyword, MEDIA_FORM_TERMS);
+  if (!media) return PASS;
+  if (!hasAnyAnchor(keyword, context.anchors.bookSpecific)) return PASS;
+  return { verdict: "reject", code: "MEDIA_COLLISION", reason: `media-type collision: "${media}"` };
+};
+
+// --- 3g. Platform/marketplace noise (§5.4) ----------------------------------
+
+/**
+ * Streaming/social/marketplace platform vocabulary ("booktok", "netflix") is
+ * platform navigation on its own. Kept — paused, not rejected — only when
+ * the keyword also carries a book anchor plus book intent; otherwise dropped.
+ */
+export const platformNoiseFilter: KeywordFilter = (keyword, context) => {
+  const platform = firstMatch(keyword, PLATFORM_TERMS);
+  if (!platform) return PASS;
+
+  const hasAnchor = hasAnyAnchor(keyword, qualifyingAnchors(context.anchors));
+  const hasIntent = !!firstMatch(keyword, context.anchors.bookIntent);
+  if (hasAnchor && hasIntent) {
+    return { verdict: "pause", code: "PLATFORM_NOISE", reason: `platform term "${platform}" with book intent` };
+  }
+  return { verdict: "reject", code: "PLATFORM_NOISE", reason: `platform/marketplace noise: "${platform}"` };
+};
+
+// --- 3h. Author-surname disambiguation (§5.2) -------------------------------
+
+/**
+ * "[first] [last] mcallister book series" is autocomplete dragging in an
+ * unrelated author who shares a surname with a series character or comp.
+ * The captured name is checked against the book's actual author and its
+ * approved comp-author allowlist (lib/manualCompetitors.ts); anything else
+ * is a different person entirely and is dropped.
+ */
+export const authorDisambiguationFilter: KeywordFilter = (keyword, context) => {
+  const match = keyword.match(AUTHOR_DISAMBIGUATION_PATTERN);
+  if (!match) return PASS;
+
+  const name = match[1];
+  const surname = name.split(" ")[1];
+  const actualAuthor = context.actualAuthor ?? "";
+
+  // Only a name-shaped phrase whose surname is one this book already knows
+  // about (the real author, or a comp/character surname among the anchors)
+  // is a candidate for disambiguation at all — this keeps generic genre
+  // phrases like "police procedural books" out of the filter entirely.
+  const knownSurnames = new Set(
+    [actualAuthor, ...context.anchors.comps, ...context.anchors.bookSpecific]
+      .map((known) => known.trim().toLowerCase().split(" ").pop())
+      .filter((token): token is string => !!token)
+  );
+  if (!knownSurnames.has(surname)) return PASS;
+
+  if (isApprovedAuthor(name, actualAuthor, context.asin)) return PASS;
+
+  return { verdict: "reject", code: "AUTHOR_DISAMBIGUATION", reason: `"${name}" is not this book's author or an approved comp` };
 };
 
 // --- 4. Review n-gram quality ---------------------------------------------
@@ -707,6 +783,9 @@ export const KEYWORD_FILTER_PIPELINE: Array<{ name: string; filter: KeywordFilte
   { name: "singleWord", filter: singleWordFilter },
   { name: "phraseShape", filter: phraseShapeFilter },
   { name: "titleCollision", filter: titleCollisionFilter },
+  { name: "mediaTypeCollision", filter: mediaTypeCollisionFilter },
+  { name: "platformNoise", filter: platformNoiseFilter },
+  { name: "authorDisambiguation", filter: authorDisambiguationFilter },
   { name: "anchorRelevance", filter: anchorRelevanceFilter },
 ];
 
@@ -831,6 +910,8 @@ export function buildFilterContext(input: FilterContextInput): FilterContext {
     isKindleUnlimited: input.isKindleUnlimited,
     hasTranslationEdition: input.hasTranslationEdition,
     now: input.now ?? new Date(),
+    actualAuthor: input.author,
+    asin: input.asin,
   };
 }
 

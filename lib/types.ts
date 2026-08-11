@@ -36,7 +36,34 @@ export type KeywordSource =
   /** SerpApi Amazon Autocomplete — the suggestions readers see while typing. */
   | "serpapi-autocomplete"
   /** Applied from the user's genre preset library (§3) rather than generated. */
-  | "genre-preset";
+  | "genre-preset"
+  /** Amazon Ads Search Term Report rows, imported from CSV — proven buyer-intent terms. */
+  | "search-term-report"
+  /** Reverse-ASIN lookups (Helium 10 Cerebro etc.) against competitor ASINs. */
+  | "reverse-asin"
+  /** LLM-generated queries, run through the full filter chain like everything else. */
+  | "persona-llm"
+  /** StoryGraph mood/pace tags for the ISBN/ASIN. */
+  | "storygraph-tags"
+  /** Library-of-Congress / library catalogue subject headings. */
+  | "library-subjects"
+  /** Descriptor phrases and comp relationships mined from critic blurbs/listicles. */
+  | "critics-blurbs"
+  /** Decodo scrape/export data (CSV or JSON). */
+  | "decodo";
+
+/**
+ * Intent-segment taxonomy for Amazon Ads keyword strategy (distinct from the
+ * 20-category KeywordCategory taxonomy below). See lib/keywordIntent.ts.
+ */
+export type IntentSegment =
+  | "alpha-core"
+  | "brand"
+  | "comp-author"
+  | "comp-title"
+  | "genre-core"
+  | "mood-setting"
+  | "discovery-longtail";
 
 /**
  * The 20-category keyword-intent taxonomy — see lib/keywordCategories.ts for
@@ -77,6 +104,26 @@ export interface KeywordCandidate {
   score?: number;
   /** Which of the 20 keyword-intent categories this came from, if the categorized generator produced it. */
   category?: KeywordCategory;
+  /** Amazon Ads intent segment (alpha-core, brand, comp-author, comp-title, genre-core, mood-setting, discovery-longtail). */
+  intentSegment?: IntentSegment;
+  /** 1-5, how specific/high-intent this candidate is. Used by cap-and-rank. */
+  specificity?: number;
+  /** Suggested match type, when the source has an opinion (e.g. search-term-report exact winners). */
+  matchType?: MatchType;
+  /** Performance data, when the candidate comes from (or is matched against) a Search Term Report. */
+  clicks?: number;
+  orders?: number;
+  cost?: number;
+  acos?: number;
+}
+
+/** A rejected/paused keyword rolled up for Amazon Ads negative-keyword setup. */
+export interface NegativeSuggestion {
+  text: string;
+  matchType: Extract<MatchType, "phrase" | "exact">;
+  reasonCode: string;
+  reason?: string;
+  source?: KeywordSource | string;
 }
 
 export interface BookMetadata {
