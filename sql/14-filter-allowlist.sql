@@ -24,5 +24,6 @@ CREATE INDEX IF NOT EXISTS idx_filter_allowlist_user_id ON filter_allowlist(user
 
 ALTER TABLE filter_allowlist ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Users manage own filter allowlist" ON filter_allowlist
+DROP POLICY IF EXISTS "Users manage own filter allowlist" ON filter_allowlist;
+CREATE POLICY "Users manage own filter allowlist" ON filter_allowlist
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);

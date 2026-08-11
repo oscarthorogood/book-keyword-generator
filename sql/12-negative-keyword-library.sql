@@ -32,5 +32,6 @@ CREATE INDEX IF NOT EXISTS idx_negative_keywords_book_id ON negative_keywords(bo
 
 ALTER TABLE negative_keywords ENABLE ROW LEVEL SECURITY;
 
-CREATE POLICY IF NOT EXISTS "Users manage own negative keywords" ON negative_keywords
+DROP POLICY IF EXISTS "Users manage own negative keywords" ON negative_keywords;
+CREATE POLICY "Users manage own negative keywords" ON negative_keywords
   FOR ALL USING (auth.uid() = user_id) WITH CHECK (auth.uid() = user_id);
