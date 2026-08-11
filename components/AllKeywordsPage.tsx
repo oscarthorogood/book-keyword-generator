@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Search } from "lucide-react";
 import Link from "next/link";
 import type { AggregatedKeywordRow } from "@/lib/allKeywordsAggregate";
+import { isCannibalized } from "@/lib/cannibalization";
 
 interface BookRef {
   id: string;
@@ -50,6 +51,7 @@ export default function AllKeywordsPage() {
   const [statusFilter, setStatusFilter] = useState<"all" | string>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | string>("all");
   const [specificityFilter, setSpecificityFilter] = useState<"all" | number>("all");
+  const [sharedOnly, setSharedOnly] = useState(false);
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
 
   useEffect(() => {
@@ -77,9 +79,12 @@ export default function AllKeywordsPage() {
       if (statusFilter !== "all" && !k.statuses.includes(statusFilter)) return false;
       if (sourceFilter !== "all" && !k.sources.includes(sourceFilter)) return false;
       if (specificityFilter !== "all" && !k.specificities.includes(specificityFilter)) return false;
+      if (sharedOnly && !isCannibalized(k)) return false;
       return true;
     });
-  }, [keywords, search, bookFilter, statusFilter, sourceFilter, specificityFilter]);
+  }, [keywords, search, bookFilter, statusFilter, sourceFilter, specificityFilter, sharedOnly]);
+
+  const sharedCount = useMemo(() => keywords.filter(isCannibalized).length, [keywords]);
 
   const page = filtered.slice(0, visibleCount);
 
@@ -210,6 +215,20 @@ export default function AllKeywordsPage() {
                   </option>
                 ))}
               </select>
+
+              {sharedCount > 0 && (
+                <button
+                  onClick={() => {
+                    setSharedOnly((v) => !v);
+                    resetPaging();
+                  }}
+                  className={`btn ${sharedOnly ? "btn-primary" : "btn-secondary"}`}
+                  aria-pressed={sharedOnly}
+                  title="Same keyword active on 2+ books — competes against itself in Amazon's auction"
+                >
+                  Shared across books ({sharedCount})
+                </button>
+              )}
             </div>
 
             <div className="table-wrap overflow-x-auto">
@@ -234,7 +253,17 @@ export default function AllKeywordsPage() {
                   {page.map((row) => (
                     <tr key={row.key}>
                       <td>
-                        <p className="cell-primary">{row.text}</p>
+                        <p className="cell-primary">
+                          {row.text}
+                          {isCannibalized(row) && (
+                            <span
+                              className="badge badge-warning ml-2"
+                              title="Active on 2+ books — competes against itself in Amazon's auction"
+                            >
+                              Shared
+                            </span>
+                          )}
+                        </p>
                       </td>
                       <td>
                         <div className="flex flex-wrap gap-1">

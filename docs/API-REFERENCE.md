@@ -393,6 +393,21 @@ uses. Response: `{ genresTotal, keywordsAdded, keywordsTotal }`.
 
 ---
 
+## Cannibalization Endpoint (Enhancements spec §14)
+
+### GET/POST /api/books/[id]/keywords/cannibalization
+
+- `GET` — this book's active keywords that are also active on another of
+  the user's books, each with `otherBooks` and a `suggestedOwnerBookId`
+  (highest specificity, tie-broken by bid). Same-author-only matches are
+  excluded (brand defense, not cannibalization).
+- `POST` — `{ text }` pauses every *other* book's active copy of that
+  keyword, keeping this book's copy active.
+
+**Implementation:** `app/api/books/[id]/keywords/cannibalization/route.ts`
+
+---
+
 ## Admin Endpoints
 
 ### GET /api/admin/access

@@ -13,17 +13,22 @@
 export interface AllKeywordsSourceRow {
   book_id: string;
   book_title: string;
+  book_author: string | null;
   text: string;
   status: string;
   match_type: string;
   source: string | null;
   specificity: number | null;
+  bid: number | null;
 }
 
 export interface AggregatedKeywordBook {
   bookId: string;
   bookTitle: string;
+  bookAuthor: string | null;
   status: string;
+  specificity: number | null;
+  bid: number | null;
 }
 
 export interface AggregatedKeywordRow {
@@ -63,7 +68,14 @@ export function aggregateKeywordsAcrossBooks(rows: AllKeywordsSourceRow[]): Aggr
       return {
         key,
         text: groupRows[0].text,
-        books: groupRows.map((r) => ({ bookId: r.book_id, bookTitle: r.book_title, status: r.status })),
+        books: groupRows.map((r) => ({
+          bookId: r.book_id,
+          bookTitle: r.book_title,
+          bookAuthor: r.book_author,
+          status: r.status,
+          specificity: r.specificity,
+          bid: r.bid,
+        })),
         statuses: uniqueSorted(groupRows.map((r) => r.status)),
         matchTypes: uniqueSorted(groupRows.map((r) => r.match_type)),
         sources: uniqueSorted(groupRows.map((r) => r.source ?? "unknown")),

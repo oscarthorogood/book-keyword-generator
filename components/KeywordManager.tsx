@@ -15,6 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import CannibalizationPanel from "./CannibalizationPanel";
 
 type MatchType = "broad" | "phrase" | "exact";
 type KeywordStatus = "active" | "paused" | "negative" | "archived" | "rejected";
@@ -412,6 +413,8 @@ export default function KeywordManager({
           </p>
         </div>
       </div>
+
+      <CannibalizationPanel bookId={bookId} onResolved={reload} />
 
       {/* Primary actions, as the reference screens' action-card row. */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">

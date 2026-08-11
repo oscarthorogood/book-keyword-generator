@@ -19,22 +19,26 @@ export async function GET() {
 
     const { data: books, error: booksError } = await supabase
       .from("books")
-      .select("id, title")
+      .select("id, title, author")
       .eq("user_id", user.id);
     if (booksError) return Response.json({ error: booksError.message }, { status: 400 });
 
-    const titleByBookId = new Map((books ?? []).map((b) => [b.id, b.title]));
+    const bookById = new Map((books ?? []).map((b) => [b.id, b]));
 
     const { data: keywords, error: keywordsError } = await supabase
       .from("keywords")
-      .select("book_id, text, status, match_type, source, specificity")
+      .select("book_id, text, status, match_type, source, specificity, bid")
       .eq("user_id", user.id)
       .neq("status", "negative");
     if (keywordsError) return Response.json({ error: keywordsError.message }, { status: 400 });
 
     const rows = (keywords ?? [])
-      .filter((k) => titleByBookId.has(k.book_id))
-      .map((k) => ({ ...k, book_title: titleByBookId.get(k.book_id)! }));
+      .filter((k) => bookById.has(k.book_id))
+      .map((k) => ({
+        ...k,
+        book_title: bookById.get(k.book_id)!.title,
+        book_author: bookById.get(k.book_id)!.author,
+      }));
 
     return Response.json({
       success: true,

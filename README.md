@@ -155,6 +155,18 @@ keyword does this for you, global-scoped by default, and warns (without
 blocking) if the term collides with an active keyword on any of your books.
 Requires `sql/12-negative-keyword-library.sql`.
 
+### Cross-book cannibalization
+
+The same keyword active on two of your books competes against itself in
+Amazon's auction. `/keywords` flags every such keyword with a **Shared**
+badge (and a toggle to filter down to just those), and each affected book's
+own keyword manager shows a callout with a one-click **keep here, pause
+elsewhere** action, defaulting to whichever book's copy is more specific
+(tie-broken by bid — there's no performance data yet to rank by, see the
+`GET /api/books/[id]/keywords/cannibalization` reference). Same-author
+books sharing an author-name keyword are exempted — that's brand defense,
+not cannibalization.
+
 ### Exporting to Amazon Ads
 
 "Export bulksheet" (`GET /api/books/[id]/keywords/export`) writes a
