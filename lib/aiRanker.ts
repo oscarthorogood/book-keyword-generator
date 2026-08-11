@@ -1,4 +1,5 @@
 import { callOpenRouter, isOpenRouterConfigured } from "./llmClient";
+import { callGroq, isGroqConfigured } from "./groqClient";
 import { KeywordCandidate } from "./types";
 
 /**
@@ -12,18 +13,12 @@ import { KeywordCandidate } from "./types";
  * Tries Google Gemini's free tier (aistudio.google.com — no credit card,
  * generous daily limits) first, per the "keep this free" constraint the rest
  * of the app follows. Request/response shape is written against Gemini's
- * documented generateContent + responseSchema contract but unverified
- * against a live call from this environment (network-restricted sandbox) —
- * verify after deploy.
+ * documented generateContent + responseSchema contract.
  *
- * If Gemini isn't configured (no `GEMINI_API_KEY`) or its call fails, this
- * falls back to OpenRouter (lib/llmClient.ts) — the same free-tier chat
- * client already used for persona-driven keyword generation
- * (lib/llmPersonaSource.ts), so a deployment with only `OPENROUTER_API_KEY`
- * set still gets an AI relevance pass. OpenRouter's free models don't offer
- * Gemini's structured `responseSchema` contract, so the prompt asks for raw
- * JSON and the response is parsed leniently (fenced or bare). Either path
- * fails soft to null (never blocks the export) on any error.
+ * If Gemini isn't configured (no `GEMINI_API_KEY`) or its call fails, falls
+ * back to OpenRouter (lib/llmClient.ts). If OpenRouter also isn't configured
+ * or fails, falls back to Groq (lib/groqClient.ts). Either path fails soft
+ * to null (never blocks the export) on any error.
  */
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -36,7 +31,7 @@ const MAX_DESCRIPTION_CONTEXT_CHARS = 1500;
 const MAX_MARKDOWN_CONTEXT_CHARS = 6000;
 
 export function isAiRankingConfigured(): boolean {
-  return !!GEMINI_API_KEY || isOpenRouterConfigured();
+  return !!GEMINI_API_KEY || isOpenRouterConfigured() || isGroqConfigured();
 }
 
 export type AiKeywordCategory = "tropes" | "comp-names" | "drop";
@@ -151,9 +146,9 @@ const RESPONSE_SCHEMA = {
 
 /**
  * Extracts a `{ "keywords": [...] }` payload from free text. Gemini's
- * `responseSchema` guarantees bare JSON; OpenRouter's free models don't, so
- * they're prompted to return JSON only but sometimes still wrap it in a
- * ```json fence or add a stray sentence — strip a fence if present, then
+ * `responseSchema` guarantees bare JSON; OpenRouter's and Groq's free models
+ * don't, so they're prompted to return JSON only but sometimes still wrap it
+ * in a ```json fence or add a stray sentence — strip a fence if present, then
  * fall back to the first `{...}` block in the text before giving up.
  */
 function parseRankedKeywordsJson(text: string): AiRankedKeyword[] | null {
@@ -252,11 +247,48 @@ async function rankWithOpenRouter(prompt: string): Promise<AiRankedKeyword[] | n
 }
 
 /**
+ * Groq leg of rankKeywordsWithAi — the final fallback when both Gemini and
+ * OpenRouter aren't configured or failed. Uses Groq's fast LLaMA inference.
+ * Same JSON prompt/response contract as the OpenRouter leg.
+ */
+async function rankWithGroq(prompt: string): Promise<AiRankedKeyword[] | null> {
+  if (!isGroqConfigured()) return null;
+
+  try {
+    const { text } = await callGroq(
+      [
+        {
+          role: "system",
+          content:
+            "You are an Amazon Sponsored Products keyword relevance judge. Respond with ONLY a JSON object, no commentary and no markdown code fence.",
+        },
+        {
+          role: "user",
+          content: `${prompt}\n\nRespond with exactly this JSON shape: {"keywords": [{"text": string, "category": "tropes" | "comp-names" | "drop", "score": integer 0-100}, ...]}`,
+        },
+      ],
+      { temperature: 0.1, maxTokens: 4096 }
+    );
+
+    const parsed = parseRankedKeywordsJson(text);
+    if (!parsed) {
+      console.error("[rankKeywordsWithAi] Groq response did not parse as the expected JSON shape");
+      return null;
+    }
+    return parsed;
+  } catch (err) {
+    console.error("[rankKeywordsWithAi] Groq call failed:", err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
  * Sends the pre-filtered shortlist to an LLM for a final relevance pass:
  * Gemini first when `GEMINI_API_KEY` is set, falling back to OpenRouter
- * (lib/llmClient.ts) when Gemini isn't configured or its call fails. Returns
- * null (triggering the caller's heuristic-only fallback) if neither is
- * configured, both calls fail, or the response doesn't parse — never throws.
+ * (lib/llmClient.ts) when Gemini isn't configured or its call fails, then
+ * falling back to Groq (lib/groqClient.ts) as a final option. Returns null
+ * (triggering the caller's heuristic-only fallback) if none are configured,
+ * all calls fail, or the response doesn't parse — never throws.
  */
 export async function rankKeywordsWithAi(
   context: BookContext,
@@ -282,7 +314,10 @@ export async function rankKeywordsWithAi(
   const geminiResult = await rankWithGemini(prompt);
   if (geminiResult) return geminiResult;
 
-  return rankWithOpenRouter(prompt);
+  const openRouterResult = await rankWithOpenRouter(prompt);
+  if (openRouterResult) return openRouterResult;
+
+  return rankWithGroq(prompt);
 }
 
 /**
