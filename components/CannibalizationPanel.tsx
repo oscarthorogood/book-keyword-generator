@@ -20,10 +20,15 @@ export default function CannibalizationPanel({ bookId, onResolved }: { bookId: s
   const [shared, setShared] = useState<SharedKeyword[] | null>(null);
   const [resolvingText, setResolvingText] = useState<string | null>(null);
   const [dismissed, setDismissed] = useState(false);
+  const [dismissedForBookId, setDismissedForBookId] = useState(bookId);
+
+  if (dismissedForBookId !== bookId) {
+    setDismissedForBookId(bookId);
+    setDismissed(false);
+  }
 
   useEffect(() => {
     let active = true;
-    setDismissed(false);
     fetch(`/api/books/${bookId}/keywords/cannibalization`)
       .then((res) => res.json().catch(() => ({})))
       .then((body) => {
