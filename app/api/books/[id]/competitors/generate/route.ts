@@ -14,6 +14,7 @@ import {
 import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazonAds";
 import { getSerpApiKeywordCandidates } from "@/lib/serpApiKeywords";
 import { fetchDecodoKeywordRows, isDecodoConfigured } from "@/lib/decodoClient";
+import { buildDecodoCandidates } from "@/lib/decodoSource";
 import { buildPersonaLlmCandidates } from "@/lib/llmPersonaSource";
 import { buildGroqPersonaCandidates } from "@/lib/groqKeywordSource";
 import { extractAsinCandidates } from "@/lib/keywordMerge";
@@ -161,6 +162,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       serpapi: serpApiResult.candidates,
       "persona-llm": personaLlmCandidates,
       "groq-persona": groqPersonaCandidates,
+      decodo:
+        liveDecodoRows.length > 0
+          ? buildDecodoCandidates(
+              { title: snapshot.title, author: snapshot.author, seriesName: snapshot.seriesName },
+              liveDecodoRows
+            )
+          : [],
     };
 
     for (const [source, candidatesList] of Object.entries(liveGroups)) {
