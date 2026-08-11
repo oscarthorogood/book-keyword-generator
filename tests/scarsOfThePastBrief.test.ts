@@ -262,6 +262,43 @@ describe("brief §5.11 cap-and-rank", () => {
     // The guaranteed listing-metadata slot always survives the cap.
     expect(kept.some((entry) => entry.text === "scars of the past")).toBe(true);
   });
+
+  it("keeps a high-specificity search-term-report keyword over a flood of low-quality noisy-source keywords", () => {
+    const anchors = buildBookAnchors({
+      title: "Scars of the Past",
+      author: "Jacqueline New",
+      seriesName: "DCI McNeill Crime Thriller",
+      genreTerms: ["scottish crime", "crime thriller"],
+      genreFamilies: ["mystery-thriller"],
+      categoryPath: ["Crime, Thriller & Mystery"],
+      competitors: [],
+      compTitles: [],
+    });
+
+    // A buyer-intent search-term-report winner with real order data...
+    const buyerIntentKeyword = {
+      text: "scars of the past dci mcneill book 1",
+      sources: ["search-term-report"] as KeywordSource[],
+      matchType: "exact" as const,
+      specificity: 5,
+      orders: 6,
+      clicks: 40,
+    };
+
+    // ...against a flood of low-quality noisy-source candidates that exceed
+    // the per-ad-group cap on their own.
+    const noisyCandidates = Array.from({ length: 30 }, (_, index) => ({
+      text: `generic noisy keyword ${index}`,
+      sources: ["serpapi-related"] as KeywordSource[],
+    }));
+
+    const { kept } = capAndRank([buyerIntentKeyword, ...noisyCandidates], anchors, {
+      maxKeywordsTotal: 10,
+      maxPerAdGroup: 10,
+    });
+
+    expect(kept.some((entry) => entry.text === buyerIntentKeyword.text)).toBe(true);
+  });
 });
 
 describe("brief F11 budget defaults", () => {
