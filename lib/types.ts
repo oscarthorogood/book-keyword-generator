@@ -149,7 +149,12 @@ export interface CompetitorKeyword {
   intent_segment: IntentSegment | null;
   match_type: MatchType;
   specificity: number | null;
-  status: "active" | "paused" | "archived";
+  status: "active" | "paused" | "negative" | "archived" | "rejected";
+  bid: number | null;
+  /** Why the re-run-filters pass rejected or paused this row (lib/keywordFilters.ts). */
+  rejection_reason: string | null;
+  /** Which filter decided — uiPollution, offTopicEntity, anchorRelevance, … */
+  rejected_by_filter: string | null;
   created_at: string;
   updated_at: string;
 }
