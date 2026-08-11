@@ -141,6 +141,10 @@ export default function KeywordManager({
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [summary, setSummary] = useState<GenerateSummary | null>(null);
   const [keyTropes, setKeyTropes] = useState("");
+  // Amazon's own guidance is 25-50 keywords per ad group, so 50 — the top of
+  // that range — is the recommended default. Applies per ad group (tropes,
+  // comp names), each still bounded by the book-library hard ceiling server-side.
+  const [resultCap, setResultCap] = useState(50);
 
   useEffect(() => {
     let active = true;
@@ -318,6 +322,7 @@ export default function KeywordManager({
             .split(/[\n,]/)
             .map((t) => t.trim())
             .filter(Boolean),
+          resultCap,
         }),
       });
       const body = await res.json().catch(() => ({}));
@@ -560,6 +565,26 @@ export default function KeywordManager({
           <span className="field-hint" id="key-tropes-hint">
             One per line or comma separated. These are the highest-trust signal in the run — they seed the
             trope categories and anchor relevance.
+          </span>
+
+          <label className="field-label mt-4" htmlFor="keyword-result-cap">
+            Result cap
+          </label>
+          <select
+            id="keyword-result-cap"
+            value={resultCap}
+            onChange={(e) => setResultCap(Number(e.target.value))}
+            className="input w-auto"
+          >
+            <option value={25}>25 keywords</option>
+            <option value={50}>50 keywords (recommended)</option>
+            <option value={100}>100 keywords</option>
+            <option value={150}>150 keywords</option>
+            <option value={300}>300 keywords (no cap)</option>
+          </select>
+          <span className="field-hint">
+            Applies per ad group (tropes, comp names). Amazon recommends 25-50 keywords per ad group for
+            focused targeting.
           </span>
 
           {generateError && (

@@ -30,9 +30,19 @@ const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
 /** Bounds on the live scrapeProductPage metadata pass — a generate run can surface far more ASINs than are worth fetching within the serverless timeout. */
 const MAX_METADATA_FETCHES = 40;
 const METADATA_CONCURRENCY = 5;
+/**
+ * Default cap on how many competitor ASINs one Generate run inserts, when the
+ * caller doesn't request a specific cap. Matches MAX_METADATA_FETCHES so, by
+ * default, every inserted row gets a live metadata fetch rather than landing
+ * with null title/author/price/bsr.
+ */
+const DEFAULT_COMPETITOR_CAP = 40;
+/** Ceiling on the user-facing cap — a book's competitor set is meant to stay a shortlist, not the entire discovery pool. */
+const MAX_COMPETITOR_CAP = 200;
 
 /**
  * POST /api/books/[id]/competitors/generate
+ * Body: { resultCap?: number }
  *
  * Pulls competitor ASINs from the stored snapshot plus all live API sources
  * (Ads API, autocomplete engines, SerpApi, Persona-LLM, Groq-Persona, Decodo)
@@ -44,6 +54,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const user = await currentUser();
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+    const body = await request.json().catch(() => ({}));
+    const requestedCap =
+      typeof body.resultCap === "number" && Number.isFinite(body.resultCap) && body.resultCap > 0
+        ? Math.floor(body.resultCap)
+        : DEFAULT_COMPETITOR_CAP;
+    const competitorCap = Math.min(requestedCap, MAX_COMPETITOR_CAP);
 
     const supabase = await supabaseServer();
     const loaded = await loadBookWithSnapshot(supabase, bookId, user.id);
@@ -196,11 +213,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return Response.json({ success: true, candidateCount: totalCrawled, insertedCount: 0 });
     }
 
+    // Apply the user-facing cap before enrichment/insertion, keeping the
+    // best-ranked candidates (lowest mean discovery position) rather than an
+    // arbitrary prefix — the cap should keep the strongest matches, not just
+    // whichever source happened to run first.
+    const selected = new Map(
+      Array.from(candidates.entries())
+        .sort(([, a], [, b]) => {
+          const meanA = a.positions.reduce((sum, p) => sum + p, 0) / a.positions.length;
+          const meanB = b.positions.reduce((sum, p) => sum + p, 0) / b.positions.length;
+          return meanA - meanB;
+        })
+        .slice(0, competitorCap)
+    );
+
     // 3. Minimal metadata (spec task 1) — reuse scrapeProductPage (lib/scrape.ts),
     // same source the comp-crawl itself uses, rather than a new fetcher.
     // Best-effort and bounded: a book can surface far more candidates than
     // are worth a live product-page fetch per Generate run.
-    const asinsToEnrich = Array.from(candidates.keys()).slice(0, MAX_METADATA_FETCHES);
+    const asinsToEnrich = Array.from(selected.keys()).slice(0, MAX_METADATA_FETCHES);
     const metadataByAsin = new Map<string, { title?: string; author?: string; price?: number; bsr?: number }>();
     for (let i = 0; i < asinsToEnrich.length; i += METADATA_CONCURRENCY) {
       const batch = asinsToEnrich.slice(i, i + METADATA_CONCURRENCY);
@@ -235,7 +266,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const existingAuthors = new Set(
       existing.map((row) => row.author?.trim().toLowerCase()).filter((a): a is string => Boolean(a))
     );
-    const rows = Array.from(candidates.entries())
+    const rows = Array.from(selected.entries())
       .filter(([asin]) => {
         const meta = metadataByAsin.get(asin);
         if (!meta?.author) return true;

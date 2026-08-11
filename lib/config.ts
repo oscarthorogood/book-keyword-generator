@@ -30,34 +30,10 @@ export const KEYWORD_CONFIG = {
   // and PRODUCT_TARGET_MAX in lib/productTargets.ts, next to the scoring code
   // that reads them. Duplicating them here previously left two contradicting
   // sets of numbers, with the copies in this file silently unused.
-  ALL_KEYWORD_SOURCES: [
-    "ads-api",
-    "autocomplete",
-    "google-autocomplete",
-    "youtube-autocomplete",
-    "duckduckgo-autocomplete",
-    "comp-title",
-    "comp-name",
-    "genre-metadata",
-    "buyer-intent",
-    "book-content",
-    "review-language",
-    "book-description",
-    "customer-qna",
-    "synonym",
-    "wikipedia",
-    "wikidata",
-    "loc-subjects",
-    "author-catalog",
-    "goodreads-tags",
-    "user-tag",
-    "key-trope", // User-provided tropes/themes/settings from the form
-    "amazon-recs", // "Frequently bought together" / "Compare with similar items"
-    "firecrawl", // LLM-extracted categories/keywords/features from the product page
-    "listing-metadata", // <title>, meta keywords, URL slug, variation swatches
-    "serpapi-related", // Amazon's own "related searches" for a seed term
-    "serpapi-organic", // Competitor titles/authors ranking for a seed term
-    "serpapi-autocomplete", // Amazon search-bar suggestions via SerpApi
-  ] as const,
+  //
+  // The same applies to the source list: the live one is ALL_KEYWORD_SOURCES
+  // in app/api/books/[id]/keywords/generate/route.ts, next to the pipeline
+  // that reads it. A duplicate used to live here too — always stale, never
+  // imported by anything — and was removed.
   ALL_KEYWORD_GROUP_TYPES: ["tropes", "comp-names", "product-targeting"] as const,
 };
