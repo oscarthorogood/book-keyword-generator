@@ -132,9 +132,28 @@ export function normalizeKeyword(text: string): string {
     .trim();
 }
 
+// containsTerm is the pipeline's innermost operation — every filter tests
+// every keyword against one or more term lists (blocklists, anchors), so a
+// single generate/filter run on a full-size book (up to BOOK_KEYWORD_MAX +
+// BOOK_COMP_NAME_MAX keywords) can call it hundreds of thousands of times.
+// `term` comes from a bounded vocabulary (the config blocklists plus this
+// book's own anchors), so caching the compiled pattern per term — instead of
+// recompiling it on every call — is a straightforward, unbounded-growth-free
+// win.
+const TERM_PATTERN_CACHE = new Map<string, RegExp>();
+
+function termPattern(term: string): RegExp {
+  let pattern = TERM_PATTERN_CACHE.get(term);
+  if (!pattern) {
+    pattern = new RegExp(`(^|[^a-z0-9])${escapeRegExp(term)}([^a-z0-9]|$)`, "i");
+    TERM_PATTERN_CACHE.set(term, pattern);
+  }
+  return pattern;
+}
+
 /** Word-boundary containment — "pages" must not match "page turner", "open" must not match "opening". */
 export function containsTerm(text: string, term: string): boolean {
-  return new RegExp(`(^|[^a-z0-9])${escapeRegExp(term)}([^a-z0-9]|$)`, "i").test(text);
+  return termPattern(term).test(text);
 }
 
 function words(text: string): string[] {
@@ -149,10 +168,30 @@ function hasAnyAnchor(text: string, anchors: string[]): string | undefined {
   return anchors.find((anchor) => anchor.length >= 3 && containsTerm(text, anchor));
 }
 
+// `context` (and its anchors) is built once per generate/filter run and then
+// reused for every keyword in the batch, but withoutAnchoredTerms used to
+// redo its O(terms × anchors) filtering from scratch on every single call —
+// same context, same terms list, same result, recomputed per keyword across
+// up to five call sites in the pipeline below. Cached per (context, terms)
+// pair via WeakMaps, so the result is computed once per batch and reused for
+// the rest of it; both WeakMaps drop their entries once the run's context
+// object is no longer referenced, so this can't leak across books.
+const ANCHORED_TERMS_CACHE = new WeakMap<FilterContext, WeakMap<string[], string[]>>();
+
 /** Blocklist terms that are part of what this book *is* are not blocklist terms for this book. */
 function withoutAnchoredTerms(terms: string[], context: FilterContext): string[] {
+  let perContext = ANCHORED_TERMS_CACHE.get(context);
+  if (!perContext) {
+    perContext = new WeakMap();
+    ANCHORED_TERMS_CACHE.set(context, perContext);
+  }
+  const cached = perContext.get(terms);
+  if (cached) return cached;
+
   const anchors = qualifyingAnchors(context.anchors);
-  return terms.filter((term) => !anchors.some((anchor) => containsTerm(anchor, term)));
+  const filtered = terms.filter((term) => !anchors.some((anchor) => containsTerm(anchor, term)));
+  perContext.set(terms, filtered);
+  return filtered;
 }
 
 function isWebAutocomplete(sources: string[]): boolean {
