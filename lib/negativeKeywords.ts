@@ -22,7 +22,18 @@ import type { MatchType } from "./types";
  * Filters whose rejections represent a real, unwanted search intent — the
  * reader who typed this wants something the book is not.
  */
-const INTENT_FILTERS = new Set(["offTopicEntity", "languageMarket", "formatAvailability"]);
+const INTENT_FILTERS = new Set([
+  "offTopicEntity",
+  "languageMarket",
+  "formatAvailability",
+  // Brief §5.10 bonus: high-volume drops (PRODUCT, GIFT_INTENT, BOILERPLATE,
+  // TITLE_COLLISION) are strong, well-evidenced negatives — a reader who
+  // typed one of these wants a mug or a Warcraft quest, not this book.
+  "physicalProduct",
+  "bookIntentGate",
+  "marketplaceBoilerplate",
+  "titleCollision",
+]);
 
 export interface NegativeKeyword {
   text: string;
