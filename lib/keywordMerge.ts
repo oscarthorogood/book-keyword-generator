@@ -850,15 +850,29 @@ export const BOOK_COMP_NAME_MAX = 120;
 const COMP_NAME_SOURCES: KeywordSource[] = ["comp-name", "amazon-recs"];
 
 /**
+ * Per-book match-type strategy (Enhancements spec §21, AUDIT §7.1-7.3):
+ * the default triple (Broad+Phrase+Exact per keyword, via `pickMatchType`)
+ * triples row count and splits performance data across match types for the
+ * same term. "phrase-only" is the competitor-validated alternative — every
+ * non-comp keyword runs Phrase, never Broad, so there's one row per term to
+ * evaluate. Comp names still run Exact under either profile: a bare name in
+ * Broad or Phrase pulls in every book that mentions it.
+ */
+export type MatchTypeProfile = "mixed" | "phrase-only";
+export const MATCH_TYPE_PROFILES: MatchTypeProfile[] = ["mixed", "phrase-only"];
+
+/**
  * Match type per keyword, rather than one type for the whole batch:
  *  - comparable author/title names run exact (a bare name in broad or phrase
  *    match pulls in every book that mentions it),
  *  - specific 3+ word phrases run phrase (the long tail is already narrow),
  *  - short generic terms run broad (they need Amazon's expansion to find
- *    real queries, and they'd match almost nothing on their own as exact).
+ *    real queries, and they'd match almost nothing on their own as exact) —
+ *    unless the book's profile is "phrase-only", which never uses Broad.
  */
-export function pickMatchType(candidate: KeywordCandidate): MatchType {
+export function pickMatchType(candidate: KeywordCandidate, profile: MatchTypeProfile = "mixed"): MatchType {
   if (candidate.sources.some((source) => COMP_NAME_SOURCES.includes(source))) return "exact";
+  if (profile === "phrase-only") return "phrase";
   return candidate.text.trim().split(/\s+/).length >= 3 ? "phrase" : "broad";
 }
 

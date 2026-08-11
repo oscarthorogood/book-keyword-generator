@@ -167,6 +167,18 @@ elsewhere** action, defaulting to whichever book's copy is more specific
 books sharing an author-name keyword are exempted — that's brand defense,
 not cannibalization.
 
+### Match-type strategy (per book)
+
+A select on the book page switches between **Broad + Phrase + Exact** (the
+default triple — `lib/keywordMerge.ts#pickMatchType`) and **Phrase-only**
+(never Broad, comp names still Exact) for the *next* generate run. The
+phrase-only profile is the competitor-validated alternative from
+AUDIT_IMPROVEMENTS.md §7.1-7.3: one row per term instead of three, so
+whatever performance data eventually gets tracked (§6, not built yet) has
+something cleaner to compare. Configuration and bookkeeping only — this
+doesn't retroactively change existing keywords or auto-pick a winner.
+Requires `sql/13-match-type-profile.sql`.
+
 ### Exporting to Amazon Ads
 
 "Export bulksheet" (`GET /api/books/[id]/keywords/export`) writes a

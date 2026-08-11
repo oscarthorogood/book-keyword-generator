@@ -130,6 +130,16 @@ single Amazon read per book; keyword generation reuses it.
 
 ---
 
+### GET/PATCH /api/books/[id]
+
+- `GET` — the book row (including `match_type_profile`).
+- `PATCH` — `{ matchTypeProfile: "mixed" | "phrase-only" }` (Enhancements
+  spec §21). The only field this route updates today.
+
+**Implementation:** `app/api/books/[id]/route.ts`
+
+---
+
 ### POST /api/books/[id]/refresh
 
 **Purpose:** Re-capture the book's Amazon metadata, replacing the stored
@@ -179,6 +189,7 @@ deciding filter and its reason — so the manager can show why.
   "bySource": { "autocomplete": 140 },
   "byCategory": { "core-genre": 12 },
   "byMatchType": { "phrase": 200, "broad": 60, "exact": 52 },
+  "matchTypeProfile": "mixed",
   "genreTerms": ["cozy mystery", "british detectives"],
   "pausedCount": 24,
   "rejectedCount": 118,

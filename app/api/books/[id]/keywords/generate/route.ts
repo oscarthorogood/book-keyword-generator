@@ -495,6 +495,10 @@ export async function POST(
       ...buildFormatNegatives(snapshot.formats ?? []),
     ];
 
+    // §21: per-book match-type strategy — "mixed" (default) or
+    // "phrase-only" (never Broad, for cleaner search-term comparison data).
+    const matchTypeProfile = loaded.book.match_type_profile ?? "mixed";
+
     const activeRows = finalCandidates.map((candidate) => ({
       book_id: bookId,
       user_id: user.id,
@@ -502,9 +506,9 @@ export async function POST(
       // A phrase mined from the book's own blurb is long-tail by nature: it
       // is specific enough for Phrase/Exact and far too thin for Broad.
       match_type:
-        candidate.matchTypeCeiling && pickMatchType(candidate) === "broad"
+        candidate.matchTypeCeiling && pickMatchType(candidate, matchTypeProfile) === "broad"
           ? candidate.matchTypeCeiling
-          : pickMatchType(candidate),
+          : pickMatchType(candidate, matchTypeProfile),
       category: candidate.category ?? null,
       source: primaryKeywordSource(candidate),
       bid: candidate.suggestedBid ?? defaultBid,
@@ -521,7 +525,7 @@ export async function POST(
       book_id: bookId,
       user_id: user.id,
       text: candidate.text,
-      match_type: pickMatchType(candidate),
+      match_type: pickMatchType(candidate, matchTypeProfile),
       category: candidate.category ?? null,
       source: primaryKeywordSource(candidate),
       bid: candidate.suggestedBid ?? defaultBid,
@@ -632,6 +636,7 @@ export async function POST(
         activeRows.map((r) => r.category).filter((c): c is KeywordCategory => !!c)
       ),
       byMatchType: countBy(activeRows.map((r) => r.match_type)),
+      matchTypeProfile,
       genreTerms: snapshot.genreTerms.slice(0, 10),
       anchors: {
         bookSpecific: filterContext.anchors.bookSpecific.slice(0, 10),

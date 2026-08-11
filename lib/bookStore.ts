@@ -19,6 +19,8 @@ export interface BookRecord {
   total_keywords: number;
   created_at: string;
   metadata_json: unknown;
+  /** §21: "mixed" (default triple) or "phrase-only". Falls back to "mixed" on rows from before sql/13. */
+  match_type_profile?: "mixed" | "phrase-only";
 }
 
 export interface BookWithSnapshot {
@@ -28,23 +30,38 @@ export interface BookWithSnapshot {
   captured: boolean;
 }
 
-const BOOK_COLUMNS =
-  "id, asin, marketplace, title, author, description, total_keywords, created_at, metadata_json";
+const BOOK_COLUMNS_LEGACY = "id, asin, marketplace, title, author, description, total_keywords, created_at, metadata_json";
+const BOOK_COLUMNS = `${BOOK_COLUMNS_LEGACY}, match_type_profile`;
 
 export async function getBook(
   supabase: SupabaseClient,
   bookId: string,
   userId: string
 ): Promise<BookRecord | null> {
-  const { data, error } = await supabase
+  let { data, error } = await supabase
     .from("books")
     .select(BOOK_COLUMNS)
     .eq("id", bookId)
     .eq("user_id", userId)
     .maybeSingle();
 
+  // sql/13-match-type-profile.sql not applied yet — retry without the
+  // column rather than breaking every book lookup on it.
+  if (error && /match_type_profile/i.test(error.message)) {
+    ({ data, error } = await supabase
+      .from("books")
+      .select(BOOK_COLUMNS_LEGACY)
+      .eq("id", bookId)
+      .eq("user_id", userId)
+      .maybeSingle());
+  }
+
   if (error || !data) return null;
-  return data as BookRecord;
+  const record = data as Record<string, unknown>;
+  return {
+    ...record,
+    match_type_profile: (record.match_type_profile as "mixed" | "phrase-only" | undefined) ?? "mixed",
+  } as BookRecord;
 }
 
 /**

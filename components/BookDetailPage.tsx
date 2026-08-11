@@ -54,6 +54,8 @@ export interface Book {
   total_keywords: number;
   created_at: string;
   metadata_json?: BookSnapshotView | null;
+  /** §21: "mixed" (default Broad/Phrase/Exact) or "phrase-only". */
+  match_type_profile?: "mixed" | "phrase-only";
 }
 
 interface BookDetailPageProps {
@@ -125,6 +127,18 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
     } finally {
       setRefreshing(false);
     }
+  }
+
+  async function updateMatchTypeProfile(profile: "mixed" | "phrase-only") {
+    if (!book) return;
+    const previous = book.match_type_profile ?? "mixed";
+    setBook({ ...book, match_type_profile: profile });
+    const res = await fetch(`/api/books/${bookId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ matchTypeProfile: profile }),
+    });
+    if (!res.ok) setBook((current) => (current ? { ...current, match_type_profile: previous } : current));
   }
 
   async function applyGenrePresets() {
@@ -255,7 +269,20 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
               {book.author} · {book.total_keywords} keyword{book.total_keywords === 1 ? "" : "s"}
             </p>
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="sr-only" htmlFor="match-type-profile">
+              Match-type strategy
+            </label>
+            <select
+              id="match-type-profile"
+              value={book.match_type_profile ?? "mixed"}
+              onChange={(e) => updateMatchTypeProfile(e.target.value as "mixed" | "phrase-only")}
+              className="input input-sm w-auto"
+              title="Which match types the next generate run assigns (§21)"
+            >
+              <option value="mixed">Broad + Phrase + Exact</option>
+              <option value="phrase-only">Phrase-only (+ Exact for comps)</option>
+            </select>
             <button onClick={applyGenrePresets} disabled={applyingPresets} className="btn btn-secondary">
               <ListChecks size={20} />
               {applyingPresets ? "Applying…" : "Apply genre presets"}
