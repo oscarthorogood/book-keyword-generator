@@ -10,6 +10,7 @@ import {
   Loader2,
   Plus,
   Search,
+  ShieldMinus,
   Sparkles,
   Trash2,
   X,
@@ -131,6 +132,8 @@ export default function KeywordManager({
   const [specificitySort, setSpecificitySort] = useState<"none" | "asc" | "desc">("none");
   const [refiltering, setRefiltering] = useState(false);
   const [refilterResult, setRefilterResult] = useState<string | null>(null);
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [promoteNotice, setPromoteNotice] = useState<string | null>(null);
 
   const [showGenerateForm, setShowGenerateForm] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -212,6 +215,42 @@ export default function KeywordManager({
     setKeywords((prev) => prev.filter((k) => k.id !== id));
     await fetch(`/api/keywords/${id}`, { method: "DELETE" });
     onKeywordsChanged?.();
+  }
+
+  /**
+   * Promotes a per-book rejection to the global negative-keyword library
+   * (§15) — a rejection is the best-evidenced negative available (see
+   * lib/negativeKeywords.ts), so it doesn't have to be rediscovered on
+   * every other book. Global scope by default; the book stays the source
+   * of truth for the reason.
+   */
+  async function promoteToNegativeLibrary(keyword: Keyword) {
+    setPromotingId(keyword.id);
+    try {
+      const res = await fetch("/api/negative-keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyword: keyword.text,
+          matchType: keyword.match_type === "exact" ? "exact" : "phrase",
+          scope: "global",
+          reason: keyword.rejection_reason || `Rejected on this book (${labelForFilter(keyword.rejected_by_filter).trim()})`,
+          source: "promoted-from-rejection",
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setPromoteNotice(
+          body.collisions?.length > 0
+            ? `Added to the negative library — heads up, it matches an active keyword: ${body.collisions.join(", ")}.`
+            : `Added "${keyword.text}" to the negative library.`
+        );
+      } else {
+        setPromoteNotice(body.error || "Could not add to the negative library.");
+      }
+    } finally {
+      setPromotingId(null);
+    }
   }
 
   async function bulkUpdate(status: KeywordStatus) {
@@ -426,6 +465,13 @@ export default function KeywordManager({
         <div className="alert mb-6" aria-live="polite">
           <Filter size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
           <p>{refilterResult}</p>
+        </div>
+      )}
+
+      {promoteNotice && (
+        <div className="alert mb-6" aria-live="polite">
+          <ShieldMinus size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
+          <p>{promoteNotice}</p>
         </div>
       )}
 
@@ -888,14 +934,27 @@ export default function KeywordManager({
                       </select>
                     </td>
                     <td className="text-right">
-                      <button
-                        onClick={() => deleteKeyword(keyword.id)}
-                        className="btn btn-tertiary btn-icon btn-sm"
-                        aria-label={`Delete ${keyword.text}`}
-                        title="Delete keyword"
-                      >
-                        <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
-                      </button>
+                      <div className="flex justify-end gap-1">
+                        {keyword.status === "rejected" && (
+                          <button
+                            onClick={() => promoteToNegativeLibrary(keyword)}
+                            disabled={promotingId === keyword.id}
+                            className="btn btn-tertiary btn-icon btn-sm"
+                            aria-label={`Promote ${keyword.text} to the negative-keyword library`}
+                            title="Promote to negative library"
+                          >
+                            <ShieldMinus size={16} style={{ color: "var(--icon-default)" }} />
+                          </button>
+                        )}
+                        <button
+                          onClick={() => deleteKeyword(keyword.id)}
+                          className="btn btn-tertiary btn-icon btn-sm"
+                          aria-label={`Delete ${keyword.text}`}
+                          title="Delete keyword"
+                        >
+                          <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

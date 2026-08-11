@@ -375,6 +375,24 @@ uses. Response: `{ genresTotal, keywordsAdded, keywordsTotal }`.
 
 ---
 
+## Negative Keyword Library Endpoints (Enhancements spec §15)
+
+### GET/POST /api/negative-keywords
+
+- `GET` — the user's whole negative-keyword library, any scope.
+- `POST` — `{ keyword, matchType?, scope, genreId?, bookId?, reason?, source? }`.
+  `scope` is `global` (default), `genre` (requires `genreId`), or `book`
+  (requires `bookId`). Response includes `collisions`: active keywords (any
+  book) whose text matches — a warning, never a block.
+
+**Implementation:** `app/api/negative-keywords/route.ts`
+
+### DELETE /api/negative-keywords/[id]
+
+**Implementation:** `app/api/negative-keywords/[id]/route.ts`
+
+---
+
 ## Admin Endpoints
 
 ### GET /api/admin/access

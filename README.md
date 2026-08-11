@@ -134,7 +134,10 @@ the deciding filter and its reason, so the keyword manager can show why —
 and a false positive can be reviewed and put back. The rejections that
 describe a real (unwanted) *search intent* — off-topic entities, wrong
 languages, missing formats — are also turned into **negative keywords**, so
-Amazon can't serve on them through a broader match.
+Amazon can't serve on them through a broader match. Any rejected keyword can
+also be **promoted to the negative-keyword library** (below) with one click,
+so the same off-topic term doesn't have to be rediscovered on every other
+book.
 
 Blocklists live in `lib/keywordFilterConfig.ts` so they can be tuned per
 marketplace or genre; per-filter rejection counts come back with every
@@ -142,14 +145,28 @@ generate run. "Re-run filters" in the keyword manager applies the pipeline
 to a book's existing keywords (`POST /api/books/[id]/keywords/filter`) —
 the migration path for lists generated before it existed.
 
+### Shared negative-keyword library
+
+Negatives can live above the per-book level: **global** (applies to every
+export), **genre**-scoped (applies when a book's resolved genre matches a
+preset genre), or **book**-scoped. `POST /api/negative-keywords` adds one —
+the keyword manager's "promote to negative library" button on any rejected
+keyword does this for you, global-scoped by default, and warns (without
+blocking) if the term collides with an active keyword on any of your books.
+Requires `sql/12-negative-keyword-library.sql`.
+
 ### Exporting to Amazon Ads
 
 "Export bulksheet" (`GET /api/books/[id]/keywords/export`) writes a
 bulk-upload CSV: a descriptive Broad/Phrase campaign, a comparable
-titles/authors Exact campaign, the negative keywords, and an ASIN/brand
-product-targeting campaign built from the competitor crawl
-(`lib/productTargets.ts`, ranked by best-seller rank and review count).
-Rejected keywords are never exported.
+titles/authors Exact campaign, an **Auto Discovery** campaign (a small slice
+of the daily budget, split into Amazon's four auto-targeting groups — close
+match, substitutes, loose match, complements — so search-term harvesting has
+something to feed on), and an ASIN/brand product-targeting campaign built
+from the competitor crawl (`lib/productTargets.ts`, ranked by best-seller
+rank and review count). Negatives (per-book plus whatever applies from the
+shared library above) ship in every campaign the export creates, not just
+the descriptive one. Rejected keywords are never exported.
 
 ## Identifiers
 
