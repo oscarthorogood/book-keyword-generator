@@ -12,7 +12,7 @@ import type { CompetitorAsin, CompetitorKeyword } from "./types";
 
 const COMPETITOR_ASIN_COLUMNS = "id, book_id, competitor_asin, source, notes, created_at, updated_at";
 const COMPETITOR_KEYWORD_COLUMNS =
-  "id, book_id, competitor_asin, text, volume, rank, competitor_count, mean_rank, category, intent_segment, match_type, specificity, status, created_at, updated_at";
+  "id, book_id, competitor_asin, text, volume, rank, competitor_count, mean_rank, category, intent_segment, match_type, specificity, status, bid, rejection_reason, rejected_by_filter, created_at, updated_at";
 
 // --- competitor_asins --------------------------------------------------
 

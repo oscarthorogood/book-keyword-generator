@@ -103,6 +103,9 @@ describe("reserveCompetitorSlots", () => {
       match_type: "phrase",
       specificity: null,
       status: "active",
+      bid: null,
+      rejection_reason: null,
+      rejected_by_filter: null,
       created_at: "",
       updated_at: "",
     };
