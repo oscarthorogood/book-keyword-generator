@@ -386,25 +386,31 @@ handle that, in order:
 2. **AI final pass** (`rankKeywordsWithAi` in `lib/aiRanker.ts`, optional) —
    sends that shortlist, plus book context (title/author/series/genre terms/
    description, and optionally a Firecrawl markdown scrape of the product
-   page for richer natural-language context — `lib/firecrawl.ts`), to Google
-   Gemini's free tier. Gemini judges each candidate's real-world relevance to
-   *this specific book* — something no heuristic can do — can reclassify a
-   candidate between Tropes/Comp-Names, can drop candidates the heuristic
-   would've kept, and returns a 0-100 relevance score used for final sort
-   order and the per-ad-group cap.
+   page for richer natural-language context — `lib/firecrawl.ts`), to an LLM.
+   It judges each candidate's real-world relevance to *this specific book* —
+   something no heuristic can do — can reclassify a candidate between
+   Tropes/Comp-Names, can drop candidates the heuristic would've kept, and
+   returns a 0-100 relevance score used for final sort order and the
+   per-ad-group cap.
 
-Uses Gemini rather than a paid API specifically to keep this optional step
-free — no credit card required for Google AI Studio's free tier. If
-`GEMINI_API_KEY` is unset, or the API call fails or times out for any
-reason, the app **silently falls back to the heuristic shortlist** — the AI
-pass never blocks the export, matching the fail-soft pattern every other
-optional source in this app follows. Whether it actually ran is reported via
-the `X-Ai-Ranking-Used` response header and shown in the success banner.
+Tries Google Gemini's free tier first (no credit card required for Google AI
+Studio's free tier), and falls back to OpenRouter (`lib/llmClient.ts` — the
+same free-tier chat client `lib/llmPersonaSource.ts` uses for persona-driven
+keyword generation) when `GEMINI_API_KEY` is unset or the Gemini call fails.
+Either way stays on a free provider, per the "keep this free" constraint the
+rest of the app follows. If neither `GEMINI_API_KEY` nor
+`OPENROUTER_API_KEY` is set, or both calls fail or time out, the app
+**silently falls back to the heuristic shortlist** — the AI pass never
+blocks the export, matching the fail-soft pattern every other optional
+source in this app follows. Whether it actually ran is reported via the
+`X-Ai-Ranking-Used` response header and shown in the success banner (it
+doesn't distinguish which provider answered).
 
-`FIRECRAWL_API_KEY` only has an effect when `GEMINI_API_KEY` is also set —
-it purely enriches the context Gemini sees, it isn't an independent feature.
-Firecrawl is not used as a fetch mechanism for the structured scrapes
-elsewhere in this app (its markdown output would break the cheerio
+`FIRECRAWL_API_KEY` only has an effect when `GEMINI_API_KEY` or
+`OPENROUTER_API_KEY` is also set — it purely enriches the context the LLM
+sees, it isn't an independent feature. Firecrawl is not used as a fetch
+mechanism for the structured scrapes elsewhere in this app (its markdown
+output would break the cheerio
 selector-based extraction those rely on) — it's scoped to this one purpose.
 
 ## The book page
@@ -503,9 +509,11 @@ Optional:
 - `SCRAPER_PROXY_API_KEY` / `SCRAPINGBEE_API_KEY` — see "Scraping from a
   cloud deployment" below. One of the two is needed on Vercel/most cloud
   hosts; not needed for local dev.
-- `GEMINI_API_KEY` / `FIRECRAWL_API_KEY` — see "AI-assisted ranking" above.
-  Neither is required; the app ranks keywords with the heuristic scorer
-  alone when they're unset.
+- `GEMINI_API_KEY` / `OPENROUTER_API_KEY` / `FIRECRAWL_API_KEY` — see
+  "AI-assisted ranking" above. `OPENROUTER_API_KEY` also drives the
+  persona-LLM keyword source (`lib/llmPersonaSource.ts`). None is required;
+  the app ranks keywords with the heuristic scorer alone when both ranking
+  keys are unset.
 - `FIRECRAWL_API_KEY` — the most reliable way to read an Amazon book page
   from a cloud deployment; see "Scraping from a cloud deployment" below.
 
