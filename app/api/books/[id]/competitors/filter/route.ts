@@ -109,7 +109,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (activeOutcomes.length > 0) {
         const compNameCandidates = activeOutcomes.map((o) => ({
           text: o.row.notes as string,
-          sources: ["auto-crawl" as const],
+          sources: ["comp-name" as const],
         }));
 
         const ranked = await rankKeywordsWithAi(

@@ -4,7 +4,7 @@ import { capAndRank } from "@/lib/keywordCapAndRank";
 import { buildFilterContext, filterKeywords, type FilterableKeyword } from "@/lib/keywordFilters";
 import { genreFamilySearchTerms } from "@/lib/genre";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
-import type { KeywordCandidate, KeywordSource, MatchType } from "@/lib/types";
+import type { KeywordCandidate, KeywordCategory, KeywordSource, MatchType } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -160,7 +160,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .map((o) => ({
           text: o.text,
           sources: (o.row.source ? [o.row.source as KeywordSource] : []) as KeywordSource[],
-          category: o.row.category ?? undefined,
+          category: (o.row.category ?? undefined) as KeywordCategory | undefined,
         }));
 
       const compHead: KeywordCandidate[] = activeOutcomes
@@ -169,7 +169,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .map((o) => ({
           text: o.text,
           sources: (o.row.source ? [o.row.source as KeywordSource] : []) as KeywordSource[],
-          category: o.row.category ?? undefined,
+          category: (o.row.category ?? undefined) as KeywordCategory | undefined,
         }));
 
       if (tropesHead.length + compHead.length > 0) {
