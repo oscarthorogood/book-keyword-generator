@@ -48,6 +48,14 @@ import { buildFormatNegatives, buildNegativeKeywords } from "@/lib/negativeKeywo
 import { buildBrandTargets, buildProductTargets } from "@/lib/productTargets";
 import { mineReviewLanguage } from "@/lib/reviewMining";
 import { getSerpApiKeywordCandidates } from "@/lib/serpApiKeywords";
+import { buildSearchTermReportCandidates, parseSearchTermReportRows } from "@/lib/searchTermImport";
+import { buildReverseAsinCandidates, parseReverseAsinRows } from "@/lib/reverseAsin";
+import { buildDecodoCandidates, parseDecodoRows } from "@/lib/decodoSource";
+import { buildPersonaLlmCandidates } from "@/lib/llmPersonaSource";
+import { buildStorygraphTagsCandidates } from "@/lib/storygraphTags";
+import { buildLibrarySubjectsCandidates } from "@/lib/librarySubjects";
+import { buildCriticsBlurbsCandidates } from "@/lib/criticsBlurbs";
+import { NegativeSuggestion } from "@/lib/types";
 import {
   buildAutocompleteSeeds,
   getAutocompleteKeywordSet,
@@ -101,6 +109,13 @@ const ALL_KEYWORD_SOURCES: KeywordSource[] = [
   "serpapi-autocomplete",
   "user-tag",
   "key-trope",
+  "search-term-report",
+  "reverse-asin",
+  "persona-llm",
+  "storygraph-tags",
+  "library-subjects",
+  "critics-blurbs",
+  "decodo",
 ];
 
 /** Candidate groups built purely from the stored snapshot — no network calls. */
@@ -289,6 +304,19 @@ export async function POST(
     );
     const defaultBid = typeof body.defaultBid === "number" && body.defaultBid > 0 ? body.defaultBid : 0.5;
 
+    // Optional CSV/JSON-driven external sources (spec §2-3, §7): only run
+    // when the caller supplies the raw export rows for this generate call —
+    // same "no data, no candidates" pattern manualCompetitors uses for its
+    // ASIN-keyed lookup, just driven by request body instead of a static table.
+    const asRecordArray = (value: unknown): Array<Record<string, unknown>> =>
+      Array.isArray(value) ? value.filter((v): v is Record<string, unknown> => !!v && typeof v === "object") : [];
+    const searchTermReportRows = asRecordArray(body.searchTermReportRows);
+    const reverseAsinRows = asRecordArray(body.reverseAsinRows);
+    const decodoRows = asRecordArray(body.decodoRows);
+    const storygraphTagsInput = asStrings(body.storygraphTags, 50);
+    const librarySubjectsInput = asStrings(body.librarySubjects, 50);
+    const criticsBlurbsInput = asStrings(body.criticsBlurbs, 30);
+
     // The relevance anchors for this book — title/author/series/characters,
     // genre, setting, comparable authors — derived from the stored snapshot.
     // They drive the filter pipeline's final gate and the completion of
@@ -348,6 +376,7 @@ export async function POST(
       youtubeAutocomplete,
       duckDuckGoAutocomplete,
       serpApiResult,
+      personaLlmCandidates,
     ] = await Promise.all([
       isAdsApiConfigured()
         ? getAdsApiKeywordRecommendations(snapshot.asin, snapshot.marketplace).catch((err: Error) => {
@@ -360,10 +389,58 @@ export async function POST(
       getYoutubeAutocompleteKeywordSet(seedTerms),
       getDuckDuckGoAutocompleteKeywordSet(seedTerms),
       getSerpApiKeywordCandidates(serpApiSeeds, snapshot.marketplace),
+      // Persona-LLM: gracefully returns [] when OPENROUTER_API_KEY isn't
+      // configured, so it never blocks generation for users without the key.
+      buildPersonaLlmCandidates({ title: snapshot.title, author: snapshot.author, asin: snapshot.asin }).catch(
+        (err: Error) => {
+          console.error("[generate] persona-llm generation failed:", err.message);
+          return [] as KeywordCandidate[];
+        }
+      ),
     ]);
 
     const serpApiBySource = (source: KeywordSource) =>
       serpApiResult.candidates.filter((candidate) => candidate.sources.includes(source));
+
+    // Search Term Report import: proven buyer-intent keywords, plus zero-order
+    // high-spend rows collected as negative suggestions (spec §2, §9).
+    const searchTermReportResult =
+      searchTermReportRows.length > 0
+        ? buildSearchTermReportCandidates(
+            { title: snapshot.title, author: snapshot.author },
+            parseSearchTermReportRows(searchTermReportRows)
+          )
+        : { candidates: [] as KeywordCandidate[], negativeSuggestions: [] as NegativeSuggestion[] };
+
+    const reverseAsinCandidates =
+      reverseAsinRows.length > 0
+        ? buildReverseAsinCandidates(
+            { author: snapshot.author, asin: snapshot.asin },
+            parseReverseAsinRows(reverseAsinRows)
+          )
+        : [];
+
+    const decodoCandidates =
+      decodoRows.length > 0
+        ? buildDecodoCandidates(
+            { title: snapshot.title, author: snapshot.author, seriesName: snapshot.seriesName },
+            parseDecodoRows(decodoRows)
+          )
+        : [];
+
+    const primaryGenreForTags = genreSeedTerms[0];
+    const storygraphTagsCandidates =
+      storygraphTagsInput.length > 0
+        ? buildStorygraphTagsCandidates({ genre: primaryGenreForTags }, storygraphTagsInput)
+        : [];
+    const librarySubjectsCandidates =
+      librarySubjectsInput.length > 0
+        ? buildLibrarySubjectsCandidates({ genre: primaryGenreForTags }, librarySubjectsInput)
+        : [];
+    const criticsBlurbsCandidates =
+      criticsBlurbsInput.length > 0
+        ? buildCriticsBlurbsCandidates({ genre: primaryGenreForTags }, criticsBlurbsInput)
+        : [];
 
     // Autocomplete corpora occasionally return bare ASINs; those belong to
     // product targeting, not the keyword list.
@@ -380,6 +457,13 @@ export async function POST(
       // map to other genre phrases, or they don't expand. The open-ended
       // thesaurus lookup this replaced is what produced "felon books".
       synonym: buildCuratedSynonymCandidates(genreSeedTerms),
+      "search-term-report": searchTermReportResult.candidates,
+      "reverse-asin": reverseAsinCandidates,
+      "persona-llm": personaLlmCandidates,
+      "storygraph-tags": storygraphTagsCandidates,
+      "library-subjects": librarySubjectsCandidates,
+      "critics-blurbs": criticsBlurbsCandidates,
+      decodo: decodoCandidates,
     };
 
     const sourceCandidateGroups = { ...groups, ...liveGroups };
@@ -499,6 +583,31 @@ export async function POST(
     const negatives = [
       ...buildNegativeKeywords([...tropesFiltered.results, ...compFiltered.results]),
       ...buildFormatNegatives(snapshot.formats ?? []),
+    ];
+
+    // §9: aggregate rejected keywords whose reason describes real (unwanted)
+    // search intent into a negative-suggestions list, alongside the
+    // zero-order/high-spend rows the Search Term Report import already
+    // collected. Additive to the existing response shape below.
+    const NEGATIVE_SUGGESTION_FILTERS = new Set([
+      "mediaTypeCollision",
+      "authorDisambiguation",
+      "bookIntentGate",
+      "uiPollution",
+      "platformNoise",
+      "formatAvailability",
+    ]);
+    const negativeSuggestions: NegativeSuggestion[] = [
+      ...searchTermReportResult.negativeSuggestions,
+      ...rejectedCandidates
+        .filter((c) => c.filter && NEGATIVE_SUGGESTION_FILTERS.has(c.filter))
+        .map((c) => ({
+          text: c.text,
+          matchType: "phrase" as const,
+          reasonCode: c.filter ?? "REJECTED",
+          reason: c.reason,
+          source: primaryKeywordSource(c),
+        })),
     ];
 
     // §21: per-book match-type strategy — "mixed" (default) or
@@ -648,6 +757,7 @@ export async function POST(
       pausedCount: pausedCandidates.length,
       rejectedCount: rejectedCandidates.length,
       negativeCount: negatives.length,
+      negativeSuggestions,
       filterSummary,
       contributingSources,
       bySource: countBy(activeRows.map((r) => r.source)),
