@@ -1,5 +1,7 @@
 import { loadBookWithSnapshot } from "@/lib/bookStore";
 import { buildBulksheetCsv, type ExportKeyword } from "@/lib/bulksheet";
+import { mergeNegatives, selectApplicableNegatives, type LibraryNegativeRow } from "@/lib/negativeKeywordLibrary";
+import { matchGenresToBook } from "@/lib/presetKeywords";
 import { buildBrandTargets, buildProductTargets } from "@/lib/productTargets";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import type { MatchType } from "@/lib/types";
@@ -67,7 +69,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         group: row.source && COMP_NAME_SOURCES.has(row.source) ? "comp-names" : "descriptive",
       }));
 
-    const negatives = rows
+    const bookNegatives = rows
       .filter((row) => row.status === "negative")
       .map((row) => ({
         text: row.text,
@@ -78,6 +80,33 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       }));
 
     const { snapshot } = loaded;
+
+    // §15: merge in the shared negative-keyword library — global rows
+    // always, genre rows when this book's resolved genre matches, book
+    // rows for this exact book. Fails soft to just the book's own
+    // negatives on a database that hasn't run sql/12 yet.
+    const [{ data: libraryRows, error: libraryError }, { data: genreRows, error: genreError }] = await Promise.all([
+      supabase
+        .from("negative_keywords")
+        .select("keyword, match_type, scope, genre_id, book_id, reason")
+        .eq("user_id", user.id),
+      supabase.from("preset_genres").select("id, name, parent_id").eq("user_id", user.id),
+    ]);
+
+    let negatives = bookNegatives;
+    if (!libraryError && !genreError && libraryRows) {
+      const genres = (genreRows ?? []).map((g) => ({ id: g.id, name: g.name, parentId: g.parent_id }));
+      const matchedGenreIds = new Set(matchGenresToBook(genres, snapshot.genreTerms).map((g) => g.id));
+      const applicable: LibraryNegativeRow[] = libraryRows.map((row) => ({
+        keyword: row.keyword,
+        matchType: row.match_type as "phrase" | "exact",
+        scope: row.scope as LibraryNegativeRow["scope"],
+        genreId: row.genre_id,
+        bookId: row.book_id,
+        reason: row.reason,
+      }));
+      negatives = mergeNegatives(bookNegatives, selectApplicableNegatives(applicable, bookId, matchedGenreIds));
+    }
     const csv = buildBulksheetCsv({
       bookTitle: snapshot.title ?? loaded.book.title ?? snapshot.asin,
       keywords,

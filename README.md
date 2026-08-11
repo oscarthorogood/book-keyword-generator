@@ -86,6 +86,14 @@ thematic keywords plus 120 comparable names) to review, filter, re-tier and
 prune — with the rejected candidates kept alongside it, each labelled with
 the filter that stopped it and why.
 
+Every keyword also gets a **Broad → Specific** rating (1–5, `lib/
+keywordSpecificity.ts`) shown as a sortable/filterable column: word count,
+anchor hits (title/author/series/character names), semantic category, and
+generic book-intent tokens ("books", "kindle", "read") all feed it, kept
+consistent with match-type assignment so a comparable-title keyword rarely
+reads as "Broad". Requires `sql/09-keyword-specificity.sql`; keywords
+generated before that migration show no rating.
+
 ### Relevance filtering
 
 Generation is source-led: every source contributes what it found. Nothing
@@ -126,7 +134,10 @@ the deciding filter and its reason, so the keyword manager can show why —
 and a false positive can be reviewed and put back. The rejections that
 describe a real (unwanted) *search intent* — off-topic entities, wrong
 languages, missing formats — are also turned into **negative keywords**, so
-Amazon can't serve on them through a broader match.
+Amazon can't serve on them through a broader match. Any rejected keyword can
+also be **promoted to the negative-keyword library** (below) with one click,
+so the same off-topic term doesn't have to be rediscovered on every other
+book.
 
 Blocklists live in `lib/keywordFilterConfig.ts` so they can be tuned per
 marketplace or genre; per-filter rejection counts come back with every
@@ -134,14 +145,69 @@ generate run. "Re-run filters" in the keyword manager applies the pipeline
 to a book's existing keywords (`POST /api/books/[id]/keywords/filter`) —
 the migration path for lists generated before it existed.
 
+### Shared negative-keyword library
+
+Negatives can live above the per-book level: **global** (applies to every
+export), **genre**-scoped (applies when a book's resolved genre matches a
+preset genre), or **book**-scoped. `POST /api/negative-keywords` adds one —
+the keyword manager's "promote to negative library" button on any rejected
+keyword does this for you, global-scoped by default, and warns (without
+blocking) if the term collides with an active keyword on any of your books.
+Requires `sql/12-negative-keyword-library.sql`.
+
+### Cross-book cannibalization
+
+The same keyword active on two of your books competes against itself in
+Amazon's auction. `/keywords` flags every such keyword with a **Shared**
+badge (and a toggle to filter down to just those), and each affected book's
+own keyword manager shows a callout with a one-click **keep here, pause
+elsewhere** action, defaulting to whichever book's copy is more specific
+(tie-broken by bid — there's no performance data yet to rank by, see the
+`GET /api/books/[id]/keywords/cannibalization` reference). Same-author
+books sharing an author-name keyword are exempted — that's brand defense,
+not cannibalization.
+
+### Match-type strategy (per book)
+
+A select on the book page switches between **Broad + Phrase + Exact** (the
+default triple — `lib/keywordMerge.ts#pickMatchType`) and **Phrase-only**
+(never Broad, comp names still Exact) for the *next* generate run. The
+phrase-only profile is the competitor-validated alternative from
+AUDIT_IMPROVEMENTS.md §7.1-7.3: one row per term instead of three, so
+whatever performance data eventually gets tracked (§6, not built yet) has
+something cleaner to compare. Configuration and bookkeeping only — this
+doesn't retroactively change existing keywords or auto-pick a winner.
+Requires `sql/13-match-type-profile.sql`.
+
+### Filter allowlist
+
+If a filter rejects something that's actually fine, **Restore & allowlist**
+on that keyword (next to the negative-library button, on any rejected row)
+activates it here and remembers the exact text so no future generate run —
+on this book or any other — rejects it again. The dashboard's "Top
+rejecting filters" widget shows which filters are producing the most
+rejections, the signal for deciding what's worth tuning. Requires
+`sql/14-filter-allowlist.sql`.
+
+This is a scoped slice of the Enhancements spec's §16: moving the full
+denylist/regex configuration in `lib/keywordFilterConfig.ts` into a
+live-editable database table (the other half of that section) would mean
+refactoring the synchronous, DB-free filter pipeline that
+`lib/keywordFilters.ts`'s 200-plus tests assert against — left as
+separate, higher-risk follow-up work rather than attempted half-done here.
+
 ### Exporting to Amazon Ads
 
 "Export bulksheet" (`GET /api/books/[id]/keywords/export`) writes a
 bulk-upload CSV: a descriptive Broad/Phrase campaign, a comparable
-titles/authors Exact campaign, the negative keywords, and an ASIN/brand
-product-targeting campaign built from the competitor crawl
-(`lib/productTargets.ts`, ranked by best-seller rank and review count).
-Rejected keywords are never exported.
+titles/authors Exact campaign, an **Auto Discovery** campaign (a small slice
+of the daily budget, split into Amazon's four auto-targeting groups — close
+match, substitutes, loose match, complements — so search-term harvesting has
+something to feed on), and an ASIN/brand product-targeting campaign built
+from the competitor crawl (`lib/productTargets.ts`, ranked by best-seller
+rank and review count). Negatives (per-book plus whatever applies from the
+shared library above) ship in every campaign the export creates, not just
+the descriptive one. Rejected keywords are never exported.
 
 ## Identifiers
 
@@ -364,6 +430,41 @@ templating, synonym expansion, and the AI ranking step's book context.
 marketplace its link points at. Cross-marketplace comparison (does this book
 rank differently on .com vs .co.uk?) would mean capturing the same ASIN
 across multiple domains, which isn't built.
+
+## Navigation
+
+The sidebar is **Dashboard** (an overview across every book — keyword stats,
+specificity distribution, top keywords by genre, recent books) → **Books**
+→ **Keywords** (every keyword across every book, grouped by text, with a
+Books column) → **Presets** (a managed keyword library organized by
+genre/sub-genre — see below). Every section is its own route; there's no
+single-page view-swapping builder anymore.
+
+## Preset keywords by genre
+
+`/presets` is a library of keywords organized under genres and sub-genres
+you define. **Apply genre presets** on a book page (next to **Re-fetch
+metadata**) matches the book's resolved genre against that library and
+inserts the matching preset keywords through the same merge/dedup/filter
+pipeline generation uses — presets are trusted but not exempt, so a preset
+that doesn't fit a specific book still gets rejected and stays visible with
+its reason, the same as any generated candidate.
+
+Each preset keyword carries a tier: **Tier A** applies automatically; **Tier
+B** is inserted paused for manual review regardless of what the filter
+pipeline decides. Editing a preset keyword's text or match type propagates
+to every book that applied it — unless that book's copy was hand-edited
+afterward, which clears the link so propagation can never overwrite a
+manual edit. Requires `sql/10-preset-keywords.sql`.
+
+**Import starter library** on `/presets` seeds your library from a
+checked-in starter set (`lib/presetSeedData/vinciKeywordBank.ts`): 9 genres,
+60 sub-genres, 800 keywords, each with the comp authors it was researched
+against (shown under the keyword once imported). Idempotent — re-running it
+only adds what's missing, never duplicates or overwrites anything you've
+since edited. Requires `sql/11-preset-keyword-author-references.sql` to keep
+the author references; without it, the import still runs, just without that
+extra context.
 
 ## Setup
 

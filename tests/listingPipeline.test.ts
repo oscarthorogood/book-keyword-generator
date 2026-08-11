@@ -274,6 +274,48 @@ describe("bulksheet export", () => {
     expect(rows.some((row) => row["Keyword or Product Targeting"] === 'brand="ian rankin"')).toBe(true);
   });
 
+  it("adds an Auto Discovery campaign with the four targeting groups, at a small budget slice (§17)", () => {
+    const autoCampaignRow = rows.find(
+      (row) => row.Entity === "Campaign" && row["Campaign Name"].includes("Auto Discovery")
+    );
+    expect(autoCampaignRow).toBeDefined();
+    expect(autoCampaignRow!["Campaign Targeting Type"]).toBe("auto");
+    // Default daily budget in this fixture is $10 — auto should be a small slice, not $10.
+    expect(Number(autoCampaignRow!["Daily Budget"])).toBeLessThan(10);
+
+    const autoCampaignName = autoCampaignRow!["Campaign Name"];
+    const autoRows = rows.filter((row) => row["Campaign Name"] === autoCampaignName);
+    for (const expression of ["close-match", "substitutes", "loose-match", "complements"]) {
+      expect(
+        autoRows.some((row) => row["Keyword or Product Targeting"] === `targetingExpression="${expression}"`)
+      ).toBe(true);
+    }
+
+    const closeBid = Number(
+      autoRows.find((row) => row["Keyword or Product Targeting"] === 'targetingExpression="close-match"')!.Bid
+    );
+    const substitutesBid = Number(
+      autoRows.find((row) => row["Keyword or Product Targeting"] === 'targetingExpression="substitutes"')!.Bid
+    );
+    const looseBid = Number(
+      autoRows.find((row) => row["Keyword or Product Targeting"] === 'targetingExpression="loose-match"')!.Bid
+    );
+    const complementsBid = Number(
+      autoRows.find((row) => row["Keyword or Product Targeting"] === 'targetingExpression="complements"')!.Bid
+    );
+    expect(closeBid).toBeGreaterThan(substitutesBid);
+    expect(substitutesBid).toBeGreaterThan(looseBid);
+    expect(looseBid).toBeGreaterThan(complementsBid);
+  });
+
+  it("ships negatives in every campaign, not just Descriptive (§23.7)", () => {
+    const negativeCampaigns = new Set(
+      rows.filter((row) => row.Entity === "Negative Keyword").map((row) => row["Campaign Name"])
+    );
+    // Descriptive, Titles & Authors, Auto Discovery, and Product Targeting all created in this fixture.
+    expect(negativeCampaigns.size).toBeGreaterThanOrEqual(4);
+  });
+
   it("renders CSV with a header and quotes fields containing commas", () => {
     const csv = buildBulksheetCsv({
       bookTitle: "Scars of the Past",

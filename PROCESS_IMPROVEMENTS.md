@@ -15,7 +15,13 @@ This project had several areas where processes could be improved:
 
 ### 1. Centralized Configuration (`lib/config.ts`) ✨ NEW
 
-**Problem**: Configuration constants (SECRET, cookie settings, API limits) were duplicated across `middleware.ts` and `lib/auth.ts`.
+**Problem**: Configuration constants (SECRET, cookie settings, API limits) were duplicated across the session middleware and the auth helpers.
+
+> **§0.1 correction (2026-08-11):** the middleware file is `proxy.ts`, not
+> `middleware.ts` — renamed by Next 16 (see `proxy.ts`'s own doc comment).
+> `lib/auth.ts` no longer exists; session handling now lives in
+> `lib/supabaseServer.ts`. Both still import shared constants from
+> `lib/config.ts`, which is the point this section is making.
 
 **Solution**: Created `lib/config.ts` with centralized configuration for:
 - Authentication (JWT secret, token expiry, cookie settings, public paths)
@@ -29,8 +35,8 @@ This project had several areas where processes could be improved:
 - Reduced code duplication
 
 **Files Updated**:
-- `lib/auth.ts` - Now imports from `lib/config.ts`
-- `middleware.ts` - Now imports from `lib/config.ts`
+- `lib/supabaseServer.ts` - Now imports from `lib/config.ts`
+- `proxy.ts` - Now imports from `lib/config.ts`
 
 ### 2. Standardized Error Handling (`lib/errors.ts`) ✨ NEW
 
@@ -202,16 +208,27 @@ bash scripts/setup.sh
 
 ### High Priority (Should be done soon)
 
+> **§0.1 correction (2026-08-11):** the file list and line counts below are
+> from the wizard-era tree and no longer match. `app/page.tsx` is now a thin
+> 57-line router; `app/api/generate/route.ts` doesn't exist. The current
+> oversized files (per Enhancements spec §0.2) are `components/
+> KeywordManager.tsx` (~844 lines), `app/api/books/[id]/keywords/generate/
+> route.ts` (~630 lines), `lib/bookSnapshot.ts` (~667 lines), and
+> `lib/scrape.ts` (~1539 lines) — refactor these opportunistically as later
+> sections touch them, per that spec's guidance, rather than as a
+> standalone pass.
+
 1. **Refactor Large Files**
-   - `app/page.tsx` (1410 lines) → Split into smaller components
-   - `lib/scrape.ts` (1308 lines) → Create dedicated modules for each scrape type
-   - `lib/keywordMerge.ts` (789 lines) → Separate merging logic from scoring
-   - `app/api/generate/route.ts` (791 lines) → Extract business logic to services
+   - `components/KeywordManager.tsx` (~844 lines) → split filter/table/detail concerns
+   - `lib/scrape.ts` (~1539 lines) → dedicated modules per scrape type
+   - `lib/keywordMerge.ts` (~1113 lines) → separate merging logic from scoring
+   - `app/api/books/[id]/keywords/generate/route.ts` (~630 lines) → extract business logic to services
+   - `lib/bookSnapshot.ts` (~667 lines) → split per-source capture logic
 
 2. **Add Testing**
-   - Install Jest + React Testing Library
-   - Add tests for validation functions (e.g., `validate()` in generate/route.ts)
-   - Add tests for error handling utilities
+   - The project already uses **Vitest** (`tests/*.test.ts`, `npm test`), not Jest — keep using it rather than adding a second test runner.
+   - Add tests for validation functions (e.g. `lib/keywordValidation.ts`, `lib/keywordFilters.ts`)
+   - Add tests for error handling utilities (`lib/errors.ts`)
    - Aim for >70% coverage on lib/ directory
 
 3. **Migrate to Use Error Handling**

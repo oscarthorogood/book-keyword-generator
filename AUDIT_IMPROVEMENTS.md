@@ -120,19 +120,27 @@ These are category taxonomy, not search phrases.
 - Per-ad-group: 10-15 negatives tailored to each group's purpose
 - **Impact:** Foundation for weekly harvest-and-negate workflow
 
-### 8. Phase 1.6: Deterministic Generation (§1.6) — **COMPLETE**
-**Status:** ✅ COMPLETE
+### 8. Phase 1.6: Deterministic Generation (§1.6) — **NOT PRESENT IN CURRENT TREE**
+**Status:** ⚠️ §0.1 correction (2026-08-11): this section previously read "COMPLETE," but
+neither `lib/authorCodeCache.ts` nor `lib/keywordCache.ts` exists in the
+current codebase, and there is no `app/api/generate/route.ts` for them to be
+integrated into. Whatever branch this was implemented on did not merge, or
+the work was reverted — code over docs. Treat Phase 1.6 as **not started**
+against the current tree; the description below documents the intended
+design for whoever picks this up (the Enhancements spec §1's "cache note"
+also assumed this cache exists — it does not, so §1's fingerprint-bump
+guidance doesn't apply until this is (re)built).
 
 **What was broken:** Running the generator twice on the same ASIN produced:
 - Different author codes (FM vs MF for Freida McFadden)
 - Different keyword sets (~96% overlap, 3 keywords differ)
 - Non-deterministic campaign names and bulksheets
 
-**Solution:**
-- Created `lib/authorCodeCache.ts` with deterministic author-code generation (first letter + second word's first letter, with hash fallback)
-- Created `lib/keywordCache.ts` with request fingerprinting (SHA256 of all input parameters) and keyword caching
-- Integrated into `app/api/generate/route.ts` to cache final keyword sets after validation
-- **Impact:** Same ASIN + same parameters = same keywords + same author code + same bulksheet (within single server process; Phase 2 adds cross-restart persistence)
+**Intended solution (not implemented):**
+- `lib/authorCodeCache.ts` with deterministic author-code generation (first letter + second word's first letter, with hash fallback)
+- `lib/keywordCache.ts` with request fingerprinting (SHA256 of all input parameters) and keyword caching
+- Integration into the generate route (`app/api/books/[id]/keywords/generate/route.ts`) to cache final keyword sets after validation
+- **Impact if built:** Same ASIN + same parameters = same keywords + same author code + same bulksheet (within single server process; a later phase would add cross-restart persistence)
 
 ---
 
@@ -221,7 +229,7 @@ All critical bug checks from §2 are now integrated into:
 - `lib/bulksheet.ts` — ASIN validation at export time
 
 **Next to Modify:**
-- `app/api/generate/route.ts` — Integration of compDataValidation, budget-awareness
+- `app/api/books/[id]/keywords/generate/route.ts` — Integration of compDataValidation, budget-awareness (corrected path, §0.1)
 - `lib/keywordMerge.ts` — Reduce template mis applications, add budget-cap logic
 - `lib/bidding.ts` — Scale bids by Amazon Ads suggested-bid (when API integrated)
 

@@ -34,7 +34,9 @@ export type KeywordSource =
   /** SerpApi Amazon Search — competitor titles/authors ranking for a seed term. */
   | "serpapi-organic"
   /** SerpApi Amazon Autocomplete — the suggestions readers see while typing. */
-  | "serpapi-autocomplete";
+  | "serpapi-autocomplete"
+  /** Applied from the user's genre preset library (§3) rather than generated. */
+  | "genre-preset";
 
 /**
  * The 20-category keyword-intent taxonomy — see lib/keywordCategories.ts for

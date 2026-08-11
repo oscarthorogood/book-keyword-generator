@@ -62,6 +62,23 @@ export interface BulksheetInput {
 
 const PRODUCT = "Sponsored Products";
 
+/**
+ * Auto campaigns are the discovery engine that feeds search-term
+ * harvesting — industry practice holds them to <10% (ideally ~5%) of total
+ * spend (Enhancements spec §17) rather than sizing them like a manual
+ * campaign.
+ */
+const AUTO_BUDGET_RATIO = 0.05;
+const AUTO_BUDGET_MIN = 1;
+
+/** Close > substitutes > loose > complements: closer matches earn the higher bid. */
+const AUTO_TARGETING_GROUPS: Array<{ expression: string; label: string; bidMultiplier: number }> = [
+  { expression: "close-match", label: "Auto: close match", bidMultiplier: 1 },
+  { expression: "substitutes", label: "Auto: substitutes", bidMultiplier: 0.8 },
+  { expression: "loose-match", label: "Auto: loose match", bidMultiplier: 0.6 },
+  { expression: "complements", label: "Auto: complements", bidMultiplier: 0.4 },
+];
+
 function campaignName(bookTitle: string, suffix: string): string {
   const title = bookTitle.replace(/[",]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
   return `${title} – ${suffix}`;
@@ -138,14 +155,12 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
     }
   };
 
-  if (descriptive.length > 0) {
-    const campaign = campaignName(bookTitle, "Descriptive – Broad/Phrase");
-    addCampaign(campaign, "manual");
-    addAdGroup(campaign, "Descriptive");
-    addKeywordRows(campaign, "Descriptive", descriptive);
-
-    // Negatives hang off the discovery campaign: that's the one whose broad
-    // and phrase matches can drift into them.
+  // §23.7: negatives previously only shipped in the Descriptive campaign,
+  // so the Exact and Product Targeting campaigns had no protection from
+  // known-bad queries. Every campaign type accepts negative keywords for
+  // query exclusion (product-targeting campaigns included), so every
+  // campaign this run creates gets the same negative list.
+  const addNegativeRows = (campaign: string, adGroup: string) => {
     for (const negative of negatives) {
       rows.push({
         ...emptyRow(),
@@ -153,13 +168,21 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
         Entity: "Negative Keyword",
         Operation: "create",
         "Campaign Name": campaign,
-        "Ad Group Name": "Descriptive",
+        "Ad Group Name": adGroup,
         "Keyword or Product Targeting": negative.text,
         "Match Type": `negative ${negative.matchType}`,
         State: "enabled",
         Source: negative.reason,
       });
     }
+  };
+
+  if (descriptive.length > 0) {
+    const campaign = campaignName(bookTitle, "Descriptive – Broad/Phrase");
+    addCampaign(campaign, "manual");
+    addAdGroup(campaign, "Descriptive");
+    addKeywordRows(campaign, "Descriptive", descriptive);
+    addNegativeRows(campaign, "Descriptive");
   }
 
   if (compNames.length > 0) {
@@ -167,12 +190,59 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
     addCampaign(campaign, "manual");
     addAdGroup(campaign, "Comparable titles & authors");
     addKeywordRows(campaign, "Comparable titles & authors", compNames);
+    addNegativeRows(campaign, "Comparable titles & authors");
+  }
+
+  // §17: the auto campaign is the discovery engine that feeds
+  // search-term harvesting (§6) — runs alongside the manual campaigns
+  // above, at a small slice of the budget, seeded with the same
+  // campaign-level negatives so discovery spend isn't wasted on known junk.
+  // No Ads API involved: this is bulksheet-only, same as everything else here.
+  if (descriptive.length > 0 || compNames.length > 0) {
+    const campaign = campaignName(bookTitle, "Auto Discovery");
+    const autoBudget = Math.max(AUTO_BUDGET_MIN, Math.round(dailyBudget * AUTO_BUDGET_RATIO * 100) / 100);
+    rows.push({
+      ...emptyRow(),
+      Product: PRODUCT,
+      Entity: "Campaign",
+      Operation: "create",
+      "Campaign Name": campaign,
+      "Daily Budget": autoBudget.toFixed(2),
+      "Campaign Targeting Type": "auto",
+      State: "enabled",
+    });
+    for (const group of AUTO_TARGETING_GROUPS) {
+      rows.push({
+        ...emptyRow(),
+        Product: PRODUCT,
+        Entity: "Ad Group",
+        Operation: "create",
+        "Campaign Name": campaign,
+        "Ad Group Name": group.label,
+        Bid: money(defaultBid * group.bidMultiplier, defaultBid),
+        State: "enabled",
+      });
+      rows.push({
+        ...emptyRow(),
+        Product: PRODUCT,
+        Entity: "Product Targeting",
+        Operation: "create",
+        "Campaign Name": campaign,
+        "Ad Group Name": group.label,
+        "Keyword or Product Targeting": `targetingExpression="${group.expression}"`,
+        Bid: money(defaultBid * group.bidMultiplier, defaultBid),
+        State: "enabled",
+        Source: "auto",
+      });
+    }
+    addNegativeRows(campaign, AUTO_TARGETING_GROUPS[0].label);
   }
 
   if (productTargets.length > 0 || brandTargets.length > 0) {
     const campaign = campaignName(bookTitle, "Product Targeting");
     addCampaign(campaign, "manual");
     addAdGroup(campaign, "ASIN & brand targets");
+    addNegativeRows(campaign, "ASIN & brand targets");
 
     for (const target of productTargets) {
       rows.push({

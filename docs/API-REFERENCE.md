@@ -130,6 +130,16 @@ single Amazon read per book; keyword generation reuses it.
 
 ---
 
+### GET/PATCH /api/books/[id]
+
+- `GET` — the book row (including `match_type_profile`).
+- `PATCH` — `{ matchTypeProfile: "mixed" | "phrase-only" }` (Enhancements
+  spec §21). The only field this route updates today.
+
+**Implementation:** `app/api/books/[id]/route.ts`
+
+---
+
 ### POST /api/books/[id]/refresh
 
 **Purpose:** Re-capture the book's Amazon metadata, replacing the stored
@@ -179,6 +189,8 @@ deciding filter and its reason — so the manager can show why.
   "bySource": { "autocomplete": 140 },
   "byCategory": { "core-genre": 12 },
   "byMatchType": { "phrase": 200, "broad": 60, "exact": 52 },
+  "matchTypeProfile": "mixed",
+  "allowlistOverrideCount": 0,
   "genreTerms": ["cozy mystery", "british detectives"],
   "pausedCount": 24,
   "rejectedCount": 118,
@@ -276,6 +288,155 @@ Rejected keywords are never exported.
 **Purpose:** Update or delete one keyword (status, match type, category, bid, text).
 
 **Implementation:** `app/api/keywords/[id]/route.ts`
+
+---
+
+### GET /api/keywords/all
+
+**Purpose:** Every keyword across every one of the user's books, grouped by
+text (Enhancements spec §4 — the `/keywords` page). Read-only; negatives are
+excluded.
+
+**Response:** `{ books: [{ id, title }], keywords: AggregatedKeywordRow[] }`
+— see `lib/allKeywordsAggregate.ts` for the row shape (books, statuses,
+match types, sources, specificities per grouped keyword text).
+
+**Implementation:** `app/api/keywords/all/route.ts`
+
+---
+
+## Dashboard Endpoints (`/dashboard`, Enhancements spec §2)
+
+Each dashboard widget owns its own endpoint so one failing query never
+blanks the rest of the page.
+
+### GET /api/dashboard/keyword-stats
+
+Totals by status/match-type/source and the §1 specificity distribution
+across every book the user owns. **Implementation:**
+`app/api/dashboard/keyword-stats/route.ts`, aggregation in
+`lib/dashboardStats.ts#summarizeKeywordStats`.
+
+### GET /api/dashboard/genre-keywords
+
+Top active keywords grouped by each book's resolved primary genre.
+**Implementation:** `app/api/dashboard/genre-keywords/route.ts`, aggregation
+in `lib/dashboardStats.ts#topKeywordsByGenre`.
+
+### GET /api/dashboard/recent-books
+
+The 5 most recently added books with a capture-health badge (reused from
+the snapshot's own `capture.ok`/`capture.completeness`, not a new score).
+**Implementation:** `app/api/dashboard/recent-books/route.ts`, aggregation
+in `lib/dashboardStats.ts#recentBooksSummary`.
+
+---
+
+## Preset Keyword Endpoints (`/presets`, Enhancements spec §3)
+
+### GET/POST /api/presets/genres
+
+- `GET` — the user's genre tree, each genre's preset keywords nested.
+- `POST` — `{ name, parentId? }` creates a genre or sub-genre.
+
+**Implementation:** `app/api/presets/genres/route.ts`
+
+### PATCH/DELETE /api/presets/genres/[id]
+
+Rename (`{ name }`) or delete a genre. Deleting cascades to its preset
+keywords, but keywords already applied to books stay on those books
+(`preset_keyword_id` is `SET NULL`, not cascaded).
+
+**Implementation:** `app/api/presets/genres/[id]/route.ts`
+
+### POST /api/presets/keywords
+
+`{ genreId, keyword, matchType?, tier? }` adds a keyword to a genre.
+**Implementation:** `app/api/presets/keywords/route.ts`
+
+### PATCH/DELETE /api/presets/keywords/[id]
+
+`PATCH` — `{ keyword?, matchType?, tier? }`. Editing `keyword` or
+`matchType` propagates the change to every book keyword still carrying this
+preset's `preset_keyword_id` (a book where the user hand-edited that
+keyword already had the link cleared, so propagation can't clobber it).
+Returns `propagatedCount`.
+
+`DELETE` — removes the preset; applied book keywords are left in place as
+ordinary manual keywords.
+
+**Implementation:** `app/api/presets/keywords/[id]/route.ts`
+
+### POST /api/books/[id]/keywords/apply-presets
+
+Matches the book's resolved genre against the preset library and inserts
+the matching keywords through the standard merge/filter pipeline (source
+`genre-preset`). Tier B presets are always inserted `paused`. Response:
+`{ matchedGenres, appliedCount, activeCount, pausedCount }`.
+
+**Implementation:** `app/api/books/[id]/keywords/apply-presets/route.ts`
+
+### POST /api/presets/import-starter-library
+
+Seeds the user's preset library from the checked-in starter set
+(`lib/presetSeedData/vinciKeywordBank.ts` — 9 genres, 60 sub-genres, 800
+keywords). Idempotent via the same unique constraints the manual add flow
+uses. Response: `{ genresTotal, keywordsAdded, keywordsTotal }`.
+
+**Implementation:** `app/api/presets/import-starter-library/route.ts`
+
+---
+
+## Negative Keyword Library Endpoints (Enhancements spec §15)
+
+### GET/POST /api/negative-keywords
+
+- `GET` — the user's whole negative-keyword library, any scope.
+- `POST` — `{ keyword, matchType?, scope, genreId?, bookId?, reason?, source? }`.
+  `scope` is `global` (default), `genre` (requires `genreId`), or `book`
+  (requires `bookId`). Response includes `collisions`: active keywords (any
+  book) whose text matches — a warning, never a block.
+
+**Implementation:** `app/api/negative-keywords/route.ts`
+
+### DELETE /api/negative-keywords/[id]
+
+**Implementation:** `app/api/negative-keywords/[id]/route.ts`
+
+---
+
+## Cannibalization Endpoint (Enhancements spec §14)
+
+### GET/POST /api/books/[id]/keywords/cannibalization
+
+- `GET` — this book's active keywords that are also active on another of
+  the user's books, each with `otherBooks` and a `suggestedOwnerBookId`
+  (highest specificity, tie-broken by bid). Same-author-only matches are
+  excluded (brand defense, not cannibalization).
+- `POST` — `{ text }` pauses every *other* book's active copy of that
+  keyword, keeping this book's copy active.
+
+**Implementation:** `app/api/books/[id]/keywords/cannibalization/route.ts`
+
+---
+
+## Filter Allowlist Endpoints (Enhancements spec §16, scoped)
+
+### GET/POST /api/filter-allowlist
+
+- `GET` — the user's whole allowlist.
+- `POST` — `{ text, filter?, note? }`. Idempotent (upsert on
+  `user_id, keyword_text`). The generate route checks this after the
+  filter pipeline runs and reclassifies any matching rejected/paused
+  candidate as active — `lib/keywordFilters.ts` itself is never touched.
+
+**Implementation:** `app/api/filter-allowlist/route.ts`
+
+### DELETE /api/filter-allowlist/[id]
+
+Removes the override — future generate runs can reject that text again.
+
+**Implementation:** `app/api/filter-allowlist/[id]/route.ts`
 
 ---
 

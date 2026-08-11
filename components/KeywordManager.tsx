@@ -10,10 +10,12 @@ import {
   Loader2,
   Plus,
   Search,
+  ShieldMinus,
   Sparkles,
   Trash2,
   X,
 } from "lucide-react";
+import CannibalizationPanel from "./CannibalizationPanel";
 
 type MatchType = "broad" | "phrase" | "exact";
 type KeywordStatus = "active" | "paused" | "negative" | "archived" | "rejected";
@@ -31,7 +33,17 @@ interface Keyword {
   rejection_reason?: string | null;
   /** Which filter decided — uiPollution, offTopicEntity, anchorRelevance, … */
   rejected_by_filter?: string | null;
+  /** Broad (1) – Very specific (5), from lib/keywordSpecificity.ts. Null for rows generated before sql/09 or for negatives. */
+  specificity?: number | null;
 }
+
+const SPECIFICITY_LABELS: Record<number, string> = {
+  1: "Broad",
+  2: "Somewhat broad",
+  3: "Medium",
+  4: "Somewhat specific",
+  5: "Very specific",
+};
 
 interface GenerateSummary {
   insertedCount: number;
@@ -117,8 +129,12 @@ export default function KeywordManager({
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const [filterFilter, setFilterFilter] = useState<"all" | string>("all");
+  const [specificityFilter, setSpecificityFilter] = useState<"all" | number>("all");
+  const [specificitySort, setSpecificitySort] = useState<"none" | "asc" | "desc">("none");
   const [refiltering, setRefiltering] = useState(false);
   const [refilterResult, setRefilterResult] = useState<string | null>(null);
+  const [promotingId, setPromotingId] = useState<string | null>(null);
+  const [promoteNotice, setPromoteNotice] = useState<string | null>(null);
 
   const [showGenerateForm, setShowGenerateForm] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -200,6 +216,67 @@ export default function KeywordManager({
     setKeywords((prev) => prev.filter((k) => k.id !== id));
     await fetch(`/api/keywords/${id}`, { method: "DELETE" });
     onKeywordsChanged?.();
+  }
+
+  /**
+   * Promotes a per-book rejection to the global negative-keyword library
+   * (§15) — a rejection is the best-evidenced negative available (see
+   * lib/negativeKeywords.ts), so it doesn't have to be rediscovered on
+   * every other book. Global scope by default; the book stays the source
+   * of truth for the reason.
+   */
+  async function promoteToNegativeLibrary(keyword: Keyword) {
+    setPromotingId(keyword.id);
+    try {
+      const res = await fetch("/api/negative-keywords", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          keyword: keyword.text,
+          matchType: keyword.match_type === "exact" ? "exact" : "phrase",
+          scope: "global",
+          reason: keyword.rejection_reason || `Rejected on this book (${labelForFilter(keyword.rejected_by_filter).trim()})`,
+          source: "promoted-from-rejection",
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setPromoteNotice(
+          body.collisions?.length > 0
+            ? `Added to the negative library — heads up, it matches an active keyword: ${body.collisions.join(", ")}.`
+            : `Added "${keyword.text}" to the negative library.`
+        );
+      } else {
+        setPromoteNotice(body.error || "Could not add to the negative library.");
+      }
+    } finally {
+      setPromotingId(null);
+    }
+  }
+
+  /**
+   * Restores a false-positive rejection: activates it here and adds it to
+   * the filter allowlist (§16, scoped) so no future generate run — on this
+   * book or any other — rejects that exact text again.
+   */
+  async function restoreAndAllowlist(keyword: Keyword) {
+    setPromotingId(keyword.id);
+    try {
+      const res = await fetch("/api/filter-allowlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: keyword.text, filter: keyword.rejected_by_filter }),
+      });
+      if (res.ok) {
+        await updateKeyword(keyword.id, { status: "active" });
+        setPromoteNotice(`Restored "${keyword.text}" and added it to the filter allowlist.`);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setPromoteNotice(body.error || "Could not restore this keyword.");
+      }
+    } finally {
+      setPromotingId(null);
+    }
   }
 
   async function bulkUpdate(status: KeywordStatus) {
@@ -321,17 +398,21 @@ export default function KeywordManager({
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return keywords.filter((k) => {
+    const matched = keywords.filter((k) => {
       // A generate run produces more rejections than keepers, so the default
       // view is the list you'd actually work with; rejected has its own tab.
       if (statusFilter === "all" && k.status === "rejected") return false;
       if (statusFilter !== "all" && k.status !== statusFilter) return false;
       if (sourceFilter !== "all" && k.source !== sourceFilter) return false;
       if (filterFilter !== "all" && k.rejected_by_filter !== filterFilter) return false;
+      if (specificityFilter !== "all" && k.specificity !== specificityFilter) return false;
       if (term && !k.text.toLowerCase().includes(term)) return false;
       return true;
     });
-  }, [keywords, statusFilter, sourceFilter, filterFilter, search]);
+    if (specificitySort === "none") return matched;
+    const sorted = [...matched].sort((a, b) => (a.specificity ?? 0) - (b.specificity ?? 0));
+    return specificitySort === "desc" ? sorted.reverse() : sorted;
+  }, [keywords, statusFilter, sourceFilter, filterFilter, specificityFilter, specificitySort, search]);
 
   const page = visible.slice(0, visibleCount);
   const allPageSelected = page.length > 0 && page.every((k) => selected.has(k.id));
@@ -357,6 +438,8 @@ export default function KeywordManager({
           </p>
         </div>
       </div>
+
+      <CannibalizationPanel bookId={bookId} onResolved={reload} />
 
       {/* Primary actions, as the reference screens' action-card row. */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -410,6 +493,13 @@ export default function KeywordManager({
         <div className="alert mb-6" aria-live="polite">
           <Filter size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
           <p>{refilterResult}</p>
+        </div>
+      )}
+
+      {promoteNotice && (
+        <div className="alert mb-6" aria-live="polite">
+          <ShieldMinus size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
+          <p>{promoteNotice}</p>
         </div>
       )}
 
@@ -633,6 +723,22 @@ export default function KeywordManager({
             ))}
           </select>
         )}
+
+        <select
+          value={specificityFilter}
+          onChange={(e) =>
+            changeFilters(() => setSpecificityFilter(e.target.value === "all" ? "all" : Number(e.target.value)))
+          }
+          className="input w-auto"
+          aria-label="Filter by specificity"
+        >
+          <option value="all">Any specificity</option>
+          {[1, 2, 3, 4, 5].map((level) => (
+            <option key={level} value={level}>
+              {SPECIFICITY_LABELS[level]}
+            </option>
+          ))}
+        </select>
       </div>
 
       {selected.size > 0 && (
@@ -724,6 +830,22 @@ export default function KeywordManager({
                   <th scope="col" className="hidden xl:table-cell">
                     Filter verdict
                   </th>
+                  <th scope="col" className="hidden md:table-cell">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setSpecificitySort((prev) =>
+                          prev === "none" ? "asc" : prev === "asc" ? "desc" : "none"
+                        )
+                      }
+                      className="flex items-center gap-1"
+                      aria-label="Sort by specificity"
+                      title="Broad → Specific"
+                    >
+                      Specificity
+                      {specificitySort !== "none" && <span aria-hidden="true">{specificitySort === "asc" ? "↑" : "↓"}</span>}
+                    </button>
+                  </th>
                   <th scope="col">Bid</th>
                   <th scope="col">Status</th>
                   <th scope="col">
@@ -781,6 +903,34 @@ export default function KeywordManager({
                         <span style={{ color: "var(--text-placeholder)" }}>—</span>
                       )}
                     </td>
+                    <td className="hidden md:table-cell">
+                      {keyword.specificity ? (
+                        <span
+                          className="inline-flex items-center gap-0.5"
+                          title={SPECIFICITY_LABELS[keyword.specificity]}
+                          aria-label={`Specificity: ${SPECIFICITY_LABELS[keyword.specificity]}`}
+                        >
+                          {[1, 2, 3, 4, 5].map((step) => (
+                            <span
+                              key={step}
+                              aria-hidden="true"
+                              style={{
+                                display: "inline-block",
+                                width: 6,
+                                height: 6,
+                                borderRadius: "50%",
+                                background:
+                                  step <= keyword.specificity!
+                                    ? "var(--icon-active, currentColor)"
+                                    : "var(--border-default, #d1d5db)",
+                              }}
+                            />
+                          ))}
+                        </span>
+                      ) : (
+                        <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                      )}
+                    </td>
                     <td>
                       <input
                         type="number"
@@ -812,14 +962,38 @@ export default function KeywordManager({
                       </select>
                     </td>
                     <td className="text-right">
-                      <button
-                        onClick={() => deleteKeyword(keyword.id)}
-                        className="btn btn-tertiary btn-icon btn-sm"
-                        aria-label={`Delete ${keyword.text}`}
-                        title="Delete keyword"
-                      >
-                        <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
-                      </button>
+                      <div className="flex justify-end gap-1">
+                        {keyword.status === "rejected" && (
+                          <>
+                            <button
+                              onClick={() => restoreAndAllowlist(keyword)}
+                              disabled={promotingId === keyword.id}
+                              className="btn btn-tertiary btn-icon btn-sm"
+                              aria-label={`Restore ${keyword.text} and add it to the filter allowlist`}
+                              title="False positive? Restore & allowlist"
+                            >
+                              <CheckCircle2 size={16} style={{ color: "var(--icon-default)" }} />
+                            </button>
+                            <button
+                              onClick={() => promoteToNegativeLibrary(keyword)}
+                              disabled={promotingId === keyword.id}
+                              className="btn btn-tertiary btn-icon btn-sm"
+                              aria-label={`Promote ${keyword.text} to the negative-keyword library`}
+                              title="Promote to negative library"
+                            >
+                              <ShieldMinus size={16} style={{ color: "var(--icon-default)" }} />
+                            </button>
+                          </>
+                        )}
+                        <button
+                          onClick={() => deleteKeyword(keyword.id)}
+                          className="btn btn-tertiary btn-icon btn-sm"
+                          aria-label={`Delete ${keyword.text}`}
+                          title="Delete keyword"
+                        >
+                          <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}
