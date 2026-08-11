@@ -50,8 +50,24 @@ const USER_AGENT =
 // residential IP) falls back to a direct fetch everywhere.
 export const SCRAPER_PROXY_API_KEY = process.env.SCRAPER_PROXY_API_KEY;
 
-/** Generic ScraperAPI URL wrapper — pass a country_code when the target is country-specific (e.g. an Amazon marketplace domain). */
+// Alternative proxy provider — same purpose as SCRAPER_PROXY_API_KEY above,
+// swapped in when preferred (e.g. better Amazon success rate on ScraperAPI's
+// free tier). When both are set, ScrapingBee takes priority.
+export const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY;
+
+export const SCRAPER_PROXY_CONFIGURED = Boolean(SCRAPINGBEE_API_KEY || SCRAPER_PROXY_API_KEY);
+
+/** Generic proxy URL wrapper — pass a country_code when the target is country-specific (e.g. an Amazon marketplace domain). Prefers ScrapingBee over ScraperAPI when both are configured. */
 export function resolveScraperProxyUrl(targetUrl: string, countryCode?: string): string {
+  if (SCRAPINGBEE_API_KEY) {
+    const params = new URLSearchParams({
+      api_key: SCRAPINGBEE_API_KEY,
+      url: targetUrl,
+      render_js: "false",
+    });
+    if (countryCode) params.set("country_code", countryCode);
+    return `https://app.scrapingbee.com/api/v1/?${params.toString()}`;
+  }
   if (!SCRAPER_PROXY_API_KEY) return targetUrl;
   const params = new URLSearchParams({ api_key: SCRAPER_PROXY_API_KEY, url: targetUrl });
   if (countryCode) params.set("country_code", countryCode);
@@ -100,7 +116,7 @@ export async function fetchPageHtml(
   options: { timeoutMs?: number; proxyCountry?: string; label?: string } = {}
 ): Promise<PageFetchResult> {
   const fetchUrl = resolveScraperProxyUrl(url, options.proxyCountry);
-  const timeoutMs = options.timeoutMs ?? (SCRAPER_PROXY_API_KEY ? PROXIED_PAGE_TIMEOUT_MS : PAGE_TIMEOUT_MS);
+  const timeoutMs = options.timeoutMs ?? (SCRAPER_PROXY_CONFIGURED ? PROXIED_PAGE_TIMEOUT_MS : PAGE_TIMEOUT_MS);
 
   try {
     // Rate limiting is keyed on the *target* host, not the proxy's, so

@@ -1,5 +1,5 @@
 import * as cheerio from "cheerio";
-import { PAGE_TIMEOUT_MS, PROXIED_PAGE_TIMEOUT_MS, resolveScraperProxyUrl, SCRAPER_PROXY_API_KEY } from "./scrape";
+import { PAGE_TIMEOUT_MS, PROXIED_PAGE_TIMEOUT_MS, resolveScraperProxyUrl, SCRAPER_PROXY_CONFIGURED } from "./scrape";
 import { KeywordCandidate } from "./types";
 
 const USER_AGENT =
@@ -21,7 +21,7 @@ async function fetchWithTimeout(url: string, timeoutMs: number): Promise<Respons
 async function fetchGoodreadsHtml(url: string): Promise<string | null> {
   const fetchUrl = resolveScraperProxyUrl(url);
   try {
-    const res = await fetchWithTimeout(fetchUrl, SCRAPER_PROXY_API_KEY ? PROXIED_PAGE_TIMEOUT_MS : PAGE_TIMEOUT_MS);
+    const res = await fetchWithTimeout(fetchUrl, SCRAPER_PROXY_CONFIGURED ? PROXIED_PAGE_TIMEOUT_MS : PAGE_TIMEOUT_MS);
     if (!res.ok) return null;
     return await res.text();
   } catch {

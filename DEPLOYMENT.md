@@ -121,6 +121,11 @@ Value: (Get from ScraperAPI - optional, for product page scraping)
 ```
 
 ```
+SCRAPINGBEE_API_KEY
+Value: (Get from ScrapingBee - optional, alternative to SCRAPER_PROXY_API_KEY; takes priority if both are set)
+```
+
+```
 FIRECRAWL_API_KEY
 Value: (Get from Firecrawl - optional, for page extraction)
 ```

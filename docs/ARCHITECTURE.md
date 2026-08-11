@@ -455,6 +455,7 @@ Each bug fix needs a test fixture:
 **Environment variables needed:**
 - `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY` — Supabase auth
 - `SCRAPER_PROXY_API_KEY` — Optional ScraperAPI for Amazon scraping (datacenter IP block workaround)
+- `SCRAPINGBEE_API_KEY` — Optional ScrapingBee alternative to `SCRAPER_PROXY_API_KEY` (same purpose; takes priority if both are set)
 - `GEMINI_API_KEY` — Optional Google Gemini key for keyword ranking (`lib/aiRanker.ts`); was previously and incorrectly documented here as `CLAUDE_API_KEY`
 - `FIRECRAWL_API_KEY` — Optional Firecrawl fallback scraping
 - ⏳ `AMAZON_ADS_CLIENT_ID`, `AMAZON_ADS_CLIENT_SECRET` — Needed for Phase 3
