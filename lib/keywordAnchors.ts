@@ -377,9 +377,21 @@ export function isForeignDemonym(word: string, anchors: BookAnchors): boolean {
   return !anchors.setting.includes(word);
 }
 
+// One BookAnchors object is built per generate/filter run and then read by
+// this function from a dozen-plus call sites across lib/keywordFilters.ts,
+// once per keyword — up to BOOK_KEYWORD_MAX + BOOK_COMP_NAME_MAX times per
+// run. Caching by object identity means the concatenated array is only
+// built once per run; the WeakMap drops the entry once that anchors object
+// is no longer referenced, so nothing outlives the request that built it.
+const QUALIFYING_ANCHORS_CACHE = new WeakMap<BookAnchors, string[]>();
+
 /** Every anchor that qualifies a keyword for relevance (i.e. excluding bookIntent). */
 export function qualifyingAnchors(anchors: BookAnchors): string[] {
-  return [...anchors.bookSpecific, ...anchors.genre, ...anchors.setting, ...anchors.comps];
+  const cached = QUALIFYING_ANCHORS_CACHE.get(anchors);
+  if (cached) return cached;
+  const combined = [...anchors.bookSpecific, ...anchors.genre, ...anchors.setting, ...anchors.comps];
+  QUALIFYING_ANCHORS_CACHE.set(anchors, combined);
+  return combined;
 }
 
 /** Reads `anchors.profile` with an empty (permissive) default filled in for hand-built anchors that omit it. */

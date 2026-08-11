@@ -134,17 +134,20 @@ export function containsNonBookProductTerm(text: string): boolean {
   return Array.from(NON_BOOK_PRODUCT_TERMS).some((term) => lower.includes(term));
 }
 
+// Compiled once at module load rather than per call: this runs once per
+// generated candidate (up to BOOK_KEYWORD_MAX + BOOK_COMP_NAME_MAX per book),
+// and NON_BUYING_INTENT_TOKENS never changes at runtime.
+const NON_BUYING_INTENT_PATTERNS = Array.from(NON_BUYING_INTENT_TOKENS).map(
+  (token) => new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i")
+);
+
 /**
  * Check if keyword contains non-buying-intent tokens (§3.6).
  * Filters out spoiler/ending/movie/piracy keywords that don't drive purchases.
  */
 export function containsNonBuyingIntentToken(text: string): boolean {
   const lower = text.toLowerCase();
-  return Array.from(NON_BUYING_INTENT_TOKENS).some((token) => {
-    // Word boundary match for multi-word tokens
-    const pattern = new RegExp(`\\b${token.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i");
-    return pattern.test(lower);
-  });
+  return NON_BUYING_INTENT_PATTERNS.some((pattern) => pattern.test(lower));
 }
 
 /**

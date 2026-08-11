@@ -3,6 +3,7 @@ import { loadBookWithSnapshot } from "@/lib/bookStore";
 import { mapWithConcurrency } from "@/lib/concurrency";
 import { capAndRank } from "@/lib/keywordCapAndRank";
 import { buildFilterContext, filterKeywords, type FilterableKeyword } from "@/lib/keywordFilters";
+import { BOOK_COMP_NAME_MAX, BOOK_KEYWORD_MAX } from "@/lib/keywordMerge";
 import { genreFamilySearchTerms } from "@/lib/genre";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import type { KeywordCandidate, KeywordCategory, KeywordSource, MatchType } from "@/lib/types";
@@ -232,7 +233,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         matchType: outcome.row.match_type,
         bid: outcome.row.bid ?? undefined,
       }));
-    const { backlog } = capAndRank(capCandidates, context.anchors);
+    // The book pipeline's keyword library is research output, not a single ad
+    // group (see the caps note in lib/keywordMerge.ts): it holds up to
+    // BOOK_KEYWORD_MAX descriptive keywords and BOOK_COMP_NAME_MAX comp names
+    // for review, not capAndRank's own ad-group-sized defaults (150 total /
+    // 50 per group). Passing those defaults here — as an earlier version of
+    // this route did — meant "Re-run filters" silently archived the bulk of
+    // a full-sized keyword list on every run, far below what generation
+    // itself produces and the keyword manager is meant to hold.
+    const { backlog } = capAndRank(capCandidates, context.anchors, {
+      maxKeywordsTotal: BOOK_KEYWORD_MAX + BOOK_COMP_NAME_MAX,
+      maxPerAdGroup: { descriptive: BOOK_KEYWORD_MAX, "comp-names": BOOK_COMP_NAME_MAX },
+    });
     const backlogByText = new Map(backlog.map((entry) => [entry.text, entry]));
 
     for (const outcome of outcomes) {

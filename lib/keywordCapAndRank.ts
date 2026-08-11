@@ -20,7 +20,8 @@ import type { CompetitorKeyword, KeywordCandidate, MatchType } from "./types";
 
 export interface CapAndRankOptions {
   maxKeywordsTotal?: number;
-  maxPerAdGroup?: number;
+  /** A single cap shared by every ad group, or a cap per ad group when their budgets differ (the book pipeline's descriptive/comp-names split, e.g., is 300/120, not one shared number). */
+  maxPerAdGroup?: number | Partial<Record<"descriptive" | "comp-names", number>>;
 }
 
 const DEFAULT_MAX_KEYWORDS_TOTAL = 150;
@@ -155,6 +156,11 @@ function adGroupOf(candidate: KeywordCandidate): "descriptive" | "comp-names" {
   return (candidate.sources ?? []).includes("comp-name") ? "comp-names" : "descriptive";
 }
 
+function adGroupCap(maxPerAdGroup: CapAndRankOptions["maxPerAdGroup"], adGroup: "descriptive" | "comp-names"): number {
+  if (typeof maxPerAdGroup === "number") return maxPerAdGroup;
+  return maxPerAdGroup?.[adGroup] ?? DEFAULT_MAX_PER_AD_GROUP;
+}
+
 /**
  * Applies the cap: scores every survivor, reserves guaranteed slots, then
  * fills the remaining budget by score within each ad group's own cap.
@@ -165,7 +171,6 @@ export function capAndRank(
   options: CapAndRankOptions = {}
 ): CapAndRankResult {
   const maxKeywordsTotal = options.maxKeywordsTotal ?? DEFAULT_MAX_KEYWORDS_TOTAL;
-  const maxPerAdGroup = options.maxPerAdGroup ?? DEFAULT_MAX_PER_AD_GROUP;
 
   const scored = candidates.map((candidate) => ({
     candidate,
@@ -190,8 +195,9 @@ export function capAndRank(
   for (const entry of scored) {
     if (entry.guaranteed) continue;
 
+    const groupCap = adGroupCap(options.maxPerAdGroup, entry.adGroup);
     const totalOk = kept.length < maxKeywordsTotal;
-    const adGroupOk = perAdGroupCount[entry.adGroup] < maxPerAdGroup;
+    const adGroupOk = perAdGroupCount[entry.adGroup] < groupCap;
 
     if (totalOk && adGroupOk) {
       kept.push({ ...entry.candidate, score: entry.score, guaranteed: false, adGroup: entry.adGroup });
@@ -200,7 +206,7 @@ export function capAndRank(
       backlog.push({
         ...entry.candidate,
         filter: "capAndRank",
-        reason: !totalOk ? `ranked out: over max_keywords_total (${maxKeywordsTotal})` : `ranked out: over max_per_ad_group (${maxPerAdGroup}) for "${entry.adGroup}"`,
+        reason: !totalOk ? `ranked out: over max_keywords_total (${maxKeywordsTotal})` : `ranked out: over max_per_ad_group (${groupCap}) for "${entry.adGroup}"`,
         code: "RANKED_OUT",
       });
     }
