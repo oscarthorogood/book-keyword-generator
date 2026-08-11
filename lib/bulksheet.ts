@@ -63,12 +63,18 @@ export interface BulksheetInput {
 const PRODUCT = "Sponsored Products";
 
 /**
- * Auto campaigns are the discovery engine that feeds search-term
- * harvesting — industry practice holds them to <10% (ideally ~5%) of total
- * spend (Enhancements spec §17) rather than sizing them like a manual
- * campaign.
+ * Manual campaigns default to $100/day (brief F11): the $10 default this
+ * generator previously emitted was a config bug, not an intended budget.
  */
-const AUTO_BUDGET_RATIO = 0.05;
+const DEFAULT_MANUAL_DAILY_BUDGET = 100;
+
+/**
+ * Auto campaigns are the discovery engine that feeds search-term
+ * harvesting. At the old 5%-of-$10 default this worked out to a hardcoded
+ * $1/day floor — ~2 clicks/day, which discovers almost nothing (brief F11).
+ * ~10% of the manual budget is a more useful default at any budget size.
+ */
+const AUTO_BUDGET_RATIO = 0.1;
 const AUTO_BUDGET_MIN = 1;
 
 /** Close > substitutes > loose > complements: closer matches earn the higher bid. */
@@ -104,7 +110,7 @@ function stateFor(status: string | null | undefined): string {
  */
 export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
   const { bookTitle, keywords, negatives = [], productTargets = [], brandTargets = [] } = input;
-  const dailyBudget = input.dailyBudget ?? 10;
+  const dailyBudget = input.dailyBudget ?? DEFAULT_MANUAL_DAILY_BUDGET;
   const defaultBid = input.defaultBid ?? 0.5;
   const rows: BulksheetRow[] = [];
 
