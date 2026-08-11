@@ -20,7 +20,7 @@ export async function GET() {
       supabase.from("preset_genres").select("id, name, parent_id, created_at").eq("user_id", user.id).order("name"),
       supabase
         .from("preset_keywords")
-        .select("id, genre_id, keyword, match_type, specificity, tier")
+        .select("id, genre_id, keyword, match_type, specificity, tier, author_references")
         .eq("user_id", user.id)
         .order("keyword"),
     ]);
@@ -31,10 +31,34 @@ export async function GET() {
       }
       return Response.json({ error: genreError.message }, { status: 400 });
     }
-    if (keywordError) return Response.json({ error: keywordError.message }, { status: 400 });
 
-    const keywordsByGenre = new Map<string, typeof keywords>();
-    for (const kw of keywords ?? []) {
+    // sql/11 (author_references) not applied yet — retry without it rather
+    // than failing the whole page.
+    let resolvedKeywords: Array<{
+      id: string;
+      genre_id: string;
+      keyword: string;
+      match_type: string;
+      specificity: number | null;
+      tier: string;
+      author_references?: string[] | null;
+    }> | null = keywords;
+    if (keywordError) {
+      if (!/author_references/i.test(keywordError.message)) {
+        return Response.json({ error: keywordError.message }, { status: 400 });
+      }
+      const retry = await supabase
+        .from("preset_keywords")
+        .select("id, genre_id, keyword, match_type, specificity, tier")
+        .eq("user_id", user.id)
+        .order("keyword");
+      if (retry.error) return Response.json({ error: retry.error.message }, { status: 400 });
+      resolvedKeywords = retry.data;
+    }
+    const keywordsList = resolvedKeywords ?? [];
+
+    const keywordsByGenre = new Map<string, typeof keywordsList>();
+    for (const kw of keywordsList) {
       if (!keywordsByGenre.has(kw.genre_id)) keywordsByGenre.set(kw.genre_id, []);
       keywordsByGenre.get(kw.genre_id)!.push(kw);
     }

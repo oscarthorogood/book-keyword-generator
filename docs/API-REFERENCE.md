@@ -364,6 +364,15 @@ the matching keywords through the standard merge/filter pipeline (source
 
 **Implementation:** `app/api/books/[id]/keywords/apply-presets/route.ts`
 
+### POST /api/presets/import-starter-library
+
+Seeds the user's preset library from the checked-in starter set
+(`lib/presetSeedData/vinciKeywordBank.ts` — 9 genres, 60 sub-genres, 800
+keywords). Idempotent via the same unique constraints the manual add flow
+uses. Response: `{ genresTotal, keywordsAdded, keywordsTotal }`.
+
+**Implementation:** `app/api/presets/import-starter-library/route.ts`
+
 ---
 
 ## Admin Endpoints

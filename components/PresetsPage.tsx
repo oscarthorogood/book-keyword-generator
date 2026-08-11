@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, Plus, Trash2 } from "lucide-react";
 
 type MatchType = "broad" | "phrase" | "exact";
 type Tier = "a" | "b";
@@ -12,6 +12,7 @@ interface PresetKeywordRow {
   keyword: string;
   match_type: MatchType;
   tier: Tier;
+  author_references?: string[] | null;
 }
 
 interface PresetGenreRow {
@@ -49,6 +50,9 @@ export default function PresetsPage() {
   const [newKeywordTier, setNewKeywordTier] = useState<Tier>("a");
   const [addingKeyword, setAddingKeyword] = useState(false);
 
+  const [importing, setImporting] = useState(false);
+  const [importMessage, setImportMessage] = useState<string | null>(null);
+
   const [reloadToken, setReloadToken] = useState(0);
   const load = () => setReloadToken((n) => n + 1);
 
@@ -70,6 +74,29 @@ export default function PresetsPage() {
   const topLevel = useMemo(() => genres.filter((g) => !g.parent_id), [genres]);
   const childrenOf = (parentId: string) => genres.filter((g) => g.parent_id === parentId);
   const selectedGenre = genres.find((g) => g.id === selectedGenreId) ?? null;
+
+  async function importStarterLibrary() {
+    setImporting(true);
+    setImportMessage(null);
+    try {
+      const res = await fetch("/api/presets/import-starter-library", { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setImportMessage(body.error || "Could not import the starter library.");
+        return;
+      }
+      setImportMessage(
+        body.keywordsAdded > 0
+          ? `Added ${body.keywordsAdded} new preset keyword${body.keywordsAdded === 1 ? "" : "s"} across ${body.genresTotal ?? ""} genres.`
+          : "Starter library is already fully imported — nothing new to add."
+      );
+      load();
+    } catch (err) {
+      setImportMessage(err instanceof Error ? err.message : "Could not import the starter library.");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   async function createGenre() {
     const name = newGenreName.trim();
@@ -133,12 +160,26 @@ export default function PresetsPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
-      <header className="page-header">
-        <h1 className="page-title">Preset Keywords by Genre</h1>
-        <p className="page-subtitle mt-1">
-          A managed keyword library, applied to matching books with one click from the book page.
-        </p>
+      <header className="page-header flex flex-wrap items-start justify-between gap-4">
+        <div>
+          <h1 className="page-title">Preset Keywords by Genre</h1>
+          <p className="page-subtitle mt-1">
+            A managed keyword library, applied to matching books with one click from the book page.
+          </p>
+        </div>
+        <button onClick={importStarterLibrary} disabled={importing} className="btn btn-secondary">
+          <Download size={20} />
+          {importing ? "Importing…" : "Import starter library"}
+        </button>
       </header>
+
+      {importMessage && (
+        <div className="page-body pb-0">
+          <div className="alert alert-success" aria-live="polite">
+            <p>{importMessage}</p>
+          </div>
+        </div>
+      )}
 
       <div className="page-body flex-1">
         {loadError ? (
@@ -286,7 +327,12 @@ export default function PresetsPage() {
                       <tbody>
                         {selectedGenre.keywords.map((kw) => (
                           <tr key={kw.id}>
-                            <td className="cell-primary">{kw.keyword}</td>
+                            <td>
+                              <p className="cell-primary">{kw.keyword}</p>
+                              {kw.author_references && kw.author_references.length > 0 && (
+                                <p className="meta-line text-xs">Researched against: {kw.author_references.join(", ")}</p>
+                              )}
+                            </td>
                             <td className="capitalize">{kw.match_type}</td>
                             <td>
                               <select

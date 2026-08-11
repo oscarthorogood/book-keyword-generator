@@ -399,6 +399,15 @@ to every book that applied it — unless that book's copy was hand-edited
 afterward, which clears the link so propagation can never overwrite a
 manual edit. Requires `sql/10-preset-keywords.sql`.
 
+**Import starter library** on `/presets` seeds your library from a
+checked-in starter set (`lib/presetSeedData/vinciKeywordBank.ts`): 9 genres,
+60 sub-genres, 800 keywords, each with the comp authors it was researched
+against (shown under the keyword once imported). Idempotent — re-running it
+only adds what's missing, never duplicates or overwrites anything you've
+since edited. Requires `sql/11-preset-keyword-author-references.sql` to keep
+the author references; without it, the import still runs, just without that
+extra context.
+
 ## Setup
 
 ```bash
