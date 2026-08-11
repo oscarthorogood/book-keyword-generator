@@ -1,32 +1,39 @@
 import { loadBookWithSnapshot } from "@/lib/bookStore";
+import { capAndRank } from "@/lib/keywordCapAndRank";
 import { buildFilterContext, filterKeywords, type FilterableKeyword } from "@/lib/keywordFilters";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
+import type { KeywordSource, MatchType } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-/** Statuses the pipeline is allowed to change. A negative or archived keyword is a human decision. */
-const REFILTERABLE_STATUSES = ["active", "paused", "rejected"];
+/** Statuses the pipeline is allowed to change. A negative keyword is a human decision. */
+const REFILTERABLE_STATUSES = ["active", "paused", "rejected", "archived"];
 
 interface KeywordRow {
   id: string;
   text: string;
   source: string | null;
   status: string;
+  match_type: MatchType;
+  bid: number | null;
 }
 
 /**
  * POST /api/books/[id]/keywords/filter
  * Body: { dryRun?: boolean }
  *
- * Runs the filter pipeline (lib/keywordFilters.ts) over the keywords this
- * book *already* has — the one-off migration for lists generated before the
- * pipeline existed, and the way to re-apply it after the blocklists or the
- * book's metadata change.
+ * Runs the drop-rule filter pipeline (lib/keywordFilters.ts) and then the
+ * cap-and-rank stage (lib/keywordCapAndRank.ts, brief §5.11) over the
+ * keywords this book *already* has — the one-off migration for lists
+ * generated before the pipeline existed, and the way to re-apply both after
+ * the blocklists, the keyword budget, or the book's metadata change.
  *
- * Only active/paused/rejected rows are touched: a keyword a human marked
- * negative or archived stays where they put it. `dryRun` reports what would
- * change without writing anything.
+ * Only active/paused/rejected/archived rows are touched: a keyword a human
+ * marked negative stays where they put it. A row already archived by a
+ * previous cap is re-scored on every run, so a keyword ranked out by an
+ * earlier, larger candidate pool can rotate back in once the field thins
+ * out. `dryRun` reports what would change without writing anything.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -56,7 +63,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const { data: rows, error } = await supabase
       .from("keywords")
-      .select("id, text, source, status")
+      .select("id, text, source, status, match_type, bid")
       .eq("book_id", bookId)
       .eq("user_id", user.id)
       .in("status", REFILTERABLE_STATUSES);
@@ -98,21 +105,64 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const { results, summary } = filterKeywords(filterable, context);
 
     const verdictToStatus = { pass: "active", pause: "paused", reject: "rejected" } as const;
-    const updates: Array<{ id: string; status: string; reason: string | null; filter: string | null; text: string }> = [];
-
+    interface RowOutcome {
+      row: KeywordRow;
+      status: string;
+      reason: string | null;
+      filter: string | null;
+      text: string;
+    }
+    const outcomes: RowOutcome[] = [];
     for (const result of results) {
       const row = byId.get(result.originalText);
       if (!row) continue;
-      const status = verdictToStatus[result.verdict];
-      if (status === row.status && !result.rewritten) continue;
-      updates.push({
-        id: row.id,
-        status,
+      outcomes.push({
+        row,
+        status: verdictToStatus[result.verdict],
         reason: result.reason ?? null,
         filter: result.filter ?? null,
         text: result.text,
       });
     }
+
+    // §5.11: the drop-rule pipeline alone still leaves keyword dumping — cap
+    // the survivors at the book's keyword budget and rank the rest into a
+    // backlog rather than reactivating every one of them. Ranked-out
+    // keywords are never rejects (they're plausible, just not in the top
+    // slice today), so they're archived — kept, inactive, and eligible to be
+    // rotated back in on a future re-filter — rather than joining the
+    // rejected pile.
+    const capCandidates = outcomes
+      .filter((outcome) => outcome.status === "active")
+      .map((outcome) => ({
+        text: outcome.text,
+        sources: (outcome.row.source ? [outcome.row.source] : []) as KeywordSource[],
+        matchType: outcome.row.match_type,
+        bid: outcome.row.bid ?? undefined,
+      }));
+    const { backlog } = capAndRank(capCandidates, context.anchors);
+    const backlogByText = new Map(backlog.map((entry) => [entry.text, entry]));
+
+    for (const outcome of outcomes) {
+      if (outcome.status !== "active") continue;
+      const capped = backlogByText.get(outcome.text);
+      if (!capped) continue;
+      outcome.status = "archived";
+      outcome.reason = capped.reason;
+      outcome.filter = capped.filter;
+    }
+
+    const updates = outcomes
+      .filter((outcome) => outcome.status !== outcome.row.status || outcome.text !== outcome.row.text)
+      .map((outcome) => ({
+        id: outcome.row.id,
+        status: outcome.status,
+        reason: outcome.reason,
+        filter: outcome.filter,
+        text: outcome.text,
+      }));
+
+    const archivedByCap = outcomes.filter((outcome) => outcome.filter === "capAndRank").length;
 
     if (dryRun) {
       return Response.json({
@@ -121,6 +171,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         examined: keywords.length,
         changed: updates.length,
         summary,
+        archivedByCap,
         preview: updates.slice(0, 50),
       });
     }
@@ -154,6 +205,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       examined: keywords.length,
       changed,
       summary,
+      archivedByCap,
     });
   } catch (err) {
     console.error("Error filtering keywords:", err);
