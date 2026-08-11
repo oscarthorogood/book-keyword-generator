@@ -12,9 +12,9 @@ const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
  *
  * "Generate ASINs" — the Competitors-tab equivalent of "Generate keywords":
  * pulls competitor ASINs from the same metadata scrape keyword generation
- * already uses (snapshot.competitors, the related-competitor crawl captured
- * when the book was added — see lib/productTargets.ts), rather than running
- * a new discovery pass. ASINs already tracked for this book are skipped.
+ * already uses (snapshot.competitors, compAsins, frequentlyBoughtTogether,
+ * compareWithSimilar — see lib/productTargets.ts), rather than running a new
+ * discovery pass. ASINs already tracked for this book are skipped.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -28,7 +28,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!loaded) return Response.json({ error: "Book not found" }, { status: 404 });
 
     const { snapshot, book } = loaded;
-    if (!snapshot.capture.ok) {
+    if (!snapshot.capture?.ok) {
       return Response.json(
         {
           error: "This book's Amazon metadata could not be read, so there's no competitor crawl to draw from. Re-fetch the metadata and try again.",
@@ -43,6 +43,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const ownAsin = (snapshot.asin ?? book.asin ?? "").toUpperCase();
 
     const candidates = new Map<string, string | null>();
+
+    // 1. Gather from snapshot.competitors
     for (const competitor of snapshot.competitors ?? []) {
       const asin = competitor.asin?.toUpperCase();
       if (!asin || !ASIN_PATTERN.test(asin) || asin === ownAsin || existingAsins.has(asin)) continue;
@@ -50,8 +52,35 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       candidates.set(asin, notes);
     }
 
+    // 2. Gather from snapshot.compAsins
+    for (const asinRaw of snapshot.compAsins ?? []) {
+      const asin = asinRaw?.toUpperCase();
+      if (!asin || !ASIN_PATTERN.test(asin) || asin === ownAsin || existingAsins.has(asin) || candidates.has(asin)) continue;
+      candidates.set(asin, "Related listing");
+    }
+
+    // 3. Gather from snapshot.frequentlyBoughtTogether
+    for (const item of snapshot.frequentlyBoughtTogether ?? []) {
+      const asin = item.asin?.toUpperCase();
+      if (!asin || !ASIN_PATTERN.test(asin) || asin === ownAsin || existingAsins.has(asin) || candidates.has(asin)) continue;
+      candidates.set(asin, item.title ? `Frequently bought together — ${item.title}` : "Frequently bought together");
+    }
+
+    // 4. Gather from snapshot.compareWithSimilar
+    for (const item of snapshot.compareWithSimilar ?? []) {
+      const asin = item.asin?.toUpperCase();
+      if (!asin || !ASIN_PATTERN.test(asin) || asin === ownAsin || existingAsins.has(asin) || candidates.has(asin)) continue;
+      candidates.set(asin, item.title ? `Similar title — ${item.title}` : "Similar title");
+    }
+
+    const totalCrawled =
+      (snapshot.competitors?.length ?? 0) +
+      (snapshot.compAsins?.length ?? 0) +
+      (snapshot.frequentlyBoughtTogether?.length ?? 0) +
+      (snapshot.compareWithSimilar?.length ?? 0);
+
     if (candidates.size === 0) {
-      return Response.json({ success: true, candidateCount: 0, insertedCount: 0 });
+      return Response.json({ success: true, candidateCount: totalCrawled, insertedCount: 0 });
     }
 
     const rows = Array.from(candidates.entries()).map(([asin, notes]) => ({
@@ -69,7 +98,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
 
-    return Response.json({ success: true, candidateCount: candidates.size, insertedCount: data?.length ?? 0 });
+    return Response.json({
+      success: true,
+      candidateCount: Math.max(candidates.size, totalCrawled),
+      insertedCount: data?.length ?? 0,
+    });
   } catch (err) {
     console.error("Error generating competitor ASINs:", err);
     const message = err instanceof Error ? err.message : "Unknown error";
