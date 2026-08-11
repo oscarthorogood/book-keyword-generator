@@ -12,6 +12,7 @@ import { applyFiltersToCandidates, buildFilterContext } from "@/lib/keywordFilte
 import {
   BOOK_COMP_NAME_MAX,
   BOOK_KEYWORD_MAX,
+  RECOMMENDED_MAX_KEYWORDS,
   boostScoresByCompetitorQuality,
   buildAmazonRecommendationCandidates,
   buildAuthorCatalogCandidates,
@@ -237,7 +238,7 @@ function countBy<T extends string>(values: T[]): Record<string, number> {
 
 /**
  * POST /api/books/[id]/keywords/generate
- * Body: { keyTropes?: string[], knownTags?: string[], keywordCategories?: KeywordCategory[], sources?: KeywordSource[], defaultBid?: number }
+ * Body: { keyTropes?: string[], knownTags?: string[], keywordCategories?: KeywordCategory[], sources?: KeywordSource[], defaultBid?: number, resultCap?: number }
  */
 export async function POST(
   request: Request,
@@ -292,6 +293,16 @@ export async function POST(
         : ALL_KEYWORD_SOURCES
     );
     const defaultBid = typeof body.defaultBid === "number" && body.defaultBid > 0 ? body.defaultBid : 0.5;
+    // How many results this run keeps, per ad group (tropes vs. comp names) —
+    // user-facing cap from the Generate form. Never exceeds the book-library
+    // hard ceiling (BOOK_KEYWORD_MAX/BOOK_COMP_NAME_MAX) regardless of what's
+    // requested; defaults to Amazon's own 25-50-keywords-per-ad-group guidance.
+    const requestedCap =
+      typeof body.resultCap === "number" && Number.isFinite(body.resultCap) && body.resultCap > 0
+        ? Math.floor(body.resultCap)
+        : RECOMMENDED_MAX_KEYWORDS;
+    const tropesCap = Math.min(requestedCap, BOOK_KEYWORD_MAX);
+    const compNameCap = Math.min(requestedCap, BOOK_COMP_NAME_MAX);
 
     const asRecordArray = (value: unknown): Array<Record<string, unknown>> =>
       Array.isArray(value) ? value.filter((v): v is Record<string, unknown> => !!v && typeof v === "object") : [];
@@ -524,13 +535,13 @@ export async function POST(
       0.2
     ).sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
 
-    tropesKeywords = validateFinalKeywords(tropesKeywords, defaultBid).slice(0, BOOK_KEYWORD_MAX);
+    tropesKeywords = validateFinalKeywords(tropesKeywords, defaultBid).slice(0, tropesCap);
 
     const compDataHealth = assessCompDataHealth(snapshot.competitors);
     compNameKeywords = filterHallucinatedCompKeywords(
       validateFinalKeywords(compNameKeywords, defaultBid),
       compDataHealth
-    ).slice(0, BOOK_COMP_NAME_MAX);
+    ).slice(0, compNameCap);
 
     let aiRanked = false;
     if (isAiRankingConfigured()) {

@@ -120,6 +120,10 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
   const [generating, setGenerating] = useState(false);
   const [generateError, setGenerateError] = useState<string | null>(null);
   const [summary, setSummary] = useState<GenerateSummary | null>(null);
+  // Matches MAX_METADATA_FETCHES on the generate route, so by default every
+  // inserted ASIN gets a live metadata fetch rather than landing with
+  // null title/author/price/bsr.
+  const [resultCap, setResultCap] = useState(40);
 
   const [recalculatingBids, setRecalculatingBids] = useState(false);
 
@@ -269,7 +273,11 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
     setGenerateError(null);
     setSummary(null);
     try {
-      const res = await fetch(`/api/books/${bookId}/competitors/generate`, { method: "POST" });
+      const res = await fetch(`/api/books/${bookId}/competitors/generate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ resultCap }),
+      });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setGenerateError(body.error || "Could not generate competitor ASINs.");
@@ -360,15 +368,34 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
 
       {/* Primary actions — same shape as KeywordManager's action-card row. */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <button onClick={generateAsins} disabled={generating} className="action-card">
-          <div className="flex items-start justify-between">
-            <span className="icon-tile icon-tile-inverted">
-              {generating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-            </span>
-            <Plus size={20} style={{ color: "rgba(255,255,255,0.6)" }} aria-hidden="true" />
-          </div>
-          <span className="text-md font-semibold">{generating ? "Generating…" : "Generate ASINs"}</span>
-        </button>
+        <div className="flex flex-col gap-2">
+          <button onClick={generateAsins} disabled={generating} className="action-card">
+            <div className="flex items-start justify-between">
+              <span className="icon-tile icon-tile-inverted">
+                {generating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+              </span>
+              <Plus size={20} style={{ color: "rgba(255,255,255,0.6)" }} aria-hidden="true" />
+            </div>
+            <span className="text-md font-semibold">{generating ? "Generating…" : "Generate ASINs"}</span>
+          </button>
+          <label className="sr-only" htmlFor="competitor-result-cap">
+            Result cap for Generate ASINs
+          </label>
+          <select
+            id="competitor-result-cap"
+            value={resultCap}
+            onChange={(e) => setResultCap(Number(e.target.value))}
+            className="input"
+            title="Maximum competitor ASINs to add per Generate run, best-ranked first"
+          >
+            <option value={10}>Cap: 10 ASINs</option>
+            <option value={25}>Cap: 25 ASINs</option>
+            <option value={40}>Cap: 40 ASINs (recommended)</option>
+            <option value={75}>Cap: 75 ASINs</option>
+            <option value={100}>Cap: 100 ASINs</option>
+            <option value={200}>Cap: 200 ASINs (no cap)</option>
+          </select>
+        </div>
 
         <button
           onClick={rerunFilters}

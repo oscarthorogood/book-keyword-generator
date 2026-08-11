@@ -130,8 +130,30 @@ export interface CompetitorAsin {
   id: string;
   book_id: string;
   competitor_asin: string;
-  /** "auto-crawl" is set by the Generate action from the book's own competitor crawl; the rest are manual/import sources. */
-  source: "manual" | "kdpradar" | "datadive" | "helium10" | "sellersprite" | "auto-crawl";
+  /**
+   * "auto-crawl"/"genre-preset" plus the live discovery sources are set by the
+   * Generate action (see liveGroups in competitors/generate/route.ts); the
+   * rest are manual/import sources. Kept in sync with lib/sourceRegistry.ts's
+   * competitor-tagged ids.
+   */
+  source:
+    | "manual"
+    | "kdpradar"
+    | "datadive"
+    | "helium10"
+    | "sellersprite"
+    | "auto-crawl"
+    | "genre-preset"
+    | "ads-api"
+    | "amazon-autocomplete"
+    | "google-autocomplete"
+    | "youtube-autocomplete"
+    | "duckduckgo-autocomplete"
+    | "serpapi"
+    | "decodo"
+    | "zenrows"
+    | "persona-llm"
+    | "groq-persona";
   notes: string | null;
   status: "active" | "paused" | "negative" | "archived" | "rejected";
   bid: number | null;
