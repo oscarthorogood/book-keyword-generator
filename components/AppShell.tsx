@@ -3,9 +3,9 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, ChevronLeft, ChevronRight, KeyRound, LayoutDashboard, ListChecks, LogOut, Shield, Swords } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Database, KeyRound, LayoutDashboard, ListChecks, LogOut, Shield, Swords } from "lucide-react";
 
-export type ShellSection = "dashboard" | "books" | "keywords" | "competitors" | "presets" | "access";
+export type ShellSection = "dashboard" | "books" | "keywords" | "competitors" | "presets" | "sources" | "access";
 
 interface AppShellProps {
   active: ShellSection;
@@ -18,6 +18,7 @@ const NAV_ITEMS: Array<{ section: Exclude<ShellSection, "access">; label: string
   { section: "keywords", label: "Keywords", href: "/keywords", Icon: KeyRound },
   { section: "competitors", label: "Competitors", href: "/competitors", Icon: Swords },
   { section: "presets", label: "Presets", href: "/presets", Icon: ListChecks },
+  { section: "sources", label: "Sources", href: "/sources", Icon: Database },
 ];
 
 /**

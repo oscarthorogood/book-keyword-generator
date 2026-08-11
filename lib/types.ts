@@ -52,7 +52,9 @@ export type KeywordSource =
   /** Descriptor phrases and comp relationships mined from critic blurbs/listicles. */
   | "critics-blurbs"
   /** Decodo scrape/export data (CSV or JSON). */
-  | "decodo";
+  | "decodo"
+  /** ZenRows scraping API — live Amazon search-results HTML, parsed locally. */
+  | "zenrows";
 
 /**
  * Intent-segment taxonomy for Amazon Ads keyword strategy (distinct from the

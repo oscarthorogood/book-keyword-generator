@@ -15,6 +15,8 @@ import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazo
 import { getSerpApiKeywordCandidates } from "@/lib/serpApiKeywords";
 import { fetchDecodoKeywordRows, isDecodoConfigured } from "@/lib/decodoClient";
 import { buildDecodoCandidates } from "@/lib/decodoSource";
+import { fetchZenrowsKeywordRows, isZenrowsConfigured } from "@/lib/zenrowsClient";
+import { buildZenrowsCandidates } from "@/lib/zenrowsSource";
 import { buildPersonaLlmCandidates } from "@/lib/llmPersonaSource";
 import { buildGroqPersonaCandidates } from "@/lib/groqKeywordSource";
 import { extractAsinCandidates } from "@/lib/keywordMerge";
@@ -120,6 +122,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       personaLlmCandidates,
       groqPersonaCandidates,
       liveDecodoRows,
+      liveZenrowsRows,
     ] = await Promise.all([
       isAdsApiConfigured()
         ? getAdsApiKeywordRecommendations(snapshot.asin ?? "", snapshot.marketplace).catch((err: Error) => {
@@ -151,6 +154,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             return [];
           })
         : Promise.resolve([]),
+      isZenrowsConfigured()
+        ? fetchZenrowsKeywordRows(serpApiSeeds, snapshot.marketplace).catch((err: Error) => {
+            console.error("[generate] live ZenRows fetch failed:", err.message);
+            return [];
+          })
+        : Promise.resolve([]),
     ]);
 
     const liveGroups: Record<string, KeywordCandidate[]> = {
@@ -167,6 +176,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           ? buildDecodoCandidates(
               { title: snapshot.title, author: snapshot.author, seriesName: snapshot.seriesName },
               liveDecodoRows
+            )
+          : [],
+      zenrows:
+        liveZenrowsRows.length > 0
+          ? buildZenrowsCandidates(
+              { title: snapshot.title, author: snapshot.author, seriesName: snapshot.seriesName },
+              liveZenrowsRows
             )
           : [],
     };
