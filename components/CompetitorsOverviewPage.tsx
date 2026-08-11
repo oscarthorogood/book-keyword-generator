@@ -9,7 +9,7 @@ interface BookCompetitorSummary {
   bookTitle: string;
   bookAuthor: string;
   competitorAsinCount: number;
-  competitorKeywordCount: number;
+  activeCompetitorAsinCount: number;
 }
 
 async function fetchSummary(): Promise<{ books: BookCompetitorSummary[]; error: string | null }> {
@@ -25,9 +25,9 @@ async function fetchSummary(): Promise<{ books: BookCompetitorSummary[]; error: 
 
 /**
  * Global competitors overview (spec §5.2) — the same page-shell pattern as
- * app/keywords/page.tsx's AllKeywordsPage: per-book competitor-ASIN and
- * competitor-keyword counts, linking through to each book's own
- * Competitors tab (BookKeywordPanel mode="competitors").
+ * app/keywords/page.tsx's AllKeywordsPage: per-book competitor-ASIN counts,
+ * linking through to each book's own Competitors tab
+ * (BookKeywordPanel mode="competitors").
  */
 export default function CompetitorsOverviewPage() {
   const [books, setBooks] = useState<BookCompetitorSummary[]>([]);
@@ -48,7 +48,7 @@ export default function CompetitorsOverviewPage() {
   }, []);
 
   const totalAsins = books.reduce((sum, b) => sum + b.competitorAsinCount, 0);
-  const totalKeywords = books.reduce((sum, b) => sum + b.competitorKeywordCount, 0);
+  const totalActiveAsins = books.reduce((sum, b) => sum + b.activeCompetitorAsinCount, 0);
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
@@ -56,8 +56,8 @@ export default function CompetitorsOverviewPage() {
         <div>
           <h1 className="page-title">Competitors</h1>
           <p className="page-subtitle mt-1">
-            {totalAsins} competitor ASIN{totalAsins === 1 ? "" : "s"} · {totalKeywords} competitor keyword
-            {totalKeywords === 1 ? "" : "s"} across {books.length} book{books.length === 1 ? "" : "s"}
+            {totalAsins} competitor ASIN{totalAsins === 1 ? "" : "s"} · {totalActiveAsins} active across{" "}
+            {books.length} book{books.length === 1 ? "" : "s"}
           </p>
         </div>
       </header>
@@ -96,7 +96,7 @@ export default function CompetitorsOverviewPage() {
                 <tr>
                   <th scope="col">Book</th>
                   <th scope="col">Competitor ASINs</th>
-                  <th scope="col">Competitor keywords</th>
+                  <th scope="col">Active</th>
                   <th scope="col">
                     <span className="sr-only">Actions</span>
                   </th>
@@ -110,7 +110,7 @@ export default function CompetitorsOverviewPage() {
                       <p className="meta-line text-xs">{book.bookAuthor}</p>
                     </td>
                     <td>{book.competitorAsinCount}</td>
-                    <td>{book.competitorKeywordCount}</td>
+                    <td>{book.activeCompetitorAsinCount}</td>
                     <td className="text-right">
                       <Link href={`/books/${book.bookId}?view=competitors`} className="btn btn-secondary btn-sm">
                         View competitors

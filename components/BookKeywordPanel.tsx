@@ -19,7 +19,8 @@ export interface BookKeywordPanelProps {
  * behaviour §6.3 asks for (search, category/match-type/specificity
  * filtering, CSV export, per-keyword actions) for the "keywords" mode, so it
  * is reused as-is rather than duplicated; CompetitorPanel mirrors the same
- * shape of behaviour for competitor_keywords.
+ * shape of behaviour for competitor ASINs (competitor_asins) — there is no
+ * competitor-keyword concept in this mode.
  */
 export default function BookKeywordPanel({
   bookId,

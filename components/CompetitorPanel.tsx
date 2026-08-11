@@ -3,62 +3,42 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
-  AlertTriangle,
   CheckCircle2,
   Download,
   Filter,
   Loader2,
   Plus,
   Search,
+  Sparkles,
   Swords,
   Trash2,
-  Upload,
-  X,
 } from "lucide-react";
 
-type MatchType = "broad" | "phrase" | "exact";
-type CompetitorKeywordStatus = "active" | "paused" | "negative" | "archived" | "rejected";
+type CompetitorAsinStatus = "active" | "paused" | "negative" | "archived" | "rejected";
+type CompetitorAsinSource = "manual" | "kdpradar" | "datadive" | "helium10" | "sellersprite" | "auto-crawl";
 
 interface CompetitorAsinRow {
   id: string;
   competitor_asin: string;
-  source: string;
+  source: CompetitorAsinSource;
   notes: string | null;
-  created_at: string;
-}
-
-interface CompetitorKeywordRow {
-  id: string;
-  competitor_asin: string;
-  text: string;
-  volume: number;
-  rank: number | null;
-  competitor_count: number;
-  mean_rank: number | null;
-  category: string | null;
-  intent_segment: string | null;
-  match_type: MatchType;
-  specificity: number | null;
-  status: CompetitorKeywordStatus;
+  status: CompetitorAsinStatus;
   bid: number | null;
   rejection_reason: string | null;
   rejected_by_filter: string | null;
+  created_at: string;
 }
 
-interface ImportSummary {
-  asinsSeen: number;
-  rowsParsed: number;
-  aggregatedCount: number;
+interface GenerateSummary {
   candidateCount: number;
-  storedCount: number;
+  insertedCount: number;
 }
 
-const SOURCES = ["manual", "kdpradar", "datadive", "helium10", "sellersprite"];
-const TOOLS = ["helium10", "sellersprite", "kdpradar", "datadive"] as const;
-const STATUSES: CompetitorKeywordStatus[] = ["active", "paused", "negative", "archived", "rejected"];
+const SOURCES: CompetitorAsinSource[] = ["manual", "kdpradar", "datadive", "helium10", "sellersprite", "auto-crawl"];
+const STATUSES: CompetitorAsinStatus[] = ["active", "paused", "negative", "archived", "rejected"];
 const PAGE_SIZE = 100;
 
-const statusBadge: Record<CompetitorKeywordStatus, string> = {
+const statusBadge: Record<CompetitorAsinStatus, string> = {
   active: "badge-success",
   paused: "badge-warning",
   negative: "badge-error",
@@ -66,7 +46,7 @@ const statusBadge: Record<CompetitorKeywordStatus, string> = {
   rejected: "badge-gray",
 };
 
-const STATUS_LABELS: Record<CompetitorKeywordStatus, string> = {
+const STATUS_LABELS: Record<CompetitorAsinStatus, string> = {
   active: "Active",
   paused: "Paused",
   negative: "Negative",
@@ -74,13 +54,10 @@ const STATUS_LABELS: Record<CompetitorKeywordStatus, string> = {
   rejected: "Rejected",
 };
 
-const SPECIFICITY_LABELS: Record<number, string> = {
-  1: "Broad",
-  2: "Somewhat broad",
-  3: "Medium",
-  4: "Somewhat specific",
-  5: "Very specific",
-};
+function labelForSource(source: string | null): string {
+  if (!source) return "—";
+  return source.replace(/-/g, " ");
+}
 
 function labelForFilter(filter: string | null | undefined): string {
   if (!filter) return "";
@@ -93,122 +70,57 @@ async function fetchCompetitorAsins(bookId: string): Promise<CompetitorAsinRow[]
   return res.ok ? (body.competitors ?? []) : [];
 }
 
-async function fetchCompetitorKeywords(bookId: string): Promise<CompetitorKeywordRow[]> {
-  const res = await fetch(`/api/books/${bookId}/competitor-keywords`);
-  const body = await res.json().catch(() => ({}));
-  return res.ok ? (body.keywords ?? []) : [];
-}
-
-/** Minimal CSV parser — handles quoted fields with embedded commas, no embedded newlines. */
-function parseCsv(text: string): Array<Record<string, string>> {
-  const lines = text.split(/\r?\n/).filter((line) => line.trim().length > 0);
-  if (lines.length < 2) return [];
-
-  function splitLine(line: string): string[] {
-    const fields: string[] = [];
-    let current = "";
-    let inQuotes = false;
-    for (let i = 0; i < line.length; i++) {
-      const char = line[i];
-      if (inQuotes) {
-        if (char === '"' && line[i + 1] === '"') {
-          current += '"';
-          i++;
-        } else if (char === '"') {
-          inQuotes = false;
-        } else {
-          current += char;
-        }
-      } else if (char === '"') {
-        inQuotes = true;
-      } else if (char === ",") {
-        fields.push(current);
-        current = "";
-      } else {
-        current += char;
-      }
-    }
-    fields.push(current);
-    return fields.map((f) => f.trim());
-  }
-
-  const headers = splitLine(lines[0]);
-  return lines.slice(1).map((line) => {
-    const values = splitLine(line);
-    const row: Record<string, string> = {};
-    headers.forEach((header, i) => {
-      row[header] = values[i] ?? "";
-    });
-    return row;
-  });
-}
-
 /**
- * Competitor-ASIN + competitor-keyword panel (spec §6) — the mode="competitors"
- * half of BookKeywordPanel, laid out identically to KeywordManager: the same
- * "manager" header, action-card row (generate/re-run filters/export), status
- * tabs with counts, search + filters, and inline-editable table. The one
- * structural difference is the data being managed is ASINs and the
- * reverse-ASIN keywords they surface, not hand-picked keywords.
+ * Competitor-ASIN manager (spec §6) — the mode="competitors" half of
+ * BookKeywordPanel. Managed exactly the same way as KeywordManager, with
+ * competitor ASINs standing in for keywords: same manager header, action
+ * cards (generate/re-run filters/export), status tabs, search + filters,
+ * bulk toolbar, and inline-editable table. There is no competitor-keyword
+ * concept here — this tab tracks ASINs only.
  */
 export default function CompetitorPanel({ bookId }: { bookId: string }) {
   const [asins, setAsins] = useState<CompetitorAsinRow[]>([]);
-  const [keywords, setKeywords] = useState<CompetitorKeywordRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   const [newAsinText, setNewAsinText] = useState("");
-  const [newSource, setNewSource] = useState("manual");
+  const [newSource, setNewSource] = useState<CompetitorAsinSource>("manual");
   const [adding, setAdding] = useState(false);
 
-  const [statusFilter, setStatusFilter] = useState<"all" | CompetitorKeywordStatus>("all");
-  const [search, setSearch] = useState("");
-  const [categoryFilter, setCategoryFilter] = useState<"all" | string>("all");
-  const [matchTypeFilter, setMatchTypeFilter] = useState<"all" | string>("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | CompetitorAsinStatus>("all");
+  const [sourceFilter, setSourceFilter] = useState<"all" | string>("all");
   const [filterFilter, setFilterFilter] = useState<"all" | string>("all");
-  const [specificityFilter, setSpecificityFilter] = useState<"all" | number>("all");
+  const [search, setSearch] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  const [generating, setGenerating] = useState(false);
+  const [generateError, setGenerateError] = useState<string | null>(null);
+  const [summary, setSummary] = useState<GenerateSummary | null>(null);
 
   const [refiltering, setRefiltering] = useState(false);
   const [refilterResult, setRefilterResult] = useState<string | null>(null);
 
-  const [showGenerateForm, setShowGenerateForm] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<ImportSummary | null>(null);
-  const [importTool, setImportTool] = useState<(typeof TOOLS)[number]>("helium10");
-  const [importAsin, setImportAsin] = useState("");
-  const [importCsv, setImportCsv] = useState("");
-
-  async function reload() {
-    const [loadedAsins, loadedKeywords] = await Promise.all([
-      fetchCompetitorAsins(bookId),
-      fetchCompetitorKeywords(bookId),
-    ]);
-    setAsins(loadedAsins);
-    setKeywords(loadedKeywords);
-    setSelected(new Set());
-  }
-
   useEffect(() => {
     let active = true;
-    (async () => {
-      const [loadedAsins, loadedKeywords] = await Promise.all([
-        fetchCompetitorAsins(bookId),
-        fetchCompetitorKeywords(bookId),
-      ]);
-      if (!active) return;
-      setAsins(loadedAsins);
-      setKeywords(loadedKeywords);
-      setLoading(false);
-    })();
+    fetchCompetitorAsins(bookId)
+      .then((rows) => {
+        if (!active) return;
+        setAsins(rows);
+        setLoading(false);
+      })
+      .catch(() => {
+        if (active) setLoading(false);
+      });
     return () => {
       active = false;
     };
   }, [bookId]);
 
-  const selectedImportAsin = importAsin || asins[0]?.competitor_asin || "";
+  async function reload() {
+    setAsins(await fetchCompetitorAsins(bookId));
+    setSelected(new Set());
+  }
 
   async function addAsins() {
     const text = newAsinText.trim();
@@ -239,41 +151,31 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
     }
   }
 
-  async function deleteAsin(id: string) {
-    setAsins((prev) => prev.filter((a) => a.id !== id));
-    await fetch(`/api/books/${bookId}/competitors`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id }),
-    });
-  }
-
-  async function updateKeyword(id: string, updates: Partial<CompetitorKeywordRow>) {
-    setKeywords((prev) => prev.map((k) => (k.id === id ? { ...k, ...updates } : k)));
+  async function updateAsin(id: string, updates: Partial<CompetitorAsinRow>) {
+    setAsins((prev) => prev.map((a) => (a.id === id ? { ...a, ...updates } : a)));
 
     const payload: Record<string, unknown> = {};
-    if (updates.match_type !== undefined) payload.matchType = updates.match_type;
     if (updates.status !== undefined) payload.status = updates.status;
     if (updates.bid !== undefined) payload.bid = updates.bid;
 
-    await fetch(`/api/competitor-keywords/${id}`, {
+    await fetch(`/api/competitors/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
     });
   }
 
-  async function deleteKeyword(id: string) {
-    setKeywords((prev) => prev.filter((k) => k.id !== id));
-    await fetch(`/api/competitor-keywords/${id}`, { method: "DELETE" });
+  async function deleteAsin(id: string) {
+    setAsins((prev) => prev.filter((a) => a.id !== id));
+    await fetch(`/api/competitors/${id}`, { method: "DELETE" });
   }
 
-  async function bulkUpdate(status: CompetitorKeywordStatus) {
+  async function bulkUpdate(status: CompetitorAsinStatus) {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
-    setKeywords((prev) => prev.map((k) => (selected.has(k.id) ? { ...k, status } : k)));
+    setAsins((prev) => prev.map((a) => (selected.has(a.id) ? { ...a, status } : a)));
     setSelected(new Set());
-    await fetch(`/api/books/${bookId}/competitor-keywords`, {
+    await fetch(`/api/books/${bookId}/competitors`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids, status }),
@@ -283,55 +185,31 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
   async function bulkDelete() {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
-    setKeywords((prev) => prev.filter((k) => !selected.has(k.id)));
+    setAsins((prev) => prev.filter((a) => !selected.has(a.id)));
     setSelected(new Set());
-    await fetch(`/api/books/${bookId}/competitor-keywords`, {
+    await fetch(`/api/books/${bookId}/competitors`, {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ ids }),
     });
   }
 
-  /**
-   * "Generate" for competitors runs the existing reverse-ASIN import
-   * pipeline (lib/reverseAsin.ts) over a pasted export for one competitor
-   * ASIN, rather than a from-scratch discovery pass — there's no automatic
-   * ASIN-discovery pipeline to run.
-   */
-  async function generateFromImport() {
+  /** Pulls competitor ASINs from the same metadata crawl keyword generation uses (§ generate route). */
+  async function generateAsins() {
     setGenerating(true);
     setGenerateError(null);
     setSummary(null);
     try {
-      const parsed = parseCsv(importCsv);
-      if (parsed.length === 0) {
-        setGenerateError("Paste a CSV export with a header row and at least one data row.");
-        return;
-      }
-      if (!selectedImportAsin) {
-        setGenerateError("Add a competitor ASIN above and select it before importing.");
-        return;
-      }
-
-      const res = await fetch(`/api/books/${bookId}/reverse-asin-import`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          tool: importTool,
-          rows: parsed.map((row) => ({ asin: selectedImportAsin, row })),
-        }),
-      });
+      const res = await fetch(`/api/books/${bookId}/competitors/generate`, { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setGenerateError(body.error || "Could not import this export.");
+        setGenerateError(body.error || "Could not generate competitor ASINs.");
         return;
       }
-      setSummary(body as ImportSummary);
-      setShowGenerateForm(false);
-      setImportCsv("");
+      setSummary(body as GenerateSummary);
       await reload();
     } catch (err) {
-      setGenerateError(err instanceof Error ? err.message : "Could not import this export.");
+      setGenerateError(err instanceof Error ? err.message : "Could not generate competitor ASINs.");
     } finally {
       setGenerating(false);
     }
@@ -341,18 +219,14 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
     setRefiltering(true);
     setRefilterResult(null);
     try {
-      const res = await fetch(`/api/books/${bookId}/competitor-keywords/filter`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
+      const res = await fetch(`/api/books/${bookId}/competitors/filter`, { method: "POST" });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         setRefilterResult(body.error || "Could not re-run the filters.");
         return;
       }
       setRefilterResult(
-        `Re-checked ${body.examined} keyword${body.examined === 1 ? "" : "s"} · ${body.changed} changed`
+        `Re-checked ${body.examined} competitor ASIN${body.examined === 1 ? "" : "s"} · ${body.changed} changed`
       );
       await reload();
     } catch (err) {
@@ -368,41 +242,37 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
     setSelected(new Set());
   }
 
-  const categories = useMemo(
-    () => Array.from(new Set(keywords.map((k) => k.category).filter((c): c is string => !!c))).sort(),
-    [keywords]
-  );
-  const matchTypes = useMemo(() => Array.from(new Set(keywords.map((k) => k.match_type))).sort(), [keywords]);
+  const sources = useMemo(() => Array.from(new Set(asins.map((a) => a.source))).sort(), [asins]);
   const rejectingFilters = useMemo(
-    () => Array.from(new Set(keywords.map((k) => k.rejected_by_filter).filter((f): f is string => !!f))).sort(),
-    [keywords]
+    () => Array.from(new Set(asins.map((a) => a.rejected_by_filter).filter((f): f is string => !!f))).sort(),
+    [asins]
   );
 
-  const keptCount = useMemo(() => keywords.filter((k) => k.status !== "rejected").length, [keywords]);
-  const rejectedCount = keywords.length - keptCount;
+  const keptCount = useMemo(() => asins.filter((a) => a.status !== "rejected").length, [asins]);
+  const rejectedCount = asins.length - keptCount;
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    return keywords.filter((k) => {
-      if (statusFilter === "all" && k.status === "rejected") return false;
-      if (statusFilter !== "all" && k.status !== statusFilter) return false;
-      if (categoryFilter !== "all" && k.category !== categoryFilter) return false;
-      if (matchTypeFilter !== "all" && k.match_type !== matchTypeFilter) return false;
-      if (filterFilter !== "all" && k.rejected_by_filter !== filterFilter) return false;
-      if (specificityFilter !== "all" && k.specificity !== specificityFilter) return false;
-      if (term && !k.text.toLowerCase().includes(term)) return false;
+    return asins.filter((a) => {
+      if (statusFilter === "all" && a.status === "rejected") return false;
+      if (statusFilter !== "all" && a.status !== statusFilter) return false;
+      if (sourceFilter !== "all" && a.source !== sourceFilter) return false;
+      if (filterFilter !== "all" && a.rejected_by_filter !== filterFilter) return false;
+      if (term && !a.competitor_asin.toLowerCase().includes(term) && !a.notes?.toLowerCase().includes(term)) {
+        return false;
+      }
       return true;
     });
-  }, [keywords, statusFilter, search, categoryFilter, matchTypeFilter, filterFilter, specificityFilter]);
+  }, [asins, statusFilter, sourceFilter, filterFilter, search]);
 
   const page = visible.slice(0, visibleCount);
-  const allPageSelected = page.length > 0 && page.every((k) => selected.has(k.id));
+  const allPageSelected = page.length > 0 && page.every((a) => selected.has(a.id));
 
   function toggleAllOnPage() {
     setSelected((prev) => {
       const next = new Set(prev);
-      if (allPageSelected) page.forEach((k) => next.delete(k.id));
-      else page.forEach((k) => next.add(k.id));
+      if (allPageSelected) page.forEach((a) => next.delete(a.id));
+      else page.forEach((a) => next.add(a.id));
       return next;
     });
   }
@@ -413,34 +283,29 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
         <div>
           <p className="card-title">Competitor manager</p>
           <p className="meta-line mt-1">
-            {keptCount} competitor keyword{keptCount === 1 ? "" : "s"} for this book
+            {keptCount} competitor ASIN{keptCount === 1 ? "" : "s"} for this book
             {rejectedCount > 0 && ` · ${rejectedCount} rejected by the relevance filters`}
-            {` · ${asins.length} competitor ASIN${asins.length === 1 ? "" : "s"} tracked`}
           </p>
         </div>
       </div>
 
       {/* Primary actions — same shape as KeywordManager's action-card row. */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <button
-          onClick={() => setShowGenerateForm((open) => !open)}
-          className="action-card"
-          aria-expanded={showGenerateForm}
-        >
+        <button onClick={generateAsins} disabled={generating} className="action-card">
           <div className="flex items-start justify-between">
             <span className="icon-tile icon-tile-inverted">
-              <Upload size={20} />
+              {generating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
             </span>
             <Plus size={20} style={{ color: "rgba(255,255,255,0.6)" }} aria-hidden="true" />
           </div>
-          <span className="text-md font-semibold">Generate keywords</span>
+          <span className="text-md font-semibold">{generating ? "Generating…" : "Generate ASINs"}</span>
         </button>
 
         <button
           onClick={rerunFilters}
-          disabled={refiltering || keywords.length === 0}
+          disabled={refiltering || asins.length === 0}
           className="action-card action-card-secondary"
-          title="Re-check every competitor keyword against this book's relevance filters"
+          title="Re-check every competitor ASIN against this book's own ASIN and basic ASIN shape"
         >
           <div className="flex items-start justify-between">
             <span className="icon-tile">
@@ -455,9 +320,9 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
         </button>
 
         <a
-          href={`/api/books/${bookId}/competitor-keywords/export`}
+          href={`/api/books/${bookId}/competitors/export`}
           className="action-card action-card-secondary"
-          title="Download an Amazon Ads bulk-upload CSV (competitor keywords, negatives and competitor ASIN targets)"
+          title="Download an Amazon Ads bulk-upload CSV of competitor ASIN product targets"
         >
           <div className="flex items-start justify-between">
             <span className="icon-tile">
@@ -467,6 +332,23 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
           <span className="text-md font-semibold">Export bulksheet</span>
         </a>
       </div>
+
+      {generateError && (
+        <div className="alert alert-error mb-4" role="alert">
+          <AlertCircle size={20} className="mt-0.5 shrink-0" />
+          <p>{generateError}</p>
+        </div>
+      )}
+
+      {summary && (
+        <div className="alert alert-success mb-6" aria-live="polite">
+          <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
+          <p>
+            Added {summary.insertedCount} new competitor ASIN{summary.insertedCount === 1 ? "" : "s"} from{" "}
+            {summary.candidateCount} found in this book&apos;s competitor crawl.
+          </p>
+        </div>
+      )}
 
       {refilterResult && (
         <div className="alert mb-6" aria-live="polite">
@@ -482,122 +364,8 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
         </div>
       )}
 
-      {showGenerateForm && (
-        <div className="card card-compact mb-6" style={{ background: "var(--bg-subtle)" }}>
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                Generate from a reverse-ASIN export
-              </p>
-              <p className="meta-line mt-1 max-w-2xl">
-                Paste a Cerebro/reverse-ASIN CSV export (Helium 10, SellerSprite, KDPRadar or DataDive) for one
-                competitor ASIN. Rows are aggregated, classified and stored, then gated by this book&apos;s
-                relevance filters just like generated keywords.
-              </p>
-            </div>
-            <button
-              onClick={() => setShowGenerateForm(false)}
-              className="btn btn-tertiary btn-icon btn-sm"
-              aria-label="Close generate panel"
-            >
-              <X size={20} />
-            </button>
-          </div>
-
-          {asins.length === 0 && (
-            <div className="alert alert-warning mb-4">
-              <AlertTriangle size={20} className="mt-0.5 shrink-0" />
-              <p>Add a competitor ASIN below first — the import needs to know which ASIN this export came from.</p>
-            </div>
-          )}
-
-          <div className="mb-4 flex flex-wrap items-end gap-3">
-            <div>
-              <label className="field-label" htmlFor="import-asin">
-                Competitor ASIN
-              </label>
-              <select
-                id="import-asin"
-                value={selectedImportAsin}
-                onChange={(e) => setImportAsin(e.target.value)}
-                className="input w-auto"
-                disabled={asins.length === 0}
-              >
-                {asins.map((asin) => (
-                  <option key={asin.id} value={asin.competitor_asin}>
-                    {asin.competitor_asin}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div>
-              <label className="field-label" htmlFor="import-tool">
-                Export tool
-              </label>
-              <select
-                id="import-tool"
-                value={importTool}
-                onChange={(e) => setImportTool(e.target.value as (typeof TOOLS)[number])}
-                className="input w-auto"
-              >
-                {TOOLS.map((tool) => (
-                  <option key={tool} value={tool}>
-                    {tool}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <label className="field-label" htmlFor="import-csv">
-            CSV export
-          </label>
-          <textarea
-            id="import-csv"
-            value={importCsv}
-            onChange={(e) => setImportCsv(e.target.value)}
-            rows={6}
-            placeholder="Paste the export, including its header row"
-            className="input resize-y font-mono text-xs"
-          />
-
-          {generateError && (
-            <div className="alert alert-error mt-4" role="alert">
-              <AlertCircle size={20} className="mt-0.5 shrink-0" />
-              <p>{generateError}</p>
-            </div>
-          )}
-
-          <div className="mt-5 flex justify-end">
-            <button
-              onClick={generateFromImport}
-              disabled={generating || asins.length === 0 || !importCsv.trim()}
-              className="btn btn-primary"
-            >
-              {generating ? <Loader2 size={20} className="animate-spin" /> : <Upload size={20} />}
-              {generating ? "Importing…" : "Generate keywords"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {summary && (
-        <div className="alert alert-success mb-6" aria-live="polite">
-          <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
-          <div className="min-w-0">
-            <p className="alert-title">
-              Stored {summary.storedCount} competitor keyword{summary.storedCount === 1 ? "" : "s"}
-            </p>
-            <p className="mt-1">
-              {summary.rowsParsed} rows parsed · {summary.aggregatedCount} aggregated · {summary.candidateCount}{" "}
-              candidates from {summary.asinsSeen} ASIN{summary.asinsSeen === 1 ? "" : "s"}
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Add competitor ASIN */}
-      <div className="mb-4 flex flex-wrap items-start gap-3">
+      <div className="mb-5 flex flex-wrap items-start gap-3">
         <textarea
           value={newAsinText}
           onChange={(e) => setNewAsinText(e.target.value)}
@@ -612,10 +380,15 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
             }
           }}
         />
-        <select value={newSource} onChange={(e) => setNewSource(e.target.value)} className="input w-auto" aria-label="Source">
-          {SOURCES.map((source) => (
+        <select
+          value={newSource}
+          onChange={(e) => setNewSource(e.target.value as CompetitorAsinSource)}
+          className="input w-auto"
+          aria-label="Source for new competitor ASIN"
+        >
+          {SOURCES.filter((source) => source !== "auto-crawl").map((source) => (
             <option key={source} value={source}>
-              {source}
+              {labelForSource(source)}
             </option>
           ))}
         </select>
@@ -625,25 +398,7 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
         </button>
       </div>
 
-      {asins.length > 0 && (
-        <div className="mb-6 flex flex-wrap gap-2">
-          {asins.map((asin) => (
-            <span key={asin.id} className="chip-tag inline-flex items-center gap-2">
-              {asin.competitor_asin}
-              <span className="meta-line text-xs">({asin.source})</span>
-              <button
-                onClick={() => deleteAsin(asin.id)}
-                aria-label={`Remove competitor ASIN ${asin.competitor_asin}`}
-                title="Remove"
-              >
-                <Trash2 size={12} />
-              </button>
-            </span>
-          ))}
-        </div>
-      )}
-
-      {/* Status tabs — the primary cut through the list, matching KeywordManager. */}
+      {/* Status tabs — the primary cut through the list (mirrors KeywordManager). */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="tabs overflow-x-auto" role="tablist" aria-label="Filter by status">
           <button
@@ -662,7 +417,7 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
               onClick={() => changeFilters(() => setStatusFilter(status))}
               className={`tab ${statusFilter === status ? "tab-active" : ""}`}
             >
-              {STATUS_LABELS[status]} ({keywords.filter((k) => k.status === status).length})
+              {STATUS_LABELS[status]} ({asins.filter((a) => a.status === status).length})
             </button>
           ))}
         </div>
@@ -672,43 +427,29 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
       <div className="mb-4 flex flex-wrap items-center gap-3">
         <div className="relative min-w-[200px] flex-1">
           <Search size={20} className="input-icon" aria-hidden="true" />
-          <label className="sr-only" htmlFor="competitor-keyword-search">
-            Search competitor keywords
+          <label className="sr-only" htmlFor="competitor-asin-search">
+            Search competitor ASINs
           </label>
           <input
-            id="competitor-keyword-search"
+            id="competitor-asin-search"
             type="search"
             value={search}
             onChange={(e) => changeFilters(() => setSearch(e.target.value))}
-            placeholder="Search competitor keywords"
+            placeholder="Search competitor ASINs"
             className="input input-with-icon"
           />
         </div>
 
         <select
-          value={categoryFilter}
-          onChange={(e) => changeFilters(() => setCategoryFilter(e.target.value))}
+          value={sourceFilter}
+          onChange={(e) => changeFilters(() => setSourceFilter(e.target.value))}
           className="input w-auto"
-          aria-label="Filter by category"
+          aria-label="Filter by source"
         >
-          <option value="all">All categories</option>
-          {categories.map((category) => (
-            <option key={category} value={category}>
-              {category.replace(/-/g, " ")}
-            </option>
-          ))}
-        </select>
-
-        <select
-          value={matchTypeFilter}
-          onChange={(e) => changeFilters(() => setMatchTypeFilter(e.target.value))}
-          className="input w-auto"
-          aria-label="Filter by match type"
-        >
-          <option value="all">All match types</option>
-          {matchTypes.map((type) => (
-            <option key={type} value={type}>
-              {type}
+          <option value="all">All sources</option>
+          {sources.map((source) => (
+            <option key={source} value={source}>
+              {labelForSource(source)}
             </option>
           ))}
         </select>
@@ -723,27 +464,11 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
             <option value="all">Any filter verdict</option>
             {rejectingFilters.map((filter) => (
               <option key={filter} value={filter}>
-                {labelForFilter(filter).trim()} ({keywords.filter((k) => k.rejected_by_filter === filter).length})
+                {labelForFilter(filter).trim()} ({asins.filter((a) => a.rejected_by_filter === filter).length})
               </option>
             ))}
           </select>
         )}
-
-        <select
-          value={specificityFilter}
-          onChange={(e) =>
-            changeFilters(() => setSpecificityFilter(e.target.value === "all" ? "all" : Number(e.target.value)))
-          }
-          className="input w-auto"
-          aria-label="Filter by specificity"
-        >
-          <option value="all">Any specificity</option>
-          {[1, 2, 3, 4, 5].map((level) => (
-            <option key={level} value={level}>
-              {SPECIFICITY_LABELS[level]}
-            </option>
-          ))}
-        </select>
       </div>
 
       {selected.size > 0 && (
@@ -767,7 +492,7 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
       )}
 
       {loading ? (
-        <div className="table-wrap" aria-busy="true" aria-label="Loading competitor keywords">
+        <div className="table-wrap" aria-busy="true" aria-label="Loading competitor ASINs">
           {[0, 1, 2, 3].map((row) => (
             <div key={row} className="flex items-center gap-4 border-b p-4" style={{ borderColor: "var(--line)" }}>
               <div className="skeleton h-4 w-4 shrink-0" />
@@ -783,18 +508,18 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
           </span>
           <div className="space-y-1">
             <p className="empty-state-title">
-              {keywords.length === 0 ? "No competitor keywords yet" : "No competitor keywords match these filters"}
+              {asins.length === 0 ? "No competitor ASINs yet" : "No competitor ASINs match these filters"}
             </p>
             <p className="empty-state-body">
-              {keywords.length === 0
-                ? "Add a competitor ASIN above, then generate from a reverse-ASIN export."
+              {asins.length === 0
+                ? "Generate them from this book's competitor crawl, or add your own above."
                 : "Try a different status tab, or clear the search."}
             </p>
           </div>
-          {keywords.length === 0 ? (
-            <button onClick={() => setShowGenerateForm(true)} className="btn btn-primary">
-              <Upload size={20} />
-              Generate keywords
+          {asins.length === 0 ? (
+            <button onClick={generateAsins} disabled={generating} className="btn btn-primary">
+              {generating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+              Generate ASINs
             </button>
           ) : (
             <button
@@ -802,10 +527,8 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                 changeFilters(() => {
                   setSearch("");
                   setStatusFilter("all");
-                  setCategoryFilter("all");
-                  setMatchTypeFilter("all");
+                  setSourceFilter("all");
                   setFilterFilter("all");
-                  setSpecificityFilter("all");
                 })
               }
               className="btn btn-secondary"
@@ -826,18 +549,15 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                       className="checkbox"
                       checked={allPageSelected}
                       onChange={toggleAllOnPage}
-                      aria-label="Select all shown competitor keywords"
+                      aria-label="Select all shown competitor ASINs"
                     />
                   </th>
-                  <th scope="col">Keyword</th>
-                  <th scope="col">Match</th>
-                  <th scope="col">Volume</th>
-                  <th scope="col">Rank</th>
+                  <th scope="col">Competitor ASIN</th>
                   <th scope="col" className="hidden lg:table-cell">
-                    Competitor ASINs
+                    Source
                   </th>
-                  <th scope="col" className="hidden xl:table-cell">
-                    Category
+                  <th scope="col" className="hidden lg:table-cell">
+                    Notes
                   </th>
                   <th scope="col" className="hidden xl:table-cell">
                     Filter verdict
@@ -850,52 +570,38 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                 </tr>
               </thead>
               <tbody>
-                {page.map((keyword) => (
-                  <tr key={keyword.id}>
+                {page.map((asin) => (
+                  <tr key={asin.id}>
                     <td>
                       <input
                         type="checkbox"
                         className="checkbox"
-                        checked={selected.has(keyword.id)}
+                        checked={selected.has(asin.id)}
                         onChange={(e) =>
                           setSelected((prev) => {
                             const next = new Set(prev);
-                            if (e.target.checked) next.add(keyword.id);
-                            else next.delete(keyword.id);
+                            if (e.target.checked) next.add(asin.id);
+                            else next.delete(asin.id);
                             return next;
                           })
                         }
-                        aria-label={`Select ${keyword.text}`}
+                        aria-label={`Select ${asin.competitor_asin}`}
                       />
                     </td>
                     <td>
-                      <p className="cell-primary">{keyword.text}</p>
+                      <p className="cell-primary">{asin.competitor_asin}</p>
                     </td>
-                    <td>
-                      <select
-                        value={keyword.match_type}
-                        onChange={(e) => updateKeyword(keyword.id, { match_type: e.target.value as MatchType })}
-                        className="input input-sm w-auto"
-                        aria-label={`Match type for ${keyword.text}`}
-                      >
-                        <option value="broad">Broad</option>
-                        <option value="phrase">Phrase</option>
-                        <option value="exact">Exact</option>
-                      </select>
-                    </td>
-                    <td>{keyword.volume}</td>
-                    <td>{keyword.rank ?? "—"}</td>
+                    <td className="hidden lg:table-cell">{labelForSource(asin.source)}</td>
                     <td className="hidden lg:table-cell">
-                      {keyword.competitor_count}
-                      {keyword.mean_rank !== null && (
-                        <span className="meta-line text-xs"> · mean rank {keyword.mean_rank}</span>
-                      )}
+                      <span className="meta-line text-xs">{asin.notes ?? "—"}</span>
                     </td>
-                    <td className="hidden xl:table-cell">{keyword.category?.replace(/-/g, " ") ?? "—"}</td>
                     <td className="hidden xl:table-cell">
-                      {keyword.rejected_by_filter ? (
-                        <span title={keyword.rejection_reason ?? undefined}>
-                          <span className="cell-primary">{labelForFilter(keyword.rejected_by_filter).trim()}</span>
+                      {asin.rejected_by_filter ? (
+                        <span title={asin.rejection_reason ?? undefined}>
+                          <span className="cell-primary">{labelForFilter(asin.rejected_by_filter).trim()}</span>
+                          {asin.rejection_reason && (
+                            <span className="meta-line block text-xs">{asin.rejection_reason}</span>
+                          )}
                         </span>
                       ) : (
                         <span style={{ color: "var(--text-placeholder)" }}>—</span>
@@ -906,23 +612,23 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                         type="number"
                         step="0.01"
                         min="0"
-                        value={keyword.bid ?? ""}
+                        value={asin.bid ?? ""}
                         onChange={(e) =>
-                          updateKeyword(keyword.id, {
+                          updateAsin(asin.id, {
                             bid: e.target.value === "" ? null : parseFloat(e.target.value),
                           })
                         }
                         placeholder="—"
                         className="input input-sm w-20"
-                        aria-label={`Bid for ${keyword.text}`}
+                        aria-label={`Bid for ${asin.competitor_asin}`}
                       />
                     </td>
                     <td>
                       <select
-                        value={keyword.status}
-                        onChange={(e) => updateKeyword(keyword.id, { status: e.target.value as CompetitorKeywordStatus })}
-                        className={`badge ${statusBadge[keyword.status]} cursor-pointer appearance-none pr-3`}
-                        aria-label={`Status for ${keyword.text}`}
+                        value={asin.status}
+                        onChange={(e) => updateAsin(asin.id, { status: e.target.value as CompetitorAsinStatus })}
+                        className={`badge ${statusBadge[asin.status]} cursor-pointer appearance-none pr-3`}
+                        aria-label={`Status for ${asin.competitor_asin}`}
                       >
                         {STATUSES.map((status) => (
                           <option key={status} value={status}>
@@ -933,21 +639,21 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
                     </td>
                     <td className="text-right">
                       <div className="flex justify-end gap-1">
-                        {keyword.status === "rejected" && (
+                        {asin.status === "rejected" && (
                           <button
-                            onClick={() => updateKeyword(keyword.id, { status: "active" })}
+                            onClick={() => updateAsin(asin.id, { status: "active" })}
                             className="btn btn-tertiary btn-icon btn-sm"
-                            aria-label={`Restore ${keyword.text}`}
+                            aria-label={`Restore ${asin.competitor_asin}`}
                             title="False positive? Restore"
                           >
                             <CheckCircle2 size={16} style={{ color: "var(--icon-default)" }} />
                           </button>
                         )}
                         <button
-                          onClick={() => deleteKeyword(keyword.id)}
+                          onClick={() => deleteAsin(asin.id)}
                           className="btn btn-tertiary btn-icon btn-sm"
-                          aria-label={`Delete ${keyword.text}`}
-                          title="Delete keyword"
+                          aria-label={`Delete ${asin.competitor_asin}`}
+                          title="Delete competitor ASIN"
                         >
                           <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
                         </button>
