@@ -41,8 +41,10 @@ export type KeywordSource =
   | "search-term-report"
   /** Reverse-ASIN lookups (Helium 10 Cerebro etc.) against competitor ASINs. */
   | "reverse-asin"
-  /** LLM-generated queries, run through the full filter chain like everything else. */
+  /** LLM-generated queries via OpenRouter, run through the full filter chain like everything else. */
   | "persona-llm"
+  /** LLM-generated queries via Groq (llama-3.3-70b-versatile), run through the full filter chain. */
+  | "groq-persona"
   /** StoryGraph mood/pace tags for the ISBN/ASIN. */
   | "storygraph-tags"
   /** Library-of-Congress / library catalogue subject headings. */
@@ -342,4 +344,3 @@ export interface RelatedCompetitorCrawl {
   /** Review excerpts pooled across every crawled comp title, for cross-comp review-language mining. */
   reviewSnippets: string[];
 }
-
