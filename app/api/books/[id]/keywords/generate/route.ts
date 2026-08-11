@@ -54,6 +54,7 @@ import { buildReverseAsinCandidates, parseReverseAsinRows } from "@/lib/reverseA
 import { buildDecodoCandidates, parseDecodoRows } from "@/lib/decodoSource";
 import { fetchDecodoKeywordRows, isDecodoConfigured } from "@/lib/decodoClient";
 import { buildPersonaLlmCandidates } from "@/lib/llmPersonaSource";
+import { buildGroqPersonaCandidates } from "@/lib/groqKeywordSource";
 import { buildStorygraphTagsCandidates } from "@/lib/storygraphTags";
 import { buildLibrarySubjectsCandidates } from "@/lib/librarySubjects";
 import { buildCriticsBlurbsCandidates } from "@/lib/criticsBlurbs";
@@ -114,6 +115,7 @@ const ALL_KEYWORD_SOURCES: KeywordSource[] = [
   "search-term-report",
   "reverse-asin",
   "persona-llm",
+  "groq-persona",
   "storygraph-tags",
   "library-subjects",
   "critics-blurbs",
@@ -135,8 +137,6 @@ function buildSnapshotCandidates(
   const familySearchTerms = genreFamilySearchTerms(snapshot.genreFamilies);
   const themeTerms = genreFamilyThemeTerms(snapshot.genreFamilies);
 
-  // Genre vocabulary from Amazon's own placement and the external catalogues,
-  // plus the curated search phrasing for the families it lands in.
   const genreMetadataCandidates = mergeKeywordCandidates(
     buildGenreMetadataCandidates({
       title: snapshot.title,
@@ -164,11 +164,6 @@ function buildSnapshotCandidates(
     buildReviewGenreIndicators(reviewText, themeTerms)
   );
 
-  // Seed terms for buyer-intent templating: the book's real genre vocabulary,
-  // never a guessed one, and only the best-attested end of it. Every term here
-  // is multiplied across a dozen templates, so a weak one (a stray Open
-  // Library subject like "man-woman relationships") becomes a dozen weak
-  // keywords. deriveGenreTerms already orders by source trust.
   const genreSeedTerms = [
     ...snapshot.genreTerms.slice(0, 8),
     ...knownTags,
@@ -220,9 +215,6 @@ function buildSnapshotCandidates(
       "goodreads-tags": buildGoodreadsTagCandidates(snapshot.goodreadsTags),
       firecrawl: buildFirecrawlCandidates(snapshot.firecrawlMetadata),
       "user-tag": buildKnownTagCandidates(knownTags),
-      // The listing's own HTML metadata: Amazon's meta keywords, the page
-      // title, the canonical URL slug and the variation swatches, plus the
-      // best field-weighted n-grams across all of it (lib/listingKeywords.ts).
       "listing-metadata": buildListingMetadataCandidates(listingRecordFromSnapshot(snapshot)),
       "buyer-intent": buildBuyerIntentCandidates(genreSeedTerms, {
         title: snapshot.title,
@@ -243,12 +235,6 @@ function countBy<T extends string>(values: T[]): Record<string, number> {
 /**
  * POST /api/books/[id]/keywords/generate
  * Body: { keyTropes?: string[], knownTags?: string[], keywordCategories?: KeywordCategory[], sources?: KeywordSource[], defaultBid?: number }
- *
- * Runs the book's stored metadata snapshot through every keyword source and
- * writes the result into the book's keyword list. The snapshot is captured
- * when the book is added (lib/bookSnapshot.ts) and re-captured here only if
- * it's missing or stale, so generation is fast and produces the same keywords
- * the book page says it's working from.
  */
 export async function POST(
   request: Request,
@@ -271,8 +257,6 @@ export async function POST(
 
     const { snapshot } = loaded;
 
-    // Without a title there is no book to research: every source would be
-    // seeded with nothing and the run would return noise. Say so instead.
     if (!snapshot.capture.ok || !snapshot.title) {
       return Response.json(
         {
@@ -306,10 +290,6 @@ export async function POST(
     );
     const defaultBid = typeof body.defaultBid === "number" && body.defaultBid > 0 ? body.defaultBid : 0.5;
 
-    // Optional CSV/JSON-driven external sources (spec §2-3, §7): only run
-    // when the caller supplies the raw export rows for this generate call —
-    // same "no data, no candidates" pattern manualCompetitors uses for its
-    // ASIN-keyed lookup, just driven by request body instead of a static table.
     const asRecordArray = (value: unknown): Array<Record<string, unknown>> =>
       Array.isArray(value) ? value.filter((v): v is Record<string, unknown> => !!v && typeof v === "object") : [];
     const searchTermReportRows = asRecordArray(body.searchTermReportRows);
@@ -319,10 +299,6 @@ export async function POST(
     const librarySubjectsInput = asStrings(body.librarySubjects, 50);
     const criticsBlurbsInput = asStrings(body.criticsBlurbs, 30);
 
-    // The relevance anchors for this book — title/author/series/characters,
-    // genre, setting, comparable authors — derived from the stored snapshot.
-    // They drive the filter pipeline's final gate and the completion of
-    // dangling modifiers during generation.
     const filterContext = buildFilterContext({
       title: snapshot.title,
       asin: snapshot.asin,
@@ -352,7 +328,7 @@ export async function POST(
       filterContext.anchors.primaryGenrePhrase
     );
 
-    // Get competitor ASINs manually added or generated to include them in comp-names
+    // Pull competitor titles/authors from tracked ASINs into comp-name candidates.
     const existingAsinRows = await getCompetitorAsins(supabase, bookId, user.id);
     const manualCompNames: KeywordCandidate[] = [];
     for (const row of existingAsinRows) {
@@ -361,14 +337,11 @@ export async function POST(
       for (let part of parts) {
         part = part.replace(/^(Frequently bought together|Similar title|Discovered via [\w-]+)/, "").trim();
         if (part && part.length > 2) {
-           manualCompNames.push({ text: part, sources: ["comp-name"] });
+          manualCompNames.push({ text: part, sources: ["comp-name"] });
         }
       }
     }
 
-    // Live sources: autocomplete engines are JSON endpoints that aren't
-    // subject to Amazon's product-page bot wall, and SerpApi/the Ads API are
-    // proper APIs — cheap enough to re-run on every generate.
     const seedTerms = [
       ...buildAutocompleteSeeds({
         title: snapshot.title,
@@ -379,10 +352,6 @@ export async function POST(
       ...snapshot.firecrawlSeeds,
     ];
 
-    // SerpApi is seeded with genre/comp phrases rather than the title: a
-    // title search returns the book itself, a subgenre search returns the
-    // shelf it competes on — and Amazon's own "related searches" for that
-    // shelf are the highest-value expansions available.
     const serpApiSeeds = [...genreSeedTerms.slice(0, 3), ...(snapshot.seriesName ? [snapshot.seriesName] : [])];
 
     const [
@@ -393,6 +362,7 @@ export async function POST(
       duckDuckGoAutocomplete,
       serpApiResult,
       personaLlmCandidates,
+      groqPersonaCandidates,
       liveDecodoRows,
     ] = await Promise.all([
       isAdsApiConfigured()
@@ -406,18 +376,20 @@ export async function POST(
       getYoutubeAutocompleteKeywordSet(seedTerms),
       getDuckDuckGoAutocompleteKeywordSet(seedTerms),
       getSerpApiKeywordCandidates(serpApiSeeds, snapshot.marketplace),
-      // Persona-LLM: gracefully returns [] when OPENROUTER_API_KEY isn't
-      // configured, so it never blocks generation for users without the key.
+      // OpenRouter persona: gracefully returns [] when key isn't configured.
       buildPersonaLlmCandidates({ title: snapshot.title, author: snapshot.author, asin: snapshot.asin }).catch(
         (err: Error) => {
           console.error("[generate] persona-llm generation failed:", err.message);
           return [] as KeywordCandidate[];
         }
       ),
-      // Live Decodo: only runs when no manual decodoRows were supplied in the
-      // request body — manual input always wins, since that's the user having
-      // final say over what feeds the pipeline — and gracefully degrades to
-      // [] on any failure so a Decodo outage never blocks generation.
+      // Groq persona: gracefully returns [] when GROQ_API_KEY isn't configured.
+      buildGroqPersonaCandidates({ title: snapshot.title, author: snapshot.author, asin: snapshot.asin }).catch(
+        (err: Error) => {
+          console.error("[generate] groq-persona generation failed:", err.message);
+          return [] as KeywordCandidate[];
+        }
+      ),
       decodoRows.length === 0 && isDecodoConfigured()
         ? fetchDecodoKeywordRows(serpApiSeeds, snapshot.marketplace).catch((err: Error) => {
             console.error("[generate] live Decodo fetch failed:", err.message);
@@ -429,8 +401,6 @@ export async function POST(
     const serpApiBySource = (source: KeywordSource) =>
       serpApiResult.candidates.filter((candidate) => candidate.sources.includes(source));
 
-    // Search Term Report import: proven buyer-intent keywords, plus zero-order
-    // high-spend rows collected as negative suggestions (spec §2, §9).
     const searchTermReportResult =
       searchTermReportRows.length > 0
         ? buildSearchTermReportCandidates(
@@ -474,8 +444,6 @@ export async function POST(
         ? buildCriticsBlurbsCandidates({ genre: primaryGenreForTags }, criticsBlurbsInput)
         : [];
 
-    // Autocomplete corpora occasionally return bare ASINs; those belong to
-    // product targeting, not the keyword list.
     const liveGroups: Partial<Record<KeywordSource, KeywordCandidate[]>> = {
       "ads-api": extractAsinCandidates(adsApiCandidates).keywords,
       autocomplete: extractAsinCandidates(amazonAutocomplete).keywords,
@@ -485,25 +453,23 @@ export async function POST(
       "serpapi-related": serpApiBySource("serpapi-related"),
       "serpapi-organic": serpApiBySource("serpapi-organic"),
       "serpapi-autocomplete": serpApiBySource("serpapi-autocomplete"),
-      // Synonym expansion is allowlist-only (lib/synonyms.ts): genre phrases
-      // map to other genre phrases, or they don't expand. The open-ended
-      // thesaurus lookup this replaced is what produced "felon books".
       synonym: buildCuratedSynonymCandidates(genreSeedTerms),
       "search-term-report": searchTermReportResult.candidates,
       "reverse-asin": reverseAsinCandidates,
       "persona-llm": personaLlmCandidates,
+      "groq-persona": groqPersonaCandidates,
       "storygraph-tags": storygraphTagsCandidates,
       "library-subjects": librarySubjectsCandidates,
       "critics-blurbs": criticsBlurbsCandidates,
       decodo: decodoCandidates,
     };
 
-    const sourceCandidateGroups: Partial<Record<KeywordSource, KeywordCandidate[]>> = { 
-      ...groups, 
+    const sourceCandidateGroups: Partial<Record<KeywordSource, KeywordCandidate[]>> = {
+      ...groups,
       ...liveGroups,
-      "comp-name": mergeKeywordCandidates(groups["comp-name"] ?? [], manualCompNames)
+      "comp-name": mergeKeywordCandidates(groups["comp-name"] ?? [], manualCompNames),
     };
-    
+
     const contributingSources = ALL_KEYWORD_SOURCES.filter(
       (source) => enabledSources.has(source) && (sourceCandidateGroups[source]?.length ?? 0) > 0
     );
@@ -515,8 +481,6 @@ export async function POST(
 
     const { tropes, compNames } = splitKeywordsByCategory(collapseNearDuplicates(merged));
 
-    // Carries the filter pipeline's match-type ceiling alongside the candidate,
-    // so a blurb-mined phrase can be capped at Phrase when it lands in a row.
     type ReviewedKeyword = KeywordCandidate & { matchTypeCeiling?: MatchType };
 
     let tropesKeywords: ReviewedKeyword[] = boostScoresByDescriptionQuality(
@@ -533,21 +497,12 @@ export async function POST(
 
     tropesKeywords = validateFinalKeywords(tropesKeywords, defaultBid).slice(0, BOOK_KEYWORD_MAX);
 
-    // When the crawl only found a comp or two, the "comparable author/title"
-    // bucket is mostly names that drifted in from page furniture — imprints,
-    // bookshops, unrelated authors with similar names. Drop those rather than
-    // bid on them.
     const compDataHealth = assessCompDataHealth(snapshot.competitors);
     compNameKeywords = filterHallucinatedCompKeywords(
       validateFinalKeywords(compNameKeywords, defaultBid),
       compDataHealth
     ).slice(0, BOOK_COMP_NAME_MAX);
 
-    // Optional relevance pass over the top of each list. The AI judges a
-    // shortlist, not the whole research list: sending hundreds of candidates
-    // makes one slow call that returns a partial answer anyway. It reorders
-    // and drops off-topic candidates within that slice — everything below it
-    // keeps its heuristic position rather than being lost.
     let aiRanked = false;
     if (isAiRankingConfigured()) {
       const tropesHead = tropesKeywords.slice(0, AI_REVIEW_LIMIT);
@@ -574,12 +529,6 @@ export async function POST(
       }
     }
 
-    // ---- Filter pipeline -------------------------------------------------
-    // Everything above is source-led: each source contributes what it found.
-    // This is the shared validation layer that decides what any of it is
-    // worth for *this* book (lib/keywordFilters.ts). Rejections and pauses
-    // are kept, with the deciding filter and its reason, so the keyword
-    // manager can show why — and a false positive can be resurrected.
     const tropesFiltered = applyFiltersToCandidates(tropesKeywords, filterContext);
     const compFiltered = applyFiltersToCandidates(compNameKeywords, filterContext);
 
@@ -613,19 +562,11 @@ export async function POST(
       );
     }
 
-    // Negatives: the rejections that describe a real (unwanted) search
-    // intent, plus the formats this listing doesn't have. Rejecting a
-    // keyword stops the app bidding on it; a negative stops Amazon serving
-    // on it via a broader match.
     const negatives = [
       ...buildNegativeKeywords([...tropesFiltered.results, ...compFiltered.results]),
       ...buildFormatNegatives(snapshot.formats ?? []),
     ];
 
-    // §9: aggregate rejected keywords whose reason describes real (unwanted)
-    // search intent into a negative-suggestions list, alongside the
-    // zero-order/high-spend rows the Search Term Report import already
-    // collected. Additive to the existing response shape below.
     const NEGATIVE_SUGGESTION_FILTERS = new Set([
       "mediaTypeCollision",
       "authorDisambiguation",
@@ -647,16 +588,12 @@ export async function POST(
         })),
     ];
 
-    // §21: per-book match-type strategy — "mixed" (default) or
-    // "phrase-only" (never Broad, for cleaner search-term comparison data).
     const matchTypeProfile = loaded.book.match_type_profile ?? "mixed";
 
     const activeRows = finalCandidates.map((candidate) => ({
       book_id: bookId,
       user_id: user.id,
       text: candidate.text,
-      // A phrase mined from the book's own blurb is long-tail by nature: it
-      // is specific enough for Phrase/Exact and far too thin for Broad.
       match_type:
         candidate.matchTypeCeiling && pickMatchType(candidate, matchTypeProfile) === "broad"
           ? candidate.matchTypeCeiling
@@ -687,9 +624,6 @@ export async function POST(
       specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
 
-    // §16 (scoped): a keyword restored to the user's filter allowlist
-    // never gets rejected again — checked here, after the pipeline runs,
-    // so lib/keywordFilters.ts itself stays DB-free and synchronous.
     const { data: allowlistRows } = await supabase.from("filter_allowlist").select("keyword_text").eq("user_id", user.id);
     const allowlistOverrides = new Set(
       findAllowlistOverrides(reviewRowsRaw, (allowlistRows ?? []).map((r) => r.keyword_text))
@@ -711,13 +645,9 @@ export async function POST(
       status: "negative",
       rejection_reason: negative.reason,
       rejected_by_filter: null as string | null,
-      // Negatives aren't bid on, so a Broad-Specific rating doesn't apply.
       specificity: null as number | null,
     }));
 
-    // Negatives are keyed on (book, text, match_type) like everything else,
-    // so a term that is both a negative and a rejected keyword would collide
-    // on upsert; the negative wins, since it's the one that does something.
     const negativeKeys = new Set(negativeRows.map((row) => `${row.text}|${row.match_type}`));
     const rows = [
       ...activeRows,
@@ -730,9 +660,6 @@ export async function POST(
       .upsert(rows, { onConflict: "book_id,text,match_type", ignoreDuplicates: true })
       .select();
 
-    // sql/08-keyword-filter-status.sql adds the 'rejected' status and the two
-    // reason columns. On a database that hasn't had it applied yet, write the
-    // active keywords only rather than failing the whole run, and say why.
     const needsFilterMigration =
       !!insertError && /rejection_reason|rejected_by_filter|status_check|rejected/i.test(insertError.message);
 
@@ -749,9 +676,6 @@ export async function POST(
         .select());
     }
 
-    // sql/09-keyword-specificity.sql adds the specificity column. On a
-    // database that hasn't had it applied yet, drop it and retry rather
-    // than failing the whole run.
     const needsSpecificityMigration = !!insertError && /specificity/i.test(insertError.message);
 
     if (needsSpecificityMigration) {
@@ -779,8 +703,6 @@ export async function POST(
 
     const insertedCount = inserted?.length ?? 0;
 
-    // Product targeting is a separate campaign type: bare ASINs match no
-    // text, and brand targeting reaches a competitor's whole catalogue.
     const productTargets = buildProductTargets(snapshot.competitors, snapshot.compAsins);
     const brandTargets = buildBrandTargets(snapshot.competitors);
 
@@ -815,8 +737,6 @@ export async function POST(
       productTargetCount: productTargets.length,
       brandTargetCount: brandTargets.length,
       serpApiCreditsUsed: serpApiResult.creditsUsed,
-      // Set when the database predates sql/08-keyword-filter-status.sql, so
-      // only the active keywords could be stored.
       needsFilterMigration,
       compDataHealth,
       aiRanked,

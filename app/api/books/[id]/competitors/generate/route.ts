@@ -12,6 +12,7 @@ import { getAdsApiKeywordRecommendations, isAdsApiConfigured } from "@/lib/amazo
 import { getSerpApiKeywordCandidates } from "@/lib/serpApiKeywords";
 import { fetchDecodoKeywordRows, isDecodoConfigured } from "@/lib/decodoClient";
 import { buildPersonaLlmCandidates } from "@/lib/llmPersonaSource";
+import { buildGroqPersonaCandidates } from "@/lib/groqKeywordSource";
 import { extractAsinCandidates } from "@/lib/keywordMerge";
 import { KeywordCandidate } from "@/lib/types";
 
@@ -23,12 +24,9 @@ const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
 /**
  * POST /api/books/[id]/competitors/generate
  *
- * "Generate ASINs" — the Competitors-tab equivalent of "Generate keywords":
- * pulls competitor ASINs from the same metadata scrape keyword generation
- * already uses (snapshot.competitors, compAsins, frequentlyBoughtTogether,
- * compareWithSimilar — see lib/productTargets.ts), plus the same live API
- * sources (Ads API, autocomplete engines, SerpApi) that might surface ASINs.
- * ASINs already tracked for this book are skipped.
+ * Pulls competitor ASINs from the stored snapshot plus all live API sources
+ * (Ads API, autocomplete engines, SerpApi, Persona-LLM, Groq-Persona, Decodo)
+ * mirroring the keyword generate pipeline. ASINs already tracked are skipped.
  */
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
@@ -64,30 +62,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       candidates.set(asin, { notes, source });
     };
 
-    // 1. Gather from snapshot.competitors
+    // 1. Snapshot sources
     for (const competitor of snapshot.competitors ?? []) {
       const notes = [competitor.title, competitor.author].filter(Boolean).join(" — ") || null;
       addCandidate(competitor.asin, notes, "auto-crawl");
     }
-
-    // 2. Gather from snapshot.compAsins
     for (const asinRaw of snapshot.compAsins ?? []) {
       addCandidate(asinRaw, "Related listing", "auto-crawl");
     }
-
-    // 3. Gather from snapshot.frequentlyBoughtTogether
     for (const item of snapshot.frequentlyBoughtTogether ?? []) {
       addCandidate(item.asin, item.title ? `Frequently bought together — ${item.title}` : "Frequently bought together", "auto-crawl");
     }
-
-    // 4. Gather from snapshot.compareWithSimilar
     for (const item of snapshot.compareWithSimilar ?? []) {
       addCandidate(item.asin, item.title ? `Similar title — ${item.title}` : "Similar title", "auto-crawl");
     }
 
     const totalCrawled = candidates.size;
 
-    // 5. Gather from Live Sources (just like Keyword Generate)
+    // 2. Live sources
     const seedTerms = [
       ...buildAutocompleteSeeds({
         title: snapshot.title ?? "",
@@ -108,6 +100,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       duckDuckGoAutocomplete,
       serpApiResult,
       personaLlmCandidates,
+      groqPersonaCandidates,
       liveDecodoRows,
     ] = await Promise.all([
       isAdsApiConfigured()
@@ -127,6 +120,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           return [] as KeywordCandidate[];
         }
       ),
+      // Groq persona: generates search queries, which may surface ASINs.
+      buildGroqPersonaCandidates({ title: snapshot.title, author: snapshot.author, asin: snapshot.asin }).catch(
+        (err: Error) => {
+          console.error("[generate] groq-persona generation failed:", err.message);
+          return [] as KeywordCandidate[];
+        }
+      ),
       isDecodoConfigured()
         ? fetchDecodoKeywordRows(serpApiSeeds, snapshot.marketplace).catch((err: Error) => {
             console.error("[generate] live Decodo fetch failed:", err.message);
@@ -141,8 +141,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       "google-autocomplete": googleAutocomplete,
       "youtube-autocomplete": youtubeAutocomplete,
       "duckduckgo-autocomplete": duckDuckGoAutocomplete,
-      "serpapi": serpApiResult.candidates,
+      serpapi: serpApiResult.candidates,
       "persona-llm": personaLlmCandidates,
+      "groq-persona": groqPersonaCandidates,
     };
 
     for (const [source, candidatesList] of Object.entries(liveGroups)) {
