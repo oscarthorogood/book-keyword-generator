@@ -83,7 +83,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .eq("user_id", user.id)
       .eq("status", "active")
       .neq("book_id", bookId)
-      .ilike("text", text)
+      .eq("text", text.toLowerCase())
       .select("id, book_id");
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
