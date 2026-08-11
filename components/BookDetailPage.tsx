@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { AlertTriangle, ArrowLeft, CheckCircle2, ListChecks, RefreshCw } from "lucide-react";
-import KeywordManager from "./KeywordManager";
+import BookKeywordPanel from "./BookKeywordPanel";
 
 /** The slice of the stored snapshot (books.metadata_json) this page renders. */
 export interface BookSnapshotView {
@@ -83,6 +84,8 @@ async function fetchBook(bookId: string): Promise<Book | null> {
 }
 
 export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) {
+  const router = useRouter();
+  const searchParams = useSearchParams();
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -91,6 +94,18 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
   // Bumped after applying presets to force KeywordManager to refetch —
   // simpler than threading a second imperative refresh path through it.
   const [keywordManagerKey, setKeywordManagerKey] = useState(0);
+
+  // Keywords/Competitors toggle (spec §6.2) — kept in the URL (?view=) so a
+  // link to the competitors tab (e.g. from /competitors) lands directly on
+  // it, and reloading the page doesn't silently drop back to Keywords.
+  const view: "keywords" | "competitors" = searchParams.get("view") === "competitors" ? "competitors" : "keywords";
+  function setView(next: "keywords" | "competitors") {
+    const params = new URLSearchParams(searchParams.toString());
+    if (next === "keywords") params.delete("view");
+    else params.set("view", next);
+    const query = params.toString();
+    router.replace(`/books/${bookId}${query ? `?${query}` : ""}`, { scroll: false });
+  }
 
   useEffect(() => {
     let active = true;
@@ -392,9 +407,30 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
           </div>
         </section>
 
-        <KeywordManager
-          key={keywordManagerKey}
+        {/* Keywords/Competitors toggle (spec §6.2) */}
+        <div className="tabs" role="tablist" aria-label="Keywords or competitors">
+          <button
+            role="tab"
+            aria-selected={view === "keywords"}
+            onClick={() => setView("keywords")}
+            className={`tab ${view === "keywords" ? "tab-active" : ""}`}
+          >
+            Keywords
+          </button>
+          <button
+            role="tab"
+            aria-selected={view === "competitors"}
+            onClick={() => setView("competitors")}
+            className={`tab ${view === "competitors" ? "tab-active" : ""}`}
+          >
+            Competitors
+          </button>
+        </div>
+
+        <BookKeywordPanel
+          key={`${view}-${keywordManagerKey}`}
           bookId={bookId}
+          mode={view}
           metadataCapturedAt={snapshot.capturedAt}
           metadataReady={!captureFailed}
           genreTerms={genreTerms}

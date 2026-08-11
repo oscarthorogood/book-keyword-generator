@@ -1,0 +1,188 @@
+/**
+ * DB helpers for the competitor-ASIN subsystem (docs/CLAUDE-CODE-COMPETITORS.md
+ * §1.3) — small, typed wrappers over `competitor_asins` and
+ * `competitor_keywords` (sql/15-competitor-asins.sql), mirroring the pattern
+ * lib/bookStore.ts uses for `books`: every function takes the request-scoped
+ * Supabase client (lib/supabaseServer.ts) so RLS enforces the user scoping,
+ * with `user_id` also filtered explicitly for defense in depth.
+ */
+
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { CompetitorAsin, CompetitorKeyword } from "./types";
+
+const COMPETITOR_ASIN_COLUMNS = "id, book_id, competitor_asin, source, notes, created_at, updated_at";
+const COMPETITOR_KEYWORD_COLUMNS =
+  "id, book_id, competitor_asin, text, volume, rank, competitor_count, mean_rank, category, intent_segment, match_type, specificity, status, created_at, updated_at";
+
+// --- competitor_asins --------------------------------------------------
+
+export async function getCompetitorAsins(
+  supabase: SupabaseClient,
+  bookId: string,
+  userId: string
+): Promise<CompetitorAsin[]> {
+  const { data, error } = await supabase
+    .from("competitor_asins")
+    .select(COMPETITOR_ASIN_COLUMNS)
+    .eq("book_id", bookId)
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false });
+
+  if (error) {
+    console.error("Failed to load competitor ASINs:", error.message);
+    return [];
+  }
+  return (data ?? []) as CompetitorAsin[];
+}
+
+export interface AddCompetitorAsinInput {
+  competitorAsin: string;
+  source?: CompetitorAsin["source"];
+  notes?: string | null;
+}
+
+export async function addCompetitorAsin(
+  supabase: SupabaseClient,
+  bookId: string,
+  userId: string,
+  input: AddCompetitorAsinInput
+): Promise<{ data: CompetitorAsin | null; error: string | null }> {
+  const { data, error } = await supabase
+    .from("competitor_asins")
+    .upsert(
+      {
+        book_id: bookId,
+        user_id: userId,
+        competitor_asin: input.competitorAsin.trim().toUpperCase(),
+        source: input.source ?? "manual",
+        notes: input.notes ?? null,
+      },
+      { onConflict: "book_id,competitor_asin", ignoreDuplicates: false }
+    )
+    .select(COMPETITOR_ASIN_COLUMNS)
+    .single();
+
+  if (error) return { data: null, error: error.message };
+  return { data: data as CompetitorAsin, error: null };
+}
+
+export async function deleteCompetitorAsin(
+  supabase: SupabaseClient,
+  bookId: string,
+  userId: string,
+  competitorAsinId: string
+): Promise<{ deleted: boolean; error: string | null }> {
+  const { data, error } = await supabase
+    .from("competitor_asins")
+    .delete()
+    .eq("id", competitorAsinId)
+    .eq("book_id", bookId)
+    .eq("user_id", userId)
+    .select("id");
+
+  if (error) return { deleted: false, error: error.message };
+  return { deleted: (data?.length ?? 0) > 0, error: null };
+}
+
+// --- competitor_keywords ------------------------------------------------
+
+export interface CompetitorKeywordFilters {
+  category?: string;
+  matchType?: string;
+  minVolume?: number;
+  maxRank?: number;
+  minCompetitorCount?: number;
+}
+
+export async function getCompetitorKeywords(
+  supabase: SupabaseClient,
+  bookId: string,
+  userId: string,
+  filters: CompetitorKeywordFilters = {}
+): Promise<CompetitorKeyword[]> {
+  let query = supabase
+    .from("competitor_keywords")
+    .select(COMPETITOR_KEYWORD_COLUMNS)
+    .eq("book_id", bookId)
+    .eq("user_id", userId);
+
+  if (filters.category) query = query.eq("category", filters.category);
+  if (filters.matchType) query = query.eq("match_type", filters.matchType);
+  if (filters.minVolume !== undefined) query = query.gte("volume", filters.minVolume);
+  if (filters.maxRank !== undefined) query = query.lte("rank", filters.maxRank);
+  if (filters.minCompetitorCount !== undefined) query = query.gte("competitor_count", filters.minCompetitorCount);
+
+  const { data, error } = await query.order("volume", { ascending: false });
+
+  if (error) {
+    console.error("Failed to load competitor keywords:", error.message);
+    return [];
+  }
+  return (data ?? []) as CompetitorKeyword[];
+}
+
+export interface UpsertCompetitorKeywordInput {
+  competitorAsin: string;
+  text: string;
+  volume?: number;
+  rank?: number | null;
+  competitorCount?: number;
+  meanRank?: number | null;
+  category?: string | null;
+  intentSegment?: string | null;
+  matchType?: string;
+  specificity?: number | null;
+}
+
+/** Bulk upsert, deduped by (book_id, text, competitor_asin) — the unique key on the table. */
+export async function upsertCompetitorKeywords(
+  supabase: SupabaseClient,
+  bookId: string,
+  userId: string,
+  rows: UpsertCompetitorKeywordInput[]
+): Promise<{ storedCount: number; error: string | null }> {
+  if (rows.length === 0) return { storedCount: 0, error: null };
+
+  const payload = rows.map((row) => ({
+    book_id: bookId,
+    user_id: userId,
+    competitor_asin: row.competitorAsin,
+    text: row.text,
+    volume: row.volume ?? 0,
+    rank: row.rank ?? null,
+    competitor_count: row.competitorCount ?? 1,
+    mean_rank: row.meanRank ?? null,
+    category: row.category ?? null,
+    intent_segment: row.intentSegment ?? null,
+    match_type: row.matchType ?? "phrase",
+    specificity: row.specificity ?? null,
+  }));
+
+  const { data, error } = await supabase
+    .from("competitor_keywords")
+    .upsert(payload, { onConflict: "book_id,text,competitor_asin", ignoreDuplicates: false })
+    .select("id");
+
+  if (error) return { storedCount: 0, error: error.message };
+  return { storedCount: data?.length ?? 0, error: null };
+}
+
+export async function deleteCompetitorKeywords(
+  supabase: SupabaseClient,
+  bookId: string,
+  userId: string,
+  ids: string[]
+): Promise<{ deletedCount: number; error: string | null }> {
+  if (ids.length === 0) return { deletedCount: 0, error: null };
+
+  const { data, error } = await supabase
+    .from("competitor_keywords")
+    .delete()
+    .eq("book_id", bookId)
+    .eq("user_id", userId)
+    .in("id", ids)
+    .select("id");
+
+  if (error) return { deletedCount: 0, error: error.message };
+  return { deletedCount: data?.length ?? 0, error: null };
+}
