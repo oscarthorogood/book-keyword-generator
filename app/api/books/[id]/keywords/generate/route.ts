@@ -53,6 +53,8 @@ import { buildSearchTermReportCandidates, parseSearchTermReportRows } from "@/li
 import { buildReverseAsinCandidates, parseReverseAsinRows } from "@/lib/reverseAsin";
 import { buildDecodoCandidates, parseDecodoRows } from "@/lib/decodoSource";
 import { fetchDecodoKeywordRows, isDecodoConfigured } from "@/lib/decodoClient";
+import { buildZenrowsCandidates } from "@/lib/zenrowsSource";
+import { fetchZenrowsKeywordRows, isZenrowsConfigured } from "@/lib/zenrowsClient";
 import { buildPersonaLlmCandidates } from "@/lib/llmPersonaSource";
 import { buildGroqPersonaCandidates } from "@/lib/groqKeywordSource";
 import { buildStorygraphTagsCandidates } from "@/lib/storygraphTags";
@@ -120,6 +122,7 @@ const ALL_KEYWORD_SOURCES: KeywordSource[] = [
   "library-subjects",
   "critics-blurbs",
   "decodo",
+  "zenrows",
 ];
 
 /** Candidate groups built purely from the stored snapshot — no network calls. */
@@ -357,6 +360,7 @@ export async function POST(
       personaLlmCandidates,
       groqPersonaCandidates,
       liveDecodoRows,
+      liveZenrowsRows,
       existingAsinRows,
     ] = await Promise.all([
       isAdsApiConfigured()
@@ -387,6 +391,12 @@ export async function POST(
       decodoRows.length === 0 && isDecodoConfigured()
         ? fetchDecodoKeywordRows(serpApiSeeds, snapshot.marketplace).catch((err: Error) => {
             console.error("[generate] live Decodo fetch failed:", err.message);
+            return [];
+          })
+        : Promise.resolve([]),
+      isZenrowsConfigured()
+        ? fetchZenrowsKeywordRows(serpApiSeeds, snapshot.marketplace).catch((err: Error) => {
+            console.error("[generate] live ZenRows fetch failed:", err.message);
             return [];
           })
         : Promise.resolve([]),
@@ -440,6 +450,14 @@ export async function POST(
           )
         : [];
 
+    const zenrowsCandidates =
+      liveZenrowsRows.length > 0
+        ? buildZenrowsCandidates(
+            { title: snapshot.title, author: snapshot.author, seriesName: snapshot.seriesName },
+            liveZenrowsRows
+          )
+        : [];
+
     const primaryGenreForTags = genreSeedTerms[0];
     const storygraphTagsCandidates =
       storygraphTagsInput.length > 0
@@ -472,6 +490,7 @@ export async function POST(
       "library-subjects": librarySubjectsCandidates,
       "critics-blurbs": criticsBlurbsCandidates,
       decodo: decodoCandidates,
+      zenrows: zenrowsCandidates,
     };
 
     const sourceCandidateGroups: Partial<Record<KeywordSource, KeywordCandidate[]>> = {
