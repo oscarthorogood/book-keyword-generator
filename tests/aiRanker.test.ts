@@ -8,13 +8,14 @@
  */
 
 import { describe, expect, it, vi, beforeEach, afterEach } from "vitest";
+import type { KeywordCandidate } from "../lib/types";
 
 const originalGeminiKey = process.env.GEMINI_API_KEY;
 const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
 
 const BOOK_CONTEXT = { title: "Unforgiven", author: "Jacqueline New", genreTerms: ["crime thriller"] };
-const TROPES = [{ text: "scottish crime thriller", sources: ["genre-metadata"] }];
-const COMPS = [{ text: "val mcdermid books", sources: ["comp-name"] }];
+const TROPES: KeywordCandidate[] = [{ text: "scottish crime thriller", sources: ["genre-metadata"] }];
+const COMPS: KeywordCandidate[] = [{ text: "val mcdermid books", sources: ["comp-name"] }];
 
 beforeEach(() => {
   vi.resetModules();
