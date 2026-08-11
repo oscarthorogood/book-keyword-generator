@@ -115,6 +115,30 @@ export default function KeywordStatsWidget() {
           </div>
         ) : null}
       </section>
+
+      <section className="card p-5">
+        <h2 className="text-md font-semibold" style={{ color: "var(--text-primary)" }}>
+          Top rejecting filters
+        </h2>
+        <p className="meta-line mt-1 text-xs">
+          A false positive here? Use &quot;Restore &amp; allowlist&quot; on the keyword in any book&apos;s manager.
+        </p>
+        {loading ? (
+          <div className="skeleton mt-3 h-24 w-full" />
+        ) : error ? (
+          <p className="meta-line mt-3">Unavailable.</p>
+        ) : stats ? (
+          <div className="mt-3">
+            <Bars
+              counts={Object.fromEntries(
+                Object.entries(stats.byRejectingFilter)
+                  .sort((a, b) => b[1] - a[1])
+                  .slice(0, 8)
+              )}
+            />
+          </div>
+        ) : null}
+      </section>
     </>
   );
 }

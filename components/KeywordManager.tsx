@@ -254,6 +254,31 @@ export default function KeywordManager({
     }
   }
 
+  /**
+   * Restores a false-positive rejection: activates it here and adds it to
+   * the filter allowlist (§16, scoped) so no future generate run — on this
+   * book or any other — rejects that exact text again.
+   */
+  async function restoreAndAllowlist(keyword: Keyword) {
+    setPromotingId(keyword.id);
+    try {
+      const res = await fetch("/api/filter-allowlist", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text: keyword.text, filter: keyword.rejected_by_filter }),
+      });
+      if (res.ok) {
+        await updateKeyword(keyword.id, { status: "active" });
+        setPromoteNotice(`Restored "${keyword.text}" and added it to the filter allowlist.`);
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setPromoteNotice(body.error || "Could not restore this keyword.");
+      }
+    } finally {
+      setPromotingId(null);
+    }
+  }
+
   async function bulkUpdate(status: KeywordStatus) {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
@@ -939,15 +964,26 @@ export default function KeywordManager({
                     <td className="text-right">
                       <div className="flex justify-end gap-1">
                         {keyword.status === "rejected" && (
-                          <button
-                            onClick={() => promoteToNegativeLibrary(keyword)}
-                            disabled={promotingId === keyword.id}
-                            className="btn btn-tertiary btn-icon btn-sm"
-                            aria-label={`Promote ${keyword.text} to the negative-keyword library`}
-                            title="Promote to negative library"
-                          >
-                            <ShieldMinus size={16} style={{ color: "var(--icon-default)" }} />
-                          </button>
+                          <>
+                            <button
+                              onClick={() => restoreAndAllowlist(keyword)}
+                              disabled={promotingId === keyword.id}
+                              className="btn btn-tertiary btn-icon btn-sm"
+                              aria-label={`Restore ${keyword.text} and add it to the filter allowlist`}
+                              title="False positive? Restore & allowlist"
+                            >
+                              <CheckCircle2 size={16} style={{ color: "var(--icon-default)" }} />
+                            </button>
+                            <button
+                              onClick={() => promoteToNegativeLibrary(keyword)}
+                              disabled={promotingId === keyword.id}
+                              className="btn btn-tertiary btn-icon btn-sm"
+                              aria-label={`Promote ${keyword.text} to the negative-keyword library`}
+                              title="Promote to negative library"
+                            >
+                              <ShieldMinus size={16} style={{ color: "var(--icon-default)" }} />
+                            </button>
+                          </>
                         )}
                         <button
                           onClick={() => deleteKeyword(keyword.id)}

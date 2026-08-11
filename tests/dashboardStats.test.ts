@@ -18,6 +18,15 @@ describe("summarizeKeywordStats", () => {
     expect(summary.bySource).toEqual({ autocomplete: 1, "comp-name": 1, unknown: 1 });
     expect(summary.specificityDistribution).toEqual({ 1: 0, 2: 0, 3: 1, 4: 0, 5: 1, unscored: 1 });
   });
+
+  it("counts by rejecting filter (§16), ignoring rows without one", () => {
+    const summary = summarizeKeywordStats([
+      { status: "rejected", match_type: "broad", source: null, specificity: null, rejected_by_filter: "offTopicEntity" },
+      { status: "rejected", match_type: "broad", source: null, specificity: null, rejected_by_filter: "offTopicEntity" },
+      { status: "active", match_type: "phrase", source: null, specificity: 3, rejected_by_filter: null },
+    ]);
+    expect(summary.byRejectingFilter).toEqual({ offTopicEntity: 2 });
+  });
 });
 
 describe("topKeywordsByGenre", () => {

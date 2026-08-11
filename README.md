@@ -179,6 +179,23 @@ something cleaner to compare. Configuration and bookkeeping only — this
 doesn't retroactively change existing keywords or auto-pick a winner.
 Requires `sql/13-match-type-profile.sql`.
 
+### Filter allowlist
+
+If a filter rejects something that's actually fine, **Restore & allowlist**
+on that keyword (next to the negative-library button, on any rejected row)
+activates it here and remembers the exact text so no future generate run —
+on this book or any other — rejects it again. The dashboard's "Top
+rejecting filters" widget shows which filters are producing the most
+rejections, the signal for deciding what's worth tuning. Requires
+`sql/14-filter-allowlist.sql`.
+
+This is a scoped slice of the Enhancements spec's §16: moving the full
+denylist/regex configuration in `lib/keywordFilterConfig.ts` into a
+live-editable database table (the other half of that section) would mean
+refactoring the synchronous, DB-free filter pipeline that
+`lib/keywordFilters.ts`'s 200-plus tests assert against — left as
+separate, higher-risk follow-up work rather than attempted half-done here.
+
 ### Exporting to Amazon Ads
 
 "Export bulksheet" (`GET /api/books/[id]/keywords/export`) writes a

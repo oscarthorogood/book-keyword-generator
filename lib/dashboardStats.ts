@@ -12,6 +12,7 @@ export interface KeywordStatsRow {
   match_type: string;
   source: string | null;
   specificity: number | null;
+  rejected_by_filter?: string | null;
 }
 
 export interface KeywordStatsSummary {
@@ -21,6 +22,8 @@ export interface KeywordStatsSummary {
   bySource: Record<string, number>;
   /** Counts for specificity 1..5, plus "unscored" for rows generated before sql/09. */
   specificityDistribution: Record<Specificity | "unscored", number>;
+  /** §16: which filters are rejecting the most — the tuning signal for the allowlist flow. */
+  byRejectingFilter: Record<string, number>;
 }
 
 function countBy<T>(items: T[], key: (item: T) => string): Record<string, number> {
@@ -62,6 +65,10 @@ export function summarizeKeywordStats(rows: KeywordStatsRow[]): KeywordStatsSumm
     byMatchType: countBy(rows, (r) => r.match_type),
     bySource: countBy(rows, (r) => r.source ?? "unknown"),
     specificityDistribution,
+    byRejectingFilter: countBy(
+      rows.filter((r) => r.rejected_by_filter),
+      (r) => r.rejected_by_filter!
+    ),
   };
 }
 

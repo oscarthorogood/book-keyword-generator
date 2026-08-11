@@ -41,6 +41,7 @@ import {
 } from "@/lib/keywordMerge";
 import { validateFinalKeywords } from "@/lib/keywordValidation";
 import { scoreSpecificity } from "@/lib/keywordSpecificity";
+import { findAllowlistOverrides } from "@/lib/filterAllowlist";
 import { buildListingMetadataCandidates } from "@/lib/listingKeywords";
 import { buildFormatNegatives, buildNegativeKeywords } from "@/lib/negativeKeywords";
 import { buildBrandTargets, buildProductTargets } from "@/lib/productTargets";
@@ -518,7 +519,7 @@ export async function POST(
       specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
 
-    const reviewRows = [
+    const reviewRowsRaw = [
       ...pausedCandidates.map((candidate) => ({ candidate, status: "paused" as const })),
       ...rejectedCandidates.map((candidate) => ({ candidate, status: "rejected" as const })),
     ].map(({ candidate, status }) => ({
@@ -534,6 +535,19 @@ export async function POST(
       rejected_by_filter: candidate.filter ?? null,
       specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
+
+    // §16 (scoped): a keyword restored to the user's filter allowlist
+    // never gets rejected again — checked here, after the pipeline runs,
+    // so lib/keywordFilters.ts itself stays DB-free and synchronous.
+    const { data: allowlistRows } = await supabase.from("filter_allowlist").select("keyword_text").eq("user_id", user.id);
+    const allowlistOverrides = new Set(
+      findAllowlistOverrides(reviewRowsRaw, (allowlistRows ?? []).map((r) => r.keyword_text))
+    );
+    const reviewRows = reviewRowsRaw.map((row) =>
+      allowlistOverrides.has(row)
+        ? { ...row, status: "active" as const, rejection_reason: null, rejected_by_filter: null }
+        : row
+    );
 
     const negativeRows = negatives.map((negative) => ({
       book_id: bookId,
@@ -637,6 +651,7 @@ export async function POST(
       ),
       byMatchType: countBy(activeRows.map((r) => r.match_type)),
       matchTypeProfile,
+      allowlistOverrideCount: allowlistOverrides.size,
       genreTerms: snapshot.genreTerms.slice(0, 10),
       anchors: {
         bookSpecific: filterContext.anchors.bookSpecific.slice(0, 10),

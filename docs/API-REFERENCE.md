@@ -190,6 +190,7 @@ deciding filter and its reason — so the manager can show why.
   "byCategory": { "core-genre": 12 },
   "byMatchType": { "phrase": 200, "broad": 60, "exact": 52 },
   "matchTypeProfile": "mixed",
+  "allowlistOverrideCount": 0,
   "genreTerms": ["cozy mystery", "british detectives"],
   "pausedCount": 24,
   "rejectedCount": 118,
@@ -416,6 +417,26 @@ uses. Response: `{ genresTotal, keywordsAdded, keywordsTotal }`.
   keyword, keeping this book's copy active.
 
 **Implementation:** `app/api/books/[id]/keywords/cannibalization/route.ts`
+
+---
+
+## Filter Allowlist Endpoints (Enhancements spec §16, scoped)
+
+### GET/POST /api/filter-allowlist
+
+- `GET` — the user's whole allowlist.
+- `POST` — `{ text, filter?, note? }`. Idempotent (upsert on
+  `user_id, keyword_text`). The generate route checks this after the
+  filter pipeline runs and reclassifies any matching rejected/paused
+  candidate as active — `lib/keywordFilters.ts` itself is never touched.
+
+**Implementation:** `app/api/filter-allowlist/route.ts`
+
+### DELETE /api/filter-allowlist/[id]
+
+Removes the override — future generate runs can reject that text again.
+
+**Implementation:** `app/api/filter-allowlist/[id]/route.ts`
 
 ---
 

@@ -7,8 +7,9 @@ export const runtime = "nodejs";
  * GET /api/dashboard/keyword-stats
  *
  * Dashboard "Keyword stats" + "Specificity distribution" widgets
- * (Enhancements spec §2). Each dashboard widget owns its own fetch so one
- * failing query never blanks the rest of the page.
+ * (Enhancements spec §2), plus the §16 "which filters reject the most"
+ * breakdown that motivates the allowlist flow. Each dashboard widget owns
+ * its own fetch so one failing query never blanks the rest of the page.
  */
 export async function GET() {
   try {
@@ -18,7 +19,7 @@ export async function GET() {
     const supabase = await supabaseServer();
     const { data, error } = await supabase
       .from("keywords")
-      .select("status, match_type, source, specificity")
+      .select("status, match_type, source, specificity, rejected_by_filter")
       .eq("user_id", user.id);
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
