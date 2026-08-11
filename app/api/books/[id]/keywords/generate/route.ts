@@ -17,6 +17,7 @@ import {
   buildBookContentCandidates,
   buildBuyerIntentCandidates,
   buildCompNameCandidates,
+  buildManualCompetitorCandidates,
   buildCompTitleCandidates,
   buildCuratedSynonymCandidates,
   buildDescriptionCandidates,
@@ -182,7 +183,10 @@ function buildSnapshotCandidates(
         compTitles: snapshot.compTitles,
         categories: snapshot.categories,
       }),
-      "comp-name": buildCompNameCandidates(snapshot.competitors),
+      "comp-name": mergeKeywordCandidates(
+        buildCompNameCandidates(snapshot.competitors),
+        buildManualCompetitorCandidates(snapshot.asin)
+      ),
       "author-catalog": buildAuthorCatalogCandidates(snapshot.authorCatalogTitles),
       "amazon-recs": buildAmazonRecommendationCandidates([
         snapshot.frequentlyBoughtTogether,
@@ -291,6 +295,7 @@ export async function POST(
     // dangling modifiers during generation.
     const filterContext = buildFilterContext({
       title: snapshot.title,
+      asin: snapshot.asin,
       author: snapshot.author,
       seriesName: snapshot.seriesName,
       description: snapshot.description,
