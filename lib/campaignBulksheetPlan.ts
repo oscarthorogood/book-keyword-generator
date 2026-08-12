@@ -41,6 +41,8 @@ export interface CampaignPlanTarget {
   matchType?: MatchType;
   targetingExpression?: string;
   bid: number | null;
+  /** Every campaign has one ad group except Auto Discovery, which has one per targeting group (close-match/substitutes/loose-match/complements). */
+  adGroup: string;
 }
 
 export interface CampaignPlanNegative {
@@ -103,6 +105,7 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
         text: k.text,
         matchType: k.matchType,
         bid: k.bid ?? defaultBid,
+        adGroup: "Brand Guard",
       })),
       negatives: baseNegatives,
     });
@@ -119,6 +122,7 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
         text: k.text,
         matchType: k.matchType,
         bid: k.bid ?? defaultBid,
+        adGroup: "Alpha Exact",
       })),
       negatives: baseNegatives,
     });
@@ -143,8 +147,9 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
       targets: bmmDiscovery.map((t) => ({
         keywordId: t.rootKeywordId,
         text: t.text,
-        matchType: "broad",
+        matchType: "broad" as const,
         bid: bidByKeywordId.get(t.rootKeywordId) ?? defaultBid,
+        adGroup: "BMM Discovery",
       })),
       negatives: [...baseNegatives, ...alphaExactNegatives],
     });
@@ -158,7 +163,13 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
       dailyBudget,
       targets: rivalAsins.map((a) => {
         const expr = `asin="${a.competitor_asin}"`;
-        return { competitorAsinId: a.id, text: expr, targetingExpression: expr, bid: a.bid ?? defaultBid };
+        return {
+          competitorAsinId: a.id,
+          text: expr,
+          targetingExpression: expr,
+          bid: a.bid ?? defaultBid,
+          adGroup: "Rival ASIN Offensive",
+        };
       }),
       negatives: baseNegatives,
     });
@@ -172,7 +183,7 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
       dailyBudget,
       targets: crossSell.map((t) => {
         const expr = `asin="${t.asin}"`;
-        return { text: expr, targetingExpression: expr, bid: defaultBid };
+        return { text: expr, targetingExpression: expr, bid: defaultBid, adGroup: "Catalog Cross-Sell" };
       }),
       negatives: baseNegatives,
     });
@@ -186,7 +197,7 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
       dailyBudget: autoBudget,
       targets: AUTO_TARGETING_GROUPS.map((group) => {
         const expr = `targetingExpression="${group.expression}"`;
-        return { text: expr, targetingExpression: expr, bid: defaultBid * group.bidMultiplier };
+        return { text: expr, targetingExpression: expr, bid: defaultBid * group.bidMultiplier, adGroup: group.label };
       }),
       negatives: baseNegatives,
     });

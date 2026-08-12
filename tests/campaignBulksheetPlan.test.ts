@@ -163,6 +163,25 @@ describe("buildCampaignPlans (campaigns spec §3/§4)", () => {
     expect(withAuto.some((p) => p.campaignType === "auto_discovery")).toBe(true);
   });
 
+  it("gives Auto Discovery one ad group per targeting group, and every other campaign one ad group named after itself", () => {
+    const bank: KeywordWithRollups[] = [keyword({ id: "bg-1", text: "jane doe mysteries", matchType: "exact", sources: ["comp-name"] })];
+    const plans = buildCampaignPlans({
+      book: BOOK,
+      bank,
+      anchors: ANCHORS,
+      asinBank: [],
+      siblingBooks: [],
+      negatives: [],
+      includeAutoDiscovery: true,
+    });
+    const brandGuard = plans.find((p) => p.campaignType === "brand_guard")!;
+    expect(brandGuard.targets.every((t) => t.adGroup === "Brand Guard")).toBe(true);
+
+    const auto = plans.find((p) => p.campaignType === "auto_discovery")!;
+    const adGroups = new Set(auto.targets.map((t) => t.adGroup));
+    expect(adGroups.size).toBe(4);
+  });
+
   it("defaults every campaign's daily budget to $25 and names campaigns from the book title", () => {
     const bank: KeywordWithRollups[] = [keyword({ id: "bg-1", text: "jane doe mysteries", matchType: "exact", sources: ["comp-name"] })];
     const plans = buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
