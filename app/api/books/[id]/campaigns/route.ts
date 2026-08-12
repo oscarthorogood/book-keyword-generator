@@ -14,6 +14,25 @@ export const maxDuration = 60;
 /** Decision 2 (docs/CAMPAIGNS-PROGRESS.md): typed confirmation required above this total daily spend. */
 const CONFIRMATION_THRESHOLD_PER_DAY = 50;
 
+/** GET /api/books/[id]/campaigns — this book's sub-campaigns, for the Create/Update Campaign action row and the "needs Amazon ID" badge. */
+export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
+  const { id: bookId } = await params;
+
+  const user = await currentUser();
+  if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
+
+  const supabase = await supabaseServer();
+  const { data, error } = await supabase
+    .from("campaigns")
+    .select("id, campaign_type, name, daily_budget, status, amazon_campaign_id, export_batch_id, updated_at")
+    .eq("book_id", bookId)
+    .eq("user_id", user.id)
+    .order("updated_at", { ascending: false });
+  if (error) return Response.json({ error: error.message }, { status: 400 });
+
+  return Response.json({ campaigns: data ?? [] });
+}
+
 /**
  * POST /api/books/[id]/campaigns (campaigns spec §4, PR 7)
  *
