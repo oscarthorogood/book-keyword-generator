@@ -15,12 +15,37 @@ import type { CompetitorAsin, KeywordCandidate, MatchType } from "./types";
 export interface CampaignKeyword extends KeywordCandidate {
   id: string;
   status: "active" | "paused" | "negative" | "archived" | "rejected";
+  /** The persisted keywords.bid column — distinct from KeywordCandidate's generation-time suggestedBid. */
+  bid?: number | null;
 }
 
 /** A campaign keyword joined with its lifetime performance (keyword_result_rollups, sql/24). */
 export interface KeywordWithRollups extends CampaignKeyword {
   lifetimeOrders?: number;
 }
+
+export type CampaignType =
+  | "brand_guard"
+  | "alpha_exact"
+  | "bmm_discovery"
+  | "rival_asin_offensive"
+  | "catalog_cross_sell"
+  | "auto_discovery";
+
+/**
+ * Every campaign type except Auto Discovery has exactly one ad group,
+ * named after the campaign type itself. Auto Discovery has one per
+ * targeting group (lib/bulksheet.ts's AUTO_TARGETING_GROUPS) and isn't in
+ * this map — Update Campaign (PR 9) only supports the single-ad-group
+ * types for that reason.
+ */
+export const SINGLE_AD_GROUP_LABEL: Partial<Record<CampaignType, string>> = {
+  brand_guard: "Brand Guard",
+  alpha_exact: "Alpha Exact",
+  bmm_discovery: "BMM Discovery",
+  rival_asin_offensive: "Rival ASIN Offensive",
+  catalog_cross_sell: "Catalog Cross-Sell",
+};
 
 export interface CampaignBook {
   id: string;

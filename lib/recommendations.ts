@@ -20,6 +20,7 @@
  */
 
 import { clampBid, DEFAULT_COMPETITOR_BID_RANGE } from "./amazonAds";
+import type { CampaignType } from "./campaignSelection";
 
 export type RecommendationType =
   | "increase_bid"
@@ -47,14 +48,7 @@ export interface KeywordPerformance {
   bid: number | null;
   status: "active" | "paused" | "negative" | "archived" | "rejected";
   /** BMM Discovery keywords are the only ones eligible for promote_to_alpha_exact. Always null for competitor ASINs. */
-  campaignType?:
-    | "brand_guard"
-    | "alpha_exact"
-    | "bmm_discovery"
-    | "rival_asin_offensive"
-    | "catalog_cross_sell"
-    | "auto_discovery"
-    | null;
+  campaignType?: CampaignType | null;
   /** Null before any Search Term Report has ever matched this row — no opinion before real data. */
   resultsUpdatedAt: string | null;
   lifetimeClicks: number | null;
