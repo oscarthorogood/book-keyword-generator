@@ -21,6 +21,8 @@ export interface BookRecord {
   metadata_json: unknown;
   /** §21: "mixed" (default triple) or "phrase-only". Falls back to "mixed" on rows from before sql/13. */
   match_type_profile?: "mixed" | "phrase-only";
+  /** Campaigns spec §2.5 (sql/25-catalog-cross-sell-support.sql). NULL until a human sets it on the book page — never backfilled from author name. */
+  series_key?: string | null;
 }
 
 export interface BookWithSnapshot {

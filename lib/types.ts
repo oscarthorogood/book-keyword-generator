@@ -172,6 +172,8 @@ export interface CompetitorAsin {
   mean_rank: number | null;
   created_at: string;
   updated_at: string;
+  /** Campaigns spec §2.5 (sql/25-catalog-cross-sell-support.sql). Defaults 'rival'; 'own' marks this book's own other titles for Catalog Cross-Sell. */
+  relationship?: "rival" | "own";
 }
 
 /**
