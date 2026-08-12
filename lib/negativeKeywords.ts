@@ -40,6 +40,17 @@ export interface NegativeKeyword {
   /** Negative exact for a specific unwanted query, negative phrase for a whole family of them. */
   matchType: Extract<MatchType, "phrase" | "exact">;
   reason: string;
+  /**
+   * `campaign` (blocks the term across every ad group in that campaign) or
+   * `ad_group` (blocks it only where attached) — see campaigns spec §1.3.
+   * This module stays campaign-unaware and never sets it; it defaults to
+   * `ad_group` at the bulksheet layer (lib/bulksheet.ts,
+   * lib/bulksheetUpload.ts), which is where starter-list junk terms like the
+   * ones this file produces belong. Campaign-scoped negatives (e.g. the
+   * future Alpha Exact → BMM Discovery safeguard) are set explicitly by
+   * whatever assembles that specific negative, not by this file.
+   */
+  scope?: "campaign" | "ad_group";
 }
 
 /** Terms so broad that negating them as a phrase would suppress wanted traffic too. */

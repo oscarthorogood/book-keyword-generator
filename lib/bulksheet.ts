@@ -19,26 +19,23 @@
  * source supplied one.
  */
 
+import {
+  BULKSHEET_COLUMNS,
+  buildAdGroupRow,
+  buildCampaignNegativeKeywordRow,
+  buildCampaignRow,
+  buildKeywordRow,
+  buildNegativeKeywordRow,
+  buildProductTargetingRow,
+  toCsv,
+  type BulksheetRow,
+} from "./bulksheetSchema";
 import type { NegativeKeyword } from "./negativeKeywords";
 import type { BrandTarget, ProductTarget } from "./productTargets";
 import type { MatchType } from "./types";
 
-export const BULKSHEET_COLUMNS = [
-  "Product",
-  "Entity",
-  "Operation",
-  "Campaign Name",
-  "Ad Group Name",
-  "Keyword or Product Targeting",
-  "Match Type",
-  "Bid",
-  "Daily Budget",
-  "Campaign Targeting Type",
-  "State",
-  "Source",
-] as const;
-
-export type BulksheetRow = Record<(typeof BULKSHEET_COLUMNS)[number], string>;
+export { BULKSHEET_COLUMNS };
+export type { BulksheetRow };
 
 export interface ExportKeyword {
   text: string;
@@ -58,15 +55,15 @@ export interface BulksheetInput {
   brandTargets?: BrandTarget[];
   dailyBudget?: number;
   defaultBid?: number;
+  /** The book's own ASIN, used as the SKU on Product Ad rows in the *-upload.xlsx path (lib/bulksheetUpload.ts). Unused by the review CSV. */
+  sku?: string;
 }
-
-const PRODUCT = "Sponsored Products";
 
 /**
  * Manual campaigns default to $100/day (brief F11): the $10 default this
  * generator previously emitted was a config bug, not an intended budget.
  */
-const DEFAULT_MANUAL_DAILY_BUDGET = 100;
+export const DEFAULT_MANUAL_DAILY_BUDGET = 100;
 
 /**
  * Auto campaigns are the discovery engine that feeds search-term
@@ -74,34 +71,20 @@ const DEFAULT_MANUAL_DAILY_BUDGET = 100;
  * $1/day floor — ~2 clicks/day, which discovers almost nothing (brief F11).
  * ~10% of the manual budget is a more useful default at any budget size.
  */
-const AUTO_BUDGET_RATIO = 0.1;
-const AUTO_BUDGET_MIN = 1;
+export const AUTO_BUDGET_RATIO = 0.1;
+export const AUTO_BUDGET_MIN = 1;
 
 /** Close > substitutes > loose > complements: closer matches earn the higher bid. */
-const AUTO_TARGETING_GROUPS: Array<{ expression: string; label: string; bidMultiplier: number }> = [
+export const AUTO_TARGETING_GROUPS: Array<{ expression: string; label: string; bidMultiplier: number }> = [
   { expression: "close-match", label: "Auto: close match", bidMultiplier: 1 },
   { expression: "substitutes", label: "Auto: substitutes", bidMultiplier: 0.8 },
   { expression: "loose-match", label: "Auto: loose match", bidMultiplier: 0.6 },
   { expression: "complements", label: "Auto: complements", bidMultiplier: 0.4 },
 ];
 
-function campaignName(bookTitle: string, suffix: string): string {
+export function campaignName(bookTitle: string, suffix: string): string {
   const title = bookTitle.replace(/[",]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
   return `${title} – ${suffix}`;
-}
-
-function emptyRow(): BulksheetRow {
-  return Object.fromEntries(BULKSHEET_COLUMNS.map((column) => [column, ""])) as BulksheetRow;
-}
-
-function money(value: number | null | undefined, fallback: number): string {
-  const amount = typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
-  return amount.toFixed(2);
-}
-
-/** Ads bulk sheets use "enabled"/"paused"; the app's other statuses have no upload meaning. */
-function stateFor(status: string | null | undefined): string {
-  return status === "paused" ? "paused" : "enabled";
 }
 
 /**
@@ -118,46 +101,27 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
   const compNames = keywords.filter((keyword) => keyword.group === "comp-names");
 
   const addCampaign = (name: string, targetingType: string) => {
-    rows.push({
-      ...emptyRow(),
-      Product: PRODUCT,
-      Entity: "Campaign",
-      Operation: "create",
-      "Campaign Name": name,
-      "Daily Budget": dailyBudget.toFixed(2),
-      "Campaign Targeting Type": targetingType,
-      State: "enabled",
-    });
+    rows.push(buildCampaignRow({ name, dailyBudget, targetingType }));
   };
 
   const addAdGroup = (campaign: string, adGroup: string) => {
-    rows.push({
-      ...emptyRow(),
-      Product: PRODUCT,
-      Entity: "Ad Group",
-      Operation: "create",
-      "Campaign Name": campaign,
-      "Ad Group Name": adGroup,
-      Bid: defaultBid.toFixed(2),
-      State: "enabled",
-    });
+    rows.push(buildAdGroupRow({ campaign, adGroup, bid: defaultBid }));
   };
 
   const addKeywordRows = (campaign: string, adGroup: string, entries: ExportKeyword[]) => {
     for (const entry of entries) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Keyword",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": adGroup,
-        "Keyword or Product Targeting": entry.text,
-        "Match Type": entry.matchType,
-        Bid: money(entry.bid, defaultBid),
-        State: stateFor(entry.status),
-        Source: entry.source ?? "",
-      });
+      rows.push(
+        buildKeywordRow({
+          campaign,
+          adGroup,
+          text: entry.text,
+          matchType: entry.matchType,
+          bid: entry.bid,
+          defaultBid,
+          status: entry.status,
+          source: entry.source,
+        })
+      );
     }
   };
 
@@ -165,21 +129,38 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
   // so the Exact and Product Targeting campaigns had no protection from
   // known-bad queries. Every campaign type accepts negative keywords for
   // query exclusion (product-targeting campaigns included), so every
-  // campaign this run creates gets the same negative list.
-  const addNegativeRows = (campaign: string, adGroup: string) => {
-    for (const negative of negatives) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Negative Keyword",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": adGroup,
-        "Keyword or Product Targeting": negative.text,
-        "Match Type": `negative ${negative.matchType}`,
-        State: "enabled",
-        Source: negative.reason,
-      });
+  // campaign this run creates gets the same negative list by default.
+  //
+  // §1.3: each negative's own `scope` decides the entity — `campaign`
+  // (e.g. the future Alpha Exact → BMM Discovery safeguard) blocks the term
+  // everywhere in that campaign via a Campaign Negative Keyword row with no
+  // ad group; `ad_group` (the default, matching today's starter-list junk
+  // terms) attaches only where called, as before. `entries` defaults to the
+  // shared list so every existing call site is unchanged; passing a
+  // different list per campaign is what lets a future caller (e.g. Create
+  // Campaign) give one campaign negatives another doesn't have.
+  const addNegativeRows = (campaign: string, adGroup: string, entries: NegativeKeyword[] = negatives) => {
+    for (const negative of entries) {
+      if ((negative.scope ?? "ad_group") === "campaign") {
+        rows.push(
+          buildCampaignNegativeKeywordRow({
+            campaign,
+            text: negative.text,
+            matchType: negative.matchType,
+            reason: negative.reason,
+          })
+        );
+      } else {
+        rows.push(
+          buildNegativeKeywordRow({
+            campaign,
+            adGroup,
+            text: negative.text,
+            matchType: negative.matchType,
+            reason: negative.reason,
+          })
+        );
+      }
     }
   };
 
@@ -206,40 +187,30 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
   // No Ads API involved: this is bulksheet-only, same as everything else here.
   if (descriptive.length > 0 || compNames.length > 0) {
     const campaign = campaignName(bookTitle, "Auto Discovery");
-    const autoBudget = Math.max(AUTO_BUDGET_MIN, Math.round(dailyBudget * AUTO_BUDGET_RATIO * 100) / 100);
-    rows.push({
-      ...emptyRow(),
-      Product: PRODUCT,
-      Entity: "Campaign",
-      Operation: "create",
-      "Campaign Name": campaign,
-      "Daily Budget": autoBudget.toFixed(2),
-      "Campaign Targeting Type": "auto",
-      State: "enabled",
-    });
+    const autoBudget = Math.max(
+      AUTO_BUDGET_MIN,
+      Math.round(dailyBudget * AUTO_BUDGET_RATIO * 100) / 100
+    );
+    rows.push(buildCampaignRow({ name: campaign, dailyBudget: autoBudget, targetingType: "auto" }));
     for (const group of AUTO_TARGETING_GROUPS) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Ad Group",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": group.label,
-        Bid: money(defaultBid * group.bidMultiplier, defaultBid),
-        State: "enabled",
-      });
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Product Targeting",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": group.label,
-        "Keyword or Product Targeting": `targetingExpression="${group.expression}"`,
-        Bid: money(defaultBid * group.bidMultiplier, defaultBid),
-        State: "enabled",
-        Source: "auto",
-      });
+      rows.push(
+        buildAdGroupRow({
+          campaign,
+          adGroup: group.label,
+          bid: defaultBid * group.bidMultiplier,
+          fallbackBid: defaultBid,
+        })
+      );
+      rows.push(
+        buildProductTargetingRow({
+          campaign,
+          adGroup: group.label,
+          targetingExpression: `targetingExpression="${group.expression}"`,
+          bid: defaultBid * group.bidMultiplier,
+          fallbackBid: defaultBid,
+          source: "auto",
+        })
+      );
     }
     addNegativeRows(campaign, AUTO_TARGETING_GROUPS[0].label);
   }
@@ -251,50 +222,31 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
     addNegativeRows(campaign, "ASIN & brand targets");
 
     for (const target of productTargets) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Product Targeting",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": "ASIN & brand targets",
-        "Keyword or Product Targeting": `asin="${target.asin}"`,
-        Bid: defaultBid.toFixed(2),
-        State: "enabled",
-        Source: target.title ?? "",
-      });
+      rows.push(
+        buildProductTargetingRow({
+          campaign,
+          adGroup: "ASIN & brand targets",
+          targetingExpression: `asin="${target.asin}"`,
+          bid: defaultBid,
+          source: target.title ?? "",
+        })
+      );
     }
 
     for (const target of brandTargets) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Product Targeting",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": "ASIN & brand targets",
-        "Keyword or Product Targeting": `brand="${target.brand}"`,
-        Bid: defaultBid.toFixed(2),
-        State: "enabled",
-        Source: `${target.titles} comparable title${target.titles === 1 ? "" : "s"}`,
-      });
+      rows.push(
+        buildProductTargetingRow({
+          campaign,
+          adGroup: "ASIN & brand targets",
+          targetingExpression: `brand="${target.brand}"`,
+          bid: defaultBid,
+          source: `${target.titles} comparable title${target.titles === 1 ? "" : "s"}`,
+        })
+      );
     }
   }
 
   return rows;
-}
-
-function escapeCsv(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
-
-/** Renders rows as CSV, header first. */
-export function toCsv(rows: BulksheetRow[]): string {
-  const lines = [BULKSHEET_COLUMNS.join(",")];
-  for (const row of rows) {
-    lines.push(BULKSHEET_COLUMNS.map((column) => escapeCsv(row[column] ?? "")).join(","));
-  }
-  return lines.join("\n");
 }
 
 /** One call from keywords to a downloadable bulksheet CSV. */

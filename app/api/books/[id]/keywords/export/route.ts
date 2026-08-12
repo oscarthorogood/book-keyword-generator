@@ -1,5 +1,7 @@
 import { loadBookWithSnapshot } from "@/lib/bookStore";
-import { buildBulksheetCsv, type ExportKeyword } from "@/lib/bulksheet";
+import { buildBulksheetCsv, type BulksheetInput, type ExportKeyword } from "@/lib/bulksheet";
+import { buildUploadRows } from "@/lib/bulksheetUpload";
+import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
 import { mergeNegatives, selectApplicableNegatives, type LibraryNegativeRow } from "@/lib/negativeKeywordLibrary";
 import { matchGenresToBook } from "@/lib/presetKeywords";
 import { buildBrandTargets, buildProductTargets } from "@/lib/productTargets";
@@ -107,22 +109,38 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       }));
       negatives = mergeNegatives(bookNegatives, selectApplicableNegatives(applicable, bookId, matchedGenreIds));
     }
-    const csv = buildBulksheetCsv({
+    const bulksheetInput: BulksheetInput = {
       bookTitle: snapshot.title ?? loaded.book.title ?? snapshot.asin,
+      sku: loaded.book.asin,
       keywords,
       negatives,
       productTargets: buildProductTargets(snapshot.competitors, snapshot.compAsins),
       brandTargets: buildBrandTargets(snapshot.competitors),
       defaultBid,
       dailyBudget,
-    });
+    };
 
-    const filename = `${(snapshot.title ?? snapshot.asin).replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 50)}-bulksheet.csv`;
+    const baseFilename = (snapshot.title ?? snapshot.asin).replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 50);
+
+    // UI copy stays "Download campaign plan" until PR 3.5's human upload gate
+    // confirms this format is actually accepted by Amazon.
+    if (url.searchParams.get("format") === "upload") {
+      const xlsx = await buildUploadXlsx(buildUploadRows(bulksheetInput));
+      return new Response(new Uint8Array(xlsx), {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="${baseFilename}-upload.xlsx"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    const csv = buildBulksheetCsv(bulksheetInput);
 
     return new Response(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `attachment; filename="${baseFilename}-review.csv"`,
         "Cache-Control": "no-store",
       },
     });
