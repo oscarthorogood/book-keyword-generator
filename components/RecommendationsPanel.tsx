@@ -7,6 +7,7 @@ interface Recommendation {
   id: string;
   keyword_id: string | null;
   competitor_asin_id: string | null;
+  campaign_id: string | null;
   type: "increase_bid" | "decrease_bid" | "archive" | "reactivate" | "pause" | "promote_to_alpha_exact";
   current_bid: number | null;
   suggested_bid: number | null;
@@ -25,11 +26,13 @@ const TYPE_LABEL: Record<Recommendation["type"], string> = {
 
 /**
  * Pending bid/archive/promotion recommendations for a book (campaigns spec
- * §6/§7). Reusable — book detail page today; campaign detail and a global
- * pending view can reuse it once those pages exist (PR 11). Own fetch,
- * fails soft, same pattern as CannibalizationPanel.
+ * §6/§7). Reusable — book detail page and the campaign detail page (PR 11)
+ * both use it; the fetch is always book-scoped (that's what the API
+ * generates against), and an optional `campaignId` filters the displayed
+ * list down to that one sub-campaign's recommendations without a second
+ * endpoint. Own fetch, fails soft, same pattern as CannibalizationPanel.
  */
-export default function RecommendationsPanel({ bookId }: { bookId: string }) {
+export default function RecommendationsPanel({ bookId, campaignId }: { bookId: string; campaignId?: string }) {
   const [recommendations, setRecommendations] = useState<Recommendation[] | null>(null);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
@@ -44,6 +47,8 @@ export default function RecommendationsPanel({ bookId }: { bookId: string }) {
         /* fail soft — no panel rather than an error banner */
       });
   }
+
+  const visible = campaignId ? (recommendations ?? []).filter((r) => r.campaign_id === campaignId) : recommendations;
 
   useEffect(() => {
     let mounted = true;
@@ -100,13 +105,13 @@ export default function RecommendationsPanel({ bookId }: { bookId: string }) {
     }
   }
 
-  if (!recommendations || recommendations.length === 0) return null;
+  if (!visible || visible.length === 0) return null;
 
   return (
     <div className="card mb-6">
       <div className="flex items-center justify-between gap-2 mb-3">
         <h2 className="text-md font-semibold">
-          Recommendations <span className="meta-line">({recommendations.length} pending)</span>
+          Recommendations <span className="meta-line">({visible.length} pending)</span>
         </h2>
         <div className="flex items-center gap-2">
           <button onClick={refresh} disabled={refreshing} className="btn btn-tertiary btn-sm">
@@ -118,7 +123,7 @@ export default function RecommendationsPanel({ bookId }: { bookId: string }) {
         </div>
       </div>
       <ul className="space-y-2">
-        {recommendations.map((rec) => (
+        {visible.map((rec) => (
           <li key={rec.id} className="flex flex-wrap items-center gap-2">
             <span className="cell-primary">{TYPE_LABEL[rec.type]}</span>
             {rec.confidence && <span className="meta-line text-xs">({rec.confidence} confidence)</span>}
