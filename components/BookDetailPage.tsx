@@ -1,9 +1,10 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useRouter, useSearchParams } from "next/navigation";
-import { AlertTriangle, ArrowLeft, CheckCircle2, ListChecks, RefreshCw } from "lucide-react";
-import BookKeywordPanel from "./BookKeywordPanel";
+import { AlertTriangle, ArrowLeft } from "lucide-react";
+import BookActionBar from "./BookActionBar";
+import KeywordManager from "./KeywordManager";
+import CompetitorPanel from "./CompetitorPanel";
 
 /** The slice of the stored snapshot (books.metadata_json) this page renders. */
 export interface BookSnapshotView {
@@ -84,28 +85,12 @@ async function fetchBook(bookId: string): Promise<Book | null> {
 }
 
 export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) {
-  const router = useRouter();
-  const searchParams = useSearchParams();
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [applyingPresets, setApplyingPresets] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
-  // Bumped after applying presets to force KeywordManager to refetch —
-  // simpler than threading a second imperative refresh path through it.
-  const [keywordManagerKey, setKeywordManagerKey] = useState(0);
-
-  // Keywords/Competitors toggle (spec §6.2) — kept in the URL (?view=) so a
-  // link to the competitors tab (e.g. from /competitors) lands directly on
-  // it, and reloading the page doesn't silently drop back to Keywords.
-  const view: "keywords" | "competitors" = searchParams.get("view") === "competitors" ? "competitors" : "keywords";
-  function setView(next: "keywords" | "competitors") {
-    const params = new URLSearchParams(searchParams.toString());
-    if (next === "keywords") params.delete("view");
-    else params.set("view", next);
-    const query = params.toString();
-    router.replace(`/books/${bookId}${query ? `?${query}` : ""}`, { scroll: false });
-  }
+  // Bumped after a shared action (generate/filter/presets) to force the
+  // keyword and competitor managers to refetch — simpler than threading a
+  // second imperative refresh path through each of them.
+  const [dataKey, setDataKey] = useState(0);
 
   useEffect(() => {
     let active = true;
@@ -125,25 +110,6 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
     if (loaded) setBook(loaded);
   }, [bookId]);
 
-  async function refreshMetadata() {
-    setRefreshing(true);
-    setNotice(null);
-    try {
-      const res = await fetch(`/api/books/${bookId}/refresh`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setNotice(body.error || "Could not re-fetch the metadata.");
-        return;
-      }
-      setBook(body.book as Book);
-      setNotice(body.warning ?? "Metadata re-fetched from Amazon.");
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Could not re-fetch the metadata.");
-    } finally {
-      setRefreshing(false);
-    }
-  }
-
   async function updateMatchTypeProfile(profile: "mixed" | "phrase-only") {
     if (!book) return;
     const previous = book.match_type_profile ?? "mixed";
@@ -156,31 +122,9 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
     if (!res.ok) setBook((current) => (current ? { ...current, match_type_profile: previous } : current));
   }
 
-  async function applyGenrePresets() {
-    setApplyingPresets(true);
-    setNotice(null);
-    try {
-      const res = await fetch(`/api/books/${bookId}/keywords/apply-presets`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setNotice(body.error || "Could not apply genre presets.");
-        return;
-      }
-      setNotice(
-        body.message ??
-          (body.appliedCount > 0
-            ? `Applied ${body.appliedCount} preset keyword${body.appliedCount === 1 ? "" : "s"} from ${body.matchedGenres.join(", ")}.`
-            : "No new preset keywords to apply.")
-      );
-      if (body.appliedCount > 0) {
-        await reloadBook();
-        setKeywordManagerKey((k) => k + 1);
-      }
-    } catch (err) {
-      setNotice(err instanceof Error ? err.message : "Could not apply genre presets.");
-    } finally {
-      setApplyingPresets(false);
-    }
+  function onDataChanged() {
+    setDataKey((k) => k + 1);
+    void reloadBook();
   }
 
   if (loading) {
@@ -298,16 +242,6 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
               <option value="mixed">Broad + Phrase + Exact</option>
               <option value="phrase-only">Phrase-only (+ Exact for comps)</option>
             </select>
-            {view === "keywords" && (
-              <button onClick={applyGenrePresets} disabled={applyingPresets} className="btn btn-secondary">
-                <ListChecks size={20} />
-                {applyingPresets ? "Applying…" : "Apply genre presets"}
-              </button>
-            )}
-            <button onClick={refreshMetadata} disabled={refreshing} className="btn btn-secondary">
-              <RefreshCw size={20} className={refreshing ? "animate-spin" : undefined} />
-              {refreshing ? "Re-fetching…" : "Re-fetch metadata"}
-            </button>
           </div>
         </div>
       </header>
@@ -322,13 +256,6 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
                 The metadata is incomplete and keyword generation needs it — re-fetch to try again.
               </p>
             </div>
-          </div>
-        )}
-
-        {notice && (
-          <div className="alert alert-success" aria-live="polite">
-            <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
-            <p>{notice}</p>
           </div>
         )}
 
@@ -409,35 +336,24 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
           </div>
         </section>
 
-        {/* Keywords/Competitors toggle (spec §6.2) */}
-        <div className="tabs" role="tablist" aria-label="Keywords or competitors">
-          <button
-            role="tab"
-            aria-selected={view === "keywords"}
-            onClick={() => setView("keywords")}
-            className={`tab ${view === "keywords" ? "tab-active" : ""}`}
-          >
-            Keywords
-          </button>
-          <button
-            role="tab"
-            aria-selected={view === "competitors"}
-            onClick={() => setView("competitors")}
-            className={`tab ${view === "competitors" ? "tab-active" : ""}`}
-          >
-            Competitors
-          </button>
-        </div>
-
-        <BookKeywordPanel
-          key={`${view}-${keywordManagerKey}`}
+        {/* Grouped actions (spec: simplified buttons, no keywords/competitors toggle) — everything below is one working view of the book. */}
+        <BookActionBar
           bookId={bookId}
-          mode={view}
+          metadataReady={!captureFailed}
+          onDataChanged={onDataChanged}
+          onMetadataRefreshed={onDataChanged}
+        />
+
+        <KeywordManager
+          key={`keywords-${dataKey}`}
+          bookId={bookId}
           metadataCapturedAt={snapshot.capturedAt}
           metadataReady={!captureFailed}
           genreTerms={genreTerms}
           onKeywordsChanged={reloadBook}
         />
+
+        <CompetitorPanel key={`competitors-${dataKey}`} bookId={bookId} />
       </div>
     </div>
   );

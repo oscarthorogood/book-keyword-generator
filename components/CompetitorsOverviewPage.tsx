@@ -278,7 +278,7 @@ export default function CompetitorsOverviewPage() {
                       <td>
                         <div className="flex flex-wrap gap-1">
                           {row.books.map((b) => (
-                            <Link key={b.bookId} href={`/books/${b.bookId}?view=competitors`} className="chip-tag" title={b.status}>
+                            <Link key={b.bookId} href={`/books/${b.bookId}`} className="chip-tag" title={b.status}>
                               {b.bookTitle}
                             </Link>
                           ))}

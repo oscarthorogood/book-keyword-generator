@@ -5,8 +5,6 @@ import {
   AlertCircle,
   AlertTriangle,
   CheckCircle2,
-  Download,
-  Filter,
   Loader2,
   Plus,
   Search,
@@ -15,7 +13,6 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import CampaignActions from "./CampaignActions";
 import CannibalizationPanel from "./CannibalizationPanel";
 import RecommendationsPanel from "./RecommendationsPanel";
 
@@ -183,8 +180,6 @@ export default function KeywordManager({
   const [filterFilter, setFilterFilter] = useState<"all" | string>("all");
   const [specificityFilter, setSpecificityFilter] = useState<"all" | number>("all");
   const [specificitySort, setSpecificitySort] = useState<"none" | "asc" | "desc">("none");
-  const [refiltering, setRefiltering] = useState(false);
-  const [refilterResult, setRefilterResult] = useState<string | null>(null);
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [promoteNotice, setPromoteNotice] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
@@ -452,36 +447,6 @@ export default function KeywordManager({
   }
 
   /**
-   * Re-runs the filter pipeline over the keywords this book already has —
-   * the migration path for lists generated before the pipeline existed, and
-   * the way to re-apply it after tuning.
-   */
-  async function rerunFilters() {
-    setRefiltering(true);
-    setRefilterResult(null);
-    try {
-      const res = await fetch(`/api/books/${bookId}/keywords/filter`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({}),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setRefilterResult(body.error || "Could not re-run the filters.");
-        return;
-      }
-      setRefilterResult(
-        `Re-checked ${body.examined} keyword${body.examined === 1 ? "" : "s"} · ${body.changed} changed`
-      );
-      await reload();
-    } catch (err) {
-      setRefilterResult(err instanceof Error ? err.message : "Could not re-run the filters.");
-    } finally {
-      setRefiltering(false);
-    }
-  }
-
-  /**
    * Every filter change runs through here. Selection is scoped to what's on
    * screen: selecting rows on one tab and then switching tabs would otherwise
    * leave a bulk action armed against rows the user can no longer see — and
@@ -609,62 +574,20 @@ export default function KeywordManager({
 
       <CannibalizationPanel bookId={bookId} onResolved={reload} />
       <RecommendationsPanel bookId={bookId} />
-      <CampaignActions bookId={bookId} />
 
-      {/* Primary actions, as the reference screens' action-card row. */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      {/* Generation is driven from the page-level action bar (BookActionBar); this stays as
+          an opt-in for the advanced options (key tropes, result cap) that bar's one-click
+          "Generate keywords/ASINs" doesn't expose. */}
+      <div className="mb-6">
         <button
           onClick={() => setShowGenerateForm((open) => !open)}
-          className="action-card"
+          className="btn-link"
           aria-expanded={showGenerateForm}
         >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile icon-tile-inverted">
-              <Sparkles size={20} />
-            </span>
-            <Plus size={20} style={{ color: "rgba(255,255,255,0.6)" }} aria-hidden="true" />
-          </div>
-          <span className="text-md font-semibold">Generate keywords</span>
+          <Sparkles size={16} />
+          Advanced generate options (key tropes, result cap)
         </button>
-
-        <button
-          onClick={rerunFilters}
-          disabled={refiltering || keywords.length === 0}
-          className="action-card action-card-secondary"
-          title="Re-check every keyword against this book's relevance filters"
-        >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              {refiltering ? (
-                <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} />
-              ) : (
-                <Filter size={20} style={{ color: "var(--icon-active)" }} />
-              )}
-            </span>
-          </div>
-          <span className="text-md font-semibold">{refiltering ? "Filtering…" : "Re-run filters"}</span>
-        </button>
-
-        <a
-          href={`/api/books/${bookId}/keywords/export`}
-          className="action-card action-card-secondary"
-          title="Download an Amazon Ads bulk-upload CSV (keywords, negatives and ASIN/brand targets)"
-        >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              <Download size={20} style={{ color: "var(--icon-active)" }} />
-            </span>
-          </div>
-          <span className="text-md font-semibold">Export bulksheet</span>
-        </a>
       </div>
-
-      {refilterResult && (
-        <div className="alert mb-6" aria-live="polite">
-          <Filter size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
-          <p>{refilterResult}</p>
-        </div>
-      )}
 
       {promoteNotice && (
         <div className="alert mb-6" aria-live="polite">

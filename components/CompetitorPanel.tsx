@@ -5,9 +5,6 @@ import {
   AlertCircle,
   Calculator,
   CheckCircle2,
-  Download,
-  Filter,
-  ListChecks,
   Loader2,
   Plus,
   Search,
@@ -127,12 +124,6 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
 
   const [recalculatingBids, setRecalculatingBids] = useState(false);
 
-  const [applyingPresets, setApplyingPresets] = useState(false);
-  const [applyPresetsNotice, setApplyPresetsNotice] = useState<string | null>(null);
-
-  const [refiltering, setRefiltering] = useState(false);
-  const [refilterResult, setRefilterResult] = useState<string | null>(null);
-
   useEffect(() => {
     let active = true;
     fetchCompetitorAsins(bookId)
@@ -242,31 +233,6 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
     }
   }
 
-  /** Applies matching preset competitor ASINs (task 4) — mirrors BookDetailPage's applyGenrePresets() for keywords. */
-  async function applyGenrePresets() {
-    setApplyingPresets(true);
-    setApplyPresetsNotice(null);
-    try {
-      const res = await fetch(`/api/books/${bookId}/competitors/apply-presets`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setApplyPresetsNotice(body.error || "Could not apply genre presets.");
-        return;
-      }
-      setApplyPresetsNotice(
-        body.message ??
-          (body.appliedCount > 0
-            ? `Applied ${body.appliedCount} preset competitor ASIN${body.appliedCount === 1 ? "" : "s"} from ${body.matchedGenres.join(", ")}.`
-            : "No new preset competitor ASINs to apply.")
-      );
-      if (body.appliedCount > 0) await reload();
-    } catch (err) {
-      setApplyPresetsNotice(err instanceof Error ? err.message : "Could not apply genre presets.");
-    } finally {
-      setApplyingPresets(false);
-    }
-  }
-
   /** Pulls competitor ASINs from the same metadata crawl keyword generation uses (§ generate route). */
   async function generateAsins() {
     setGenerating(true);
@@ -289,27 +255,6 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
       setGenerateError(err instanceof Error ? err.message : "Could not generate competitor ASINs.");
     } finally {
       setGenerating(false);
-    }
-  }
-
-  async function rerunFilters() {
-    setRefiltering(true);
-    setRefilterResult(null);
-    try {
-      const res = await fetch(`/api/books/${bookId}/competitors/filter`, { method: "POST" });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setRefilterResult(body.error || "Could not re-run the filters.");
-        return;
-      }
-      setRefilterResult(
-        `Re-checked ${body.examined} competitor ASIN${body.examined === 1 ? "" : "s"} · ${body.changed} changed`
-      );
-      await reload();
-    } catch (err) {
-      setRefilterResult(err instanceof Error ? err.message : "Could not re-run the filters.");
-    } finally {
-      setRefiltering(false);
     }
   }
 
@@ -366,102 +311,36 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
         </div>
       </div>
 
-      {/* Primary actions — same shape as KeywordManager's action-card row. */}
-      <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-        <div className="flex flex-col gap-2">
-          <button onClick={generateAsins} disabled={generating} className="action-card">
-            <div className="flex items-start justify-between">
-              <span className="icon-tile icon-tile-inverted">
-                {generating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-              </span>
-              <Plus size={20} style={{ color: "rgba(255,255,255,0.6)" }} aria-hidden="true" />
-            </div>
-            <span className="text-md font-semibold">{generating ? "Generating…" : "Generate ASINs"}</span>
-          </button>
-          <label className="sr-only" htmlFor="competitor-result-cap">
-            Result cap for Generate ASINs
-          </label>
-          <select
-            id="competitor-result-cap"
-            value={resultCap}
-            onChange={(e) => setResultCap(Number(e.target.value))}
-            className="input"
-            title="Maximum competitor ASINs to add per Generate run, best-ranked first"
-          >
-            <option value={10}>Cap: 10 ASINs</option>
-            <option value={25}>Cap: 25 ASINs</option>
-            <option value={40}>Cap: 40 ASINs (recommended)</option>
-            <option value={75}>Cap: 75 ASINs</option>
-            <option value={100}>Cap: 100 ASINs</option>
-            <option value={200}>Cap: 200 ASINs (no cap)</option>
-          </select>
-        </div>
-
-        <button
-          onClick={rerunFilters}
-          disabled={refiltering || asins.length === 0}
-          className="action-card action-card-secondary"
-          title="Re-check every competitor ASIN against this book's own ASIN and basic ASIN shape"
+      {/* Generation, filtering, presets and export are driven from the page-level action
+          bar (BookActionBar) — this stays as the one competitor-specific extra it doesn't
+          cover, and an advanced result-cap option for Generate ASINs. */}
+      <div className="mb-6 flex flex-wrap items-center gap-3">
+        <label className="sr-only" htmlFor="competitor-result-cap">
+          Result cap for Generate ASINs
+        </label>
+        <select
+          id="competitor-result-cap"
+          value={resultCap}
+          onChange={(e) => setResultCap(Number(e.target.value))}
+          className="input w-auto"
+          title="Maximum competitor ASINs to add per Generate run, best-ranked first"
         >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              {refiltering ? (
-                <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} />
-              ) : (
-                <Filter size={20} style={{ color: "var(--icon-active)" }} />
-              )}
-            </span>
-          </div>
-          <span className="text-md font-semibold">{refiltering ? "Filtering…" : "Re-run filters"}</span>
-        </button>
-
-        <button
-          onClick={applyGenrePresets}
-          disabled={applyingPresets}
-          className="action-card action-card-secondary"
-          title="Apply preset competitor ASINs from the genre library (spec task 4)"
-        >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              {applyingPresets ? (
-                <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} />
-              ) : (
-                <ListChecks size={20} style={{ color: "var(--icon-active)" }} />
-              )}
-            </span>
-          </div>
-          <span className="text-md font-semibold">{applyingPresets ? "Applying…" : "Apply genre presets"}</span>
-        </button>
-
-        <a
-          href={`/api/books/${bookId}/competitors/export`}
-          className="action-card action-card-secondary"
-          title="Download an Amazon Ads bulk-upload CSV of competitor ASIN product targets"
-        >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              <Download size={20} style={{ color: "var(--icon-active)" }} />
-            </span>
-          </div>
-          <span className="text-md font-semibold">Export bulksheet</span>
-        </a>
+          <option value={10}>Cap: 10 ASINs</option>
+          <option value={25}>Cap: 25 ASINs</option>
+          <option value={40}>Cap: 40 ASINs (recommended)</option>
+          <option value={75}>Cap: 75 ASINs</option>
+          <option value={100}>Cap: 100 ASINs</option>
+          <option value={200}>Cap: 200 ASINs (no cap)</option>
+        </select>
 
         <button
           onClick={() => recalculateBids()}
           disabled={recalculatingBids || asins.length === 0}
-          className="action-card action-card-secondary"
+          className="btn btn-secondary"
           title="Re-score every tracked ASIN's bid from its stored price/BSR/competitor-count signals"
         >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              {recalculatingBids ? (
-                <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} />
-              ) : (
-                <Calculator size={20} style={{ color: "var(--icon-active)" }} />
-              )}
-            </span>
-          </div>
-          <span className="text-md font-semibold">{recalculatingBids ? "Recalculating…" : "Recalculate bids"}</span>
+          {recalculatingBids ? <Loader2 size={16} className="animate-spin" /> : <Calculator size={16} />}
+          {recalculatingBids ? "Recalculating…" : "Recalculate bids"}
         </button>
       </div>
 
@@ -489,20 +368,6 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
               ? "No competitor ASINs were found in this book's cached crawl. Try clicking 'Re-fetch metadata' at the top of the page, or add ASINs manually below."
               : `All ${summary.candidateCount} competitor ASINs found in the crawl are already tracked for this book.`}
           </p>
-        </div>
-      )}
-
-      {refilterResult && (
-        <div className="alert mb-6" aria-live="polite">
-          <Filter size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
-          <p>{refilterResult}</p>
-        </div>
-      )}
-
-      {applyPresetsNotice && (
-        <div className="alert mb-6" aria-live="polite">
-          <ListChecks size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
-          <p>{applyPresetsNotice}</p>
         </div>
       )}
 
