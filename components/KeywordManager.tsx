@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
+  Calculator,
   CheckCircle2,
   Loader2,
   Plus,
@@ -170,6 +171,10 @@ export default function KeywordManager({
   const [newMatchType, setNewMatchType] = useState<MatchType>("phrase");
   const [adding, setAdding] = useState(false);
 
+  const [newAsinText, setNewAsinText] = useState("");
+  const [addingAsin, setAddingAsin] = useState(false);
+  const [recalculatingBids, setRecalculatingBids] = useState(false);
+
   // "ready" is a UI-only pseudo-status: status === "active" but not yet a
   // member of any campaign. Only rows genuinely in a campaign show as
   // "Active" — active-but-uncampaigned rows get their own tab instead of
@@ -272,6 +277,45 @@ export default function KeywordManager({
       }
     } finally {
       setAdding(false);
+    }
+  }
+
+  async function addAsin() {
+    const text = newAsinText.trim();
+    if (!text) return;
+    setAddingAsin(true);
+    try {
+      const values = text
+        .split(/[\n,]/)
+        .map((t) => t.trim())
+        .filter(Boolean);
+      for (const value of values) {
+        await fetch(`/api/books/${bookId}/competitors`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ competitor_asin: value, source: "manual" }),
+        });
+      }
+      setNewAsinText("");
+      await reload();
+    } finally {
+      setAddingAsin(false);
+    }
+  }
+
+  /** Re-scores computeCompetitorBid() from each selected ASIN's already-stored metadata. */
+  async function recalculateBids(ids?: string[]) {
+    setRecalculatingBids(true);
+    try {
+      await fetch(`/api/books/${bookId}/competitors/recalculate-bids`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(ids ? { ids } : {}),
+      });
+      if (ids) setSelected(new Set());
+      await reload();
+    } finally {
+      setRecalculatingBids(false);
     }
   }
 
@@ -808,30 +852,42 @@ export default function KeywordManager({
         </button>
       </div>
 
-      {/* Status tabs — the primary cut through the list (§4.4). */}
+      {/* Add competitor ASIN */}
+      <div className="mb-5 flex flex-wrap items-start gap-3">
+        <textarea
+          value={newAsinText}
+          onChange={(e) => setNewAsinText(e.target.value)}
+          placeholder="Add a competitor ASIN, or paste a list (one per line / comma separated)"
+          rows={1}
+          className="input min-w-[240px] flex-1 resize-none"
+          aria-label="New competitor ASIN"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              addAsin();
+            }
+          }}
+        />
+        <button onClick={addAsin} disabled={addingAsin || !newAsinText.trim()} className="btn btn-secondary">
+          <Plus size={20} />
+          Add ASIN
+        </button>
+      </div>
+
+      {/* Status tabs — the primary cut through the list (§4.4). Ordered so
+          Active/Ready (the working set) sit together, then the rest of the
+          lifecycle, with All last as the escape hatch. Spread to fill the
+          row rather than clustering to one side. */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="tabs overflow-x-auto" role="tablist" aria-label="Filter by status">
+        <div className="tabs tabs-spread" role="tablist" aria-label="Filter by status">
           <button
             role="tab"
-            aria-selected={statusFilter === "all"}
-            onClick={() => changeFilters(() => setStatusFilter("all"))}
-            className={`tab ${statusFilter === "all" ? "tab-active" : ""}`}
+            aria-selected={statusFilter === "active"}
+            onClick={() => changeFilters(() => setStatusFilter("active"))}
+            className={`tab ${statusFilter === "active" ? "tab-active" : ""}`}
           >
-            All ({keptCount})
+            Active ({bank.filter((r) => r.status === "active" && inCampaign(r)).length})
           </button>
-          {STATUSES.map((status) => (
-            <button
-              key={status}
-              role="tab"
-              aria-selected={statusFilter === status}
-              onClick={() => changeFilters(() => setStatusFilter(status))}
-              className={`tab ${statusFilter === status ? "tab-active" : ""}`}
-            >
-              {status === "active"
-                ? `Active (${bank.filter((r) => r.status === "active" && inCampaign(r)).length})`
-                : `${STATUS_LABELS[status]} (${keywords.filter((k) => k.status === status).length})`}
-            </button>
-          ))}
           <button
             role="tab"
             aria-selected={statusFilter === "ready"}
@@ -840,6 +896,25 @@ export default function KeywordManager({
             title="Passed the relevance filters but not yet part of any campaign"
           >
             Ready ({bank.filter((r) => r.status === "active" && !inCampaign(r)).length})
+          </button>
+          {(["archived", "paused", "negative", "rejected"] as KeywordStatus[]).map((status) => (
+            <button
+              key={status}
+              role="tab"
+              aria-selected={statusFilter === status}
+              onClick={() => changeFilters(() => setStatusFilter(status))}
+              className={`tab ${statusFilter === status ? "tab-active" : ""}`}
+            >
+              {STATUS_LABELS[status]} ({keywords.filter((k) => k.status === status).length})
+            </button>
+          ))}
+          <button
+            role="tab"
+            aria-selected={statusFilter === "all"}
+            onClick={() => changeFilters(() => setStatusFilter("all"))}
+            className={`tab ${statusFilter === "all" ? "tab-active" : ""}`}
+          >
+            All ({keptCount})
           </button>
         </div>
       </div>
@@ -932,6 +1007,17 @@ export default function KeywordManager({
               Mark {STATUS_LABELS[status].toLowerCase()}
             </button>
           ))}
+          {Array.from(selected).some((id) => rowById(id)?.kind === "asin") && (
+            <button
+              onClick={() => recalculateBids(Array.from(selected).filter((id) => rowById(id)?.kind === "asin"))}
+              disabled={recalculatingBids}
+              className="btn btn-secondary btn-sm"
+              title="Re-score the selected ASINs' bids from their stored price/BSR/competitor-count signals"
+            >
+              <Calculator size={16} />
+              {recalculatingBids ? "Recalculating…" : "Recalculate bids"}
+            </button>
+          )}
           <button onClick={bulkDelete} className="btn btn-destructive btn-sm">
             <Trash2 size={16} />
             Delete
@@ -1077,7 +1163,6 @@ export default function KeywordManager({
               </th>
               <th scope="col">Bid</th>
               <th scope="col">Status</th>
-              <th scope="col">Campaigns</th>
               <th scope="col">
                 <span className="sr-only">Actions</span>
               </th>
@@ -1185,19 +1270,6 @@ export default function KeywordManager({
                       </option>
                     ))}
                   </select>
-                </td>
-                <td>
-                  {row.campaigns.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
-                      {row.campaigns.map((name) => (
-                        <span key={name} className="chip-tag" title={name}>
-                          {name}
-                        </span>
-                      ))}
-                    </div>
-                  ) : (
-                    <span style={{ color: "var(--text-placeholder)" }}>—</span>
-                  )}
                 </td>
                 <td className="text-right">
                   <div className="flex justify-end gap-1">
