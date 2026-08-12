@@ -218,6 +218,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           export_batch_id: exportBatchId,
           bulksheet_path: uploadPath,
           bulksheet_download_url: signedUpload?.signedUrl ?? null,
+          last_export_error: null,
+          last_export_error_at: null,
         })
         .eq("id", campaignId)
         .select()
@@ -232,6 +234,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       });
     } catch (uploadErr) {
       const message = uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed";
+      await supabase
+        .from("campaigns")
+        .update({ last_export_error: message, last_export_error_at: new Date().toISOString() })
+        .eq("id", campaignId);
       return Response.json({ error: `Update Campaign failed: ${message}` }, { status: 500 });
     }
   } catch (err) {

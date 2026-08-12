@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { Loader2, RefreshCw, Rocket } from "lucide-react";
+import { AlertTriangle, Download, Loader2, RefreshCw, Rocket, X } from "lucide-react";
 
 interface Campaign {
   id: string;
@@ -11,6 +11,9 @@ interface Campaign {
   status: string;
   amazon_campaign_id: string | null;
   export_batch_id: string;
+  bulksheet_path?: string | null;
+  last_export_error?: string | null;
+  last_export_error_at?: string | null;
 }
 
 /**
@@ -37,16 +40,23 @@ export default function CampaignActions({ bookId }: { bookId: string }) {
     null
   );
   const [error, setError] = useState<string | null>(null);
+  const [listError, setListError] = useState<string | null>(null);
 
   const loadCampaigns = useCallback(
     (active: () => boolean = () => true) =>
       fetch(`/api/books/${bookId}/campaigns`)
         .then((res) => res.json().catch(() => ({})))
         .then((body) => {
-          if (active()) setCampaigns(body.campaigns ?? []);
+          if (!active()) return;
+          if (Array.isArray(body.campaigns)) {
+            setCampaigns(body.campaigns);
+            setListError(null);
+          } else {
+            setListError(body.error || "Could not load campaigns.");
+          }
         })
-        .catch(() => {
-          /* fail soft — no list rather than an error banner */
+        .catch((err) => {
+          if (active()) setListError(err instanceof Error ? err.message : "Could not load campaigns.");
         }),
     [bookId]
   );
@@ -158,14 +168,28 @@ export default function CampaignActions({ bookId }: { bookId: string }) {
               )}
             </span>
           </div>
-          <span className="text-md font-semibold">{submitting ? "Creating…" : "Create campaign"}</span>
+          <span className="text-md font-semibold">{submitting ? "Creating draft…" : "Create campaign (draft)"}</span>
         </button>
       </div>
 
       {error && (
-        <p className="alert alert-error mt-2" role="alert">
-          {error}
-        </p>
+        <div className="alert alert-error mt-2" role="alert">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+          <p className="flex-1">{error}</p>
+          <button className="btn btn-tertiary btn-icon btn-sm" onClick={() => setError(null)} aria-label="Dismiss error">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {listError && (
+        <div className="alert alert-error mt-2" role="alert">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+          <p className="flex-1">Could not load campaigns: {listError}</p>
+          <button className="btn btn-tertiary btn-sm" onClick={() => loadCampaigns()}>
+            Retry
+          </button>
+        </div>
       )}
 
       {result && (
@@ -174,9 +198,12 @@ export default function CampaignActions({ bookId }: { bookId: string }) {
             <p className="alert-title">
               Created {result.campaigns.length} campaign{result.campaigns.length === 1 ? "" : "s"} — {result.totalDailyBudget.toFixed(2)}/day total
             </p>
-            {result.downloadUrl && (
-              <a href={result.downloadUrl} className="btn btn-tertiary btn-sm mt-2">
-                Download bulksheet
+            {result.campaigns[0] && (
+              <a
+                href={`/api/books/${bookId}/campaigns/${result.campaigns[0].id}/download`}
+                className="btn btn-tertiary btn-sm mt-2"
+              >
+                <Download size={14} /> Download bulksheet
               </a>
             )}
           </div>
@@ -188,8 +215,22 @@ export default function CampaignActions({ bookId }: { bookId: string }) {
           {campaigns.map((c) => (
             <li key={c.id} className="flex items-center gap-2 flex-wrap">
               <span>
-                {c.name} ({c.daily_budget.toFixed(2)}/day, {c.status})
+                {c.name} ({c.daily_budget.toFixed(2)}/day, {c.status === "draft" ? "draft — not yet exported" : c.status})
               </span>
+              {c.bulksheet_path && (
+                <a
+                  href={`/api/books/${bookId}/campaigns/${c.id}/download`}
+                  className="btn btn-tertiary btn-sm"
+                  title="Download the current bulksheet for this campaign"
+                >
+                  <Download size={14} /> Download
+                </a>
+              )}
+              {c.last_export_error && (
+                <span className="badge badge-error" title={c.last_export_error}>
+                  export failed
+                </span>
+              )}
               {!c.amazon_campaign_id ? (
                 <>
                   <span className="badge badge-warning">needs Amazon ID</span>
@@ -209,13 +250,14 @@ export default function CampaignActions({ bookId }: { bookId: string }) {
                   className="btn btn-tertiary btn-sm"
                   disabled={c.status !== "exported" || updatingId === c.id}
                   onClick={() => updateCampaign(c.id)}
+                  title="Re-scores this campaign's targets against the current keyword/ASIN bank, recommendations and imported results, then uploads only what changed"
                 >
                   {updatingId === c.id ? (
                     <Loader2 size={14} className="animate-spin" />
                   ) : (
                     <RefreshCw size={14} />
                   )}{" "}
-                  Update campaign
+                  Filter & update campaign
                 </button>
               )}
               {updateResult?.id === c.id && (
@@ -224,7 +266,7 @@ export default function CampaignActions({ bookId }: { bookId: string }) {
                   {updateResult.downloadUrl && (
                     <>
                       {" "}
-                      <a href={updateResult.downloadUrl}>Download</a>
+                      <a href={`/api/books/${bookId}/campaigns/${c.id}/download`}>Download</a>
                     </>
                   )}
                 </span>

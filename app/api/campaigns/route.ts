@@ -20,7 +20,7 @@ export async function GET() {
     const { data: campaigns, error: campaignsError } = await supabase
       .from("campaigns")
       .select(
-        "id, book_id, export_batch_id, campaign_type, name, daily_budget, currency, status, amazon_campaign_id, operation, updated_at"
+        "id, book_id, export_batch_id, campaign_type, name, daily_budget, currency, status, amazon_campaign_id, operation, updated_at, bulksheet_path, last_export_error, last_export_error_at"
       )
       .eq("user_id", user.id)
       .order("updated_at", { ascending: false });

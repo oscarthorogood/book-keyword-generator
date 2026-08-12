@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft } from "lucide-react";
+import { AlertTriangle, ArrowLeft, Download } from "lucide-react";
 import Link from "next/link";
 import RecommendationsPanel from "./RecommendationsPanel";
 
@@ -17,6 +17,8 @@ interface Campaign {
   operation: string;
   export_batch_id: string;
   bulksheet_download_url: string | null;
+  bulksheet_path: string | null;
+  last_export_error: string | null;
   updated_at: string;
 }
 
@@ -28,6 +30,8 @@ interface Book {
 
 interface Target {
   id: string;
+  keyword_id: string | null;
+  competitor_asin_id: string | null;
   target_text: string;
   match_type: string | null;
   targeting_expression: string | null;
@@ -38,6 +42,12 @@ interface Target {
   negative_scope: string | null;
   created_at: string;
 }
+
+const STATE_LABELS: Record<string, string> = {
+  enabled: "Active",
+  paused: "Paused",
+  archived: "Archived",
+};
 
 interface Result {
   impressions: number;
@@ -164,10 +174,19 @@ export default function CampaignDetailPage({ campaignId }: { campaignId: string 
                   <dd className="cell-primary">{new Date(campaign.updated_at).toLocaleString()}</dd>
                 </div>
               </dl>
-              {campaign.bulksheet_download_url && (
-                <a href={campaign.bulksheet_download_url} className="btn btn-tertiary btn-sm mt-3">
-                  Download latest bulksheet
+              {campaign.bulksheet_path && (
+                <a href={`/api/campaigns/${campaign.id}/download`} className="btn btn-tertiary btn-sm mt-3">
+                  <Download size={14} /> Download latest bulksheet
                 </a>
+              )}
+              {campaign.last_export_error && (
+                <div className="alert alert-error mt-3" role="alert">
+                  <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+                  <div>
+                    <p className="alert-title">Last export failed</p>
+                    <p className="mt-1">{campaign.last_export_error}</p>
+                  </div>
+                </div>
               )}
             </div>
 
@@ -203,35 +222,74 @@ export default function CampaignDetailPage({ campaignId }: { campaignId: string 
 
             <RecommendationsPanel bookId={campaign.book_id} campaignId={campaign.id} />
 
-            <div className="table-wrap overflow-x-auto">
-              <table className="table table-dense">
-                <thead>
-                  <tr>
-                    <th scope="col">Target</th>
-                    <th scope="col">Match type</th>
-                    <th scope="col">Bid</th>
-                    <th scope="col">State</th>
-                    <th scope="col">Operation</th>
-                    <th scope="col">Exported</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {targets.map((t) => (
-                    <tr key={t.id}>
-                      <td>
-                        <p className="cell-primary">{t.target_text}</p>
-                        {t.is_negative && <span className="meta-line text-xs">negative ({t.negative_scope})</span>}
-                      </td>
-                      <td>{t.match_type ?? "—"}</td>
-                      <td>{t.bid !== null ? `$${t.bid.toFixed(2)}` : "—"}</td>
-                      <td>{t.state}</td>
-                      <td>{t.operation}</td>
-                      <td>{new Date(t.created_at).toLocaleDateString()}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            {(() => {
+              const states = Array.from(new Set(targets.map((t) => t.state)));
+              function targetTable(rows: Target[]) {
+                return (
+                  <div className="table-wrap overflow-x-auto">
+                    <table className="table table-dense">
+                      <thead>
+                        <tr>
+                          <th scope="col">Target</th>
+                          <th scope="col">Match type</th>
+                          <th scope="col">Bid</th>
+                          <th scope="col">Operation</th>
+                          <th scope="col">Exported</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {rows.map((t) => (
+                          <tr key={t.id}>
+                            <td>
+                              <p className="cell-primary">{t.target_text}</p>
+                              {t.is_negative && <span className="meta-line text-xs">negative ({t.negative_scope})</span>}
+                            </td>
+                            <td>{t.match_type ?? "—"}</td>
+                            <td>{t.bid !== null ? `$${t.bid.toFixed(2)}` : "—"}</td>
+                            <td>{t.operation}</td>
+                            <td>{new Date(t.created_at).toLocaleDateString()}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                );
+              }
+              return (
+                <div className="space-y-6">
+                  {states.map((state) => {
+                    const inState = targets.filter((t) => t.state === state);
+                    const asinRows = inState.filter((t) => t.competitor_asin_id);
+                    const keywordRows = inState.filter((t) => !t.competitor_asin_id);
+                    return (
+                      <div key={state}>
+                        <h3 className="text-sm font-semibold mb-2" style={{ color: "var(--text-primary)" }}>
+                          {STATE_LABELS[state] ?? state} <span className="meta-line">({inState.length})</span>
+                        </h3>
+                        <div className="grid gap-4 lg:grid-cols-2">
+                          <div>
+                            <p className="meta-line text-xs mb-1">ASINs ({asinRows.length})</p>
+                            {asinRows.length > 0 ? (
+                              targetTable(asinRows)
+                            ) : (
+                              <p className="meta-line text-xs">None</p>
+                            )}
+                          </div>
+                          <div>
+                            <p className="meta-line text-xs mb-1">Keywords ({keywordRows.length})</p>
+                            {keywordRows.length > 0 ? (
+                              targetTable(keywordRows)
+                            ) : (
+                              <p className="meta-line text-xs">None</p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })()}
           </>
         ) : null}
       </div>

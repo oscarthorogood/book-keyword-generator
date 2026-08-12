@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Download, RefreshCw, ThumbsDown, ThumbsUp } from "lucide-react";
+import { AlertTriangle, Download, RefreshCw, ThumbsDown, ThumbsUp, X } from "lucide-react";
 
 interface Recommendation {
   id: string;
@@ -36,15 +36,23 @@ export default function RecommendationsPanel({ bookId, campaignId }: { bookId: s
   const [recommendations, setRecommendations] = useState<Recommendation[] | null>(null);
   const [decidingId, setDecidingId] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   function load(active: () => boolean = () => true) {
     return fetch(`/api/books/${bookId}/recommendations`)
       .then((res) => res.json().catch(() => ({})))
       .then((body) => {
-        if (active() && Array.isArray(body.recommendations)) setRecommendations(body.recommendations);
+        if (!active()) return;
+        if (Array.isArray(body.recommendations)) {
+          setRecommendations(body.recommendations);
+          setError(null);
+        } else {
+          setError(body.error || "Could not load recommendations.");
+        }
       })
-      .catch(() => {
-        /* fail soft — no panel rather than an error banner */
+      .catch((err) => {
+        if (active()) setError(err instanceof Error ? err.message : "Could not load recommendations.");
       });
   }
 
@@ -83,13 +91,21 @@ export default function RecommendationsPanel({ bookId, campaignId }: { bookId: s
     }
 
     setDecidingId(rec.id);
+    setActionError(null);
     try {
       const res = await fetch(`/api/books/${bookId}/recommendations/${rec.id}/accept`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
       });
-      if (res.ok) setRecommendations((prev) => (prev ? prev.filter((r) => r.id !== rec.id) : prev));
+      const resBody = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setRecommendations((prev) => (prev ? prev.filter((r) => r.id !== rec.id) : prev));
+      } else {
+        setActionError(resBody.error || "Could not accept recommendation.");
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not accept recommendation.");
     } finally {
       setDecidingId(null);
     }
@@ -97,21 +113,29 @@ export default function RecommendationsPanel({ bookId, campaignId }: { bookId: s
 
   async function reject(rec: Recommendation) {
     setDecidingId(rec.id);
+    setActionError(null);
     try {
       const res = await fetch(`/api/books/${bookId}/recommendations/${rec.id}/reject`, { method: "POST" });
-      if (res.ok) setRecommendations((prev) => (prev ? prev.filter((r) => r.id !== rec.id) : prev));
+      const resBody = await res.json().catch(() => ({}));
+      if (res.ok) {
+        setRecommendations((prev) => (prev ? prev.filter((r) => r.id !== rec.id) : prev));
+      } else {
+        setActionError(resBody.error || "Could not reject recommendation.");
+      }
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : "Could not reject recommendation.");
     } finally {
       setDecidingId(null);
     }
   }
 
-  if (!visible || visible.length === 0) return null;
+  if (!error && (!visible || visible.length === 0)) return null;
 
   return (
     <div className="card mb-6">
       <div className="flex items-center justify-between gap-2 mb-3">
         <h2 className="text-md font-semibold">
-          Recommendations <span className="meta-line">({visible.length} pending)</span>
+          Recommendations <span className="meta-line">({visible?.length ?? 0} pending)</span>
         </h2>
         <div className="flex items-center gap-2">
           <button onClick={refresh} disabled={refreshing} className="btn btn-tertiary btn-sm">
@@ -122,8 +146,29 @@ export default function RecommendationsPanel({ bookId, campaignId }: { bookId: s
           </a>
         </div>
       </div>
+
+      {error && (
+        <div className="alert alert-error mb-3" role="alert">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+          <p className="flex-1">{error}</p>
+          <button className="btn btn-tertiary btn-icon btn-sm" onClick={() => setError(null)} aria-label="Dismiss error">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
+      {actionError && (
+        <div className="alert alert-error mb-3" role="alert">
+          <AlertTriangle size={18} className="mt-0.5 shrink-0" />
+          <p className="flex-1">{actionError}</p>
+          <button className="btn btn-tertiary btn-icon btn-sm" onClick={() => setActionError(null)} aria-label="Dismiss error">
+            <X size={14} />
+          </button>
+        </div>
+      )}
+
       <ul className="space-y-2">
-        {visible.map((rec) => (
+        {(visible ?? []).map((rec) => (
           <li key={rec.id} className="flex flex-wrap items-center gap-2">
             <span className="cell-primary">{TYPE_LABEL[rec.type]}</span>
             {rec.confidence && <span className="meta-line text-xs">({rec.confidence} confidence)</span>}
