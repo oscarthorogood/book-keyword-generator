@@ -4,7 +4,6 @@ import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft } from "lucide-react";
 import BookActionBar from "./BookActionBar";
 import KeywordManager from "./KeywordManager";
-import CompetitorPanel from "./CompetitorPanel";
 
 /** The slice of the stored snapshot (books.metadata_json) this page renders. */
 export interface BookSnapshotView {
@@ -345,15 +344,13 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
         />
 
         <KeywordManager
-          key={`keywords-${dataKey}`}
+          key={`bank-${dataKey}`}
           bookId={bookId}
           metadataCapturedAt={snapshot.capturedAt}
           metadataReady={!captureFailed}
           genreTerms={genreTerms}
           onKeywordsChanged={reloadBook}
         />
-
-        <CompetitorPanel key={`competitors-${dataKey}`} bookId={bookId} />
       </div>
     </div>
   );

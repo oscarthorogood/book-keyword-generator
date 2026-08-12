@@ -27,7 +27,7 @@ interface Campaign {
 interface BookActionBarProps {
   bookId: string;
   metadataReady: boolean;
-  /** Bumped to force KeywordManager/CompetitorPanel to refetch after a shared action. */
+  /** Bumped to force KeywordManager to refetch after a shared action. */
   onDataChanged: () => void;
   onMetadataRefreshed: () => void;
 }
@@ -40,8 +40,8 @@ async function postJson(url: string, body: unknown = {}) {
 
 /**
  * Book page (spec: "Simplify buttons on each book page"): every action that
- * used to be scattered across KeywordManager's action-card row, CompetitorPanel's
- * action-card row, and the page header now lives here, grouped by function.
+ * used to be scattered across KeywordManager's action-card row and the page
+ * header now lives here, grouped by function.
  * Generate/filter/presets fan out to both the keyword and competitor-ASIN
  * pipelines in one click — the user works the book as a whole, not two
  * parallel tabs.
