@@ -874,30 +874,20 @@ export default function KeywordManager({
         </button>
       </div>
 
-      {/* Status tabs — the primary cut through the list (§4.4). */}
+      {/* Status tabs — the primary cut through the list (§4.4). Ordered so
+          Active/Ready (the working set) sit together, then the rest of the
+          lifecycle, with All last as the escape hatch. Spread to fill the
+          row rather than clustering to one side. */}
       <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="tabs overflow-x-auto" role="tablist" aria-label="Filter by status">
+        <div className="tabs tabs-spread" role="tablist" aria-label="Filter by status">
           <button
             role="tab"
-            aria-selected={statusFilter === "all"}
-            onClick={() => changeFilters(() => setStatusFilter("all"))}
-            className={`tab ${statusFilter === "all" ? "tab-active" : ""}`}
+            aria-selected={statusFilter === "active"}
+            onClick={() => changeFilters(() => setStatusFilter("active"))}
+            className={`tab ${statusFilter === "active" ? "tab-active" : ""}`}
           >
-            All ({keptCount})
+            Active ({bank.filter((r) => r.status === "active" && inCampaign(r)).length})
           </button>
-          {STATUSES.map((status) => (
-            <button
-              key={status}
-              role="tab"
-              aria-selected={statusFilter === status}
-              onClick={() => changeFilters(() => setStatusFilter(status))}
-              className={`tab ${statusFilter === status ? "tab-active" : ""}`}
-            >
-              {status === "active"
-                ? `Active (${bank.filter((r) => r.status === "active" && inCampaign(r)).length})`
-                : `${STATUS_LABELS[status]} (${keywords.filter((k) => k.status === status).length})`}
-            </button>
-          ))}
           <button
             role="tab"
             aria-selected={statusFilter === "ready"}
@@ -906,6 +896,25 @@ export default function KeywordManager({
             title="Passed the relevance filters but not yet part of any campaign"
           >
             Ready ({bank.filter((r) => r.status === "active" && !inCampaign(r)).length})
+          </button>
+          {(["archived", "paused", "negative", "rejected"] as KeywordStatus[]).map((status) => (
+            <button
+              key={status}
+              role="tab"
+              aria-selected={statusFilter === status}
+              onClick={() => changeFilters(() => setStatusFilter(status))}
+              className={`tab ${statusFilter === status ? "tab-active" : ""}`}
+            >
+              {STATUS_LABELS[status]} ({keywords.filter((k) => k.status === status).length})
+            </button>
+          ))}
+          <button
+            role="tab"
+            aria-selected={statusFilter === "all"}
+            onClick={() => changeFilters(() => setStatusFilter("all"))}
+            className={`tab ${statusFilter === "all" ? "tab-active" : ""}`}
+          >
+            All ({keptCount})
           </button>
         </div>
       </div>

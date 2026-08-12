@@ -808,6 +808,18 @@ h6 {
     border-radius: var(--radius-md);
   }
 
+  /* Fills the width of its row instead of clustering to one side — each tab
+     grows equally and its label centers, e.g. the book bank's status tabs. */
+  .tabs-spread {
+    display: flex;
+    width: 100%;
+  }
+
+  .tabs-spread .tab {
+    flex: 1 1 0;
+    text-align: center;
+  }
+
   .tab {
     padding: 8px 12px;
     border-radius: var(--radius-sm);
