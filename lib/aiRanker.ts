@@ -1,27 +1,41 @@
-import { callOpenRouter, isOpenRouterConfigured } from "./llmClient";
+import { callOpenRouter, isOpenRouterConfigured, parseJsonLoose } from "./llmClient";
 import { callGroq, isGroqConfigured } from "./groqClient";
+import { mapWithConcurrency } from "./concurrency";
 import { KeywordCandidate } from "./types";
 
 /**
  * Final AI-judged pass over the heuristically pre-filtered keyword
  * shortlist. The heuristic scorer (scoreAndTierBids in lib/keywordMerge.ts)
  * narrows hundreds of raw candidates down to a shortlist first — this only
- * ever sees that shortlist, not the raw pool, to keep the call small, cheap,
- * and fast, and to keep a clean fallback path (the heuristic's own order)
- * if the AI call fails or isn't configured.
+ * ever sees that shortlist, not the raw pool, to keep the calls cheap and to
+ * keep a clean fallback path (the heuristic's own order) if the AI pass fails
+ * or isn't configured.
  *
- * Tries Google Gemini's free tier (aistudio.google.com — no credit card,
- * generous daily limits) first, per the "keep this free" constraint the rest
- * of the app follows. Request/response shape is written against Gemini's
- * documented generateContent + responseSchema contract.
+ * The shortlist is judged in *chunks* rather than one request. A single call
+ * covering the whole list reliably came back truncated — models stop
+ * emitting well before the last candidate — and a truncated JSON body fails
+ * to parse, which threw away the entire pass. Chunking bounds each response,
+ * lets the chunks run in parallel, and degrades to a partial verdict set
+ * (anything unjudged keeps its heuristic position) instead of nothing.
  *
- * If Gemini isn't configured (no `GEMINI_API_KEY`) or its call fails, falls
- * back to OpenRouter (lib/llmClient.ts). If OpenRouter also isn't configured
- * or fails, falls back to Groq (lib/groqClient.ts). Either path fails soft
- * to null (never blocks the export) on any error.
+ * Provider order defaults to Gemini → OpenRouter → Groq: Gemini's free tier
+ * (aistudio.google.com — no credit card, generous daily limits) first, per
+ * the "keep this free" constraint the rest of the app follows. Set
+ * `AI_RANKER_PROVIDER_ORDER` (e.g. `openrouter,groq,gemini`) to change it.
+ * Every leg fails soft to null and never blocks the export.
  */
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+
+/**
+ * Candidates per request. Sized so a chunk's JSON verdict list fits inside
+ * the response token budget with room to spare on the free models.
+ */
+export const AI_RANK_CHUNK_SIZE = 55;
+/** Chunks in flight at once — enough to hide latency without tripping free-tier rate limits. */
+const AI_RANK_CONCURRENCY = 4;
+/** Wall-clock ceiling for one provider's whole set of chunks; the route has a 60s serverless timeout. */
+const AI_RANK_BUDGET_MS = 35_000;
 // Fast/cheap model, well within the free tier's rate limits for a
 // single-user tool. Google's model lineup moves fast — if this 404s, check
 // aistudio.google.com for the current Flash model name.
@@ -147,24 +161,50 @@ const RESPONSE_SCHEMA = {
 /**
  * Extracts a `{ "keywords": [...] }` payload from free text. Gemini's
  * `responseSchema` guarantees bare JSON; OpenRouter's and Groq's free models
- * don't, so they're prompted to return JSON only but sometimes still wrap it
- * in a ```json fence or add a stray sentence — strip a fence if present, then
- * fall back to the first `{...}` block in the text before giving up.
+ * honour JSON mode inconsistently, so they're prompted to return JSON only
+ * but sometimes still wrap it in a ```json fence or add a stray sentence —
+ * parseJsonLoose (lib/llmClient.ts) handles both shapes.
  */
 function parseRankedKeywordsJson(text: string): AiRankedKeyword[] | null {
-  const unfenced = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
-  const candidates = [unfenced, unfenced.match(/\{[\s\S]*\}/)?.[0]].filter((value): value is string => !!value);
-
-  for (const candidate of candidates) {
-    try {
-      const parsed = JSON.parse(candidate) as { keywords?: AiRankedKeyword[] };
-      if (parsed.keywords) return parsed.keywords;
-    } catch {
-      // try the next candidate
-    }
-  }
-  return null;
+  const parsed = parseJsonLoose<{ keywords?: AiRankedKeyword[] } | AiRankedKeyword[]>(text);
+  if (!parsed) return null;
+  if (Array.isArray(parsed)) return parsed;
+  return parsed.keywords ?? null;
 }
+
+/** Response-token budget for one chunk: enough for a verdict object per candidate, plus slack. */
+function chunkMaxTokens(candidateCount: number): number {
+  return Math.min(8192, Math.max(1500, candidateCount * 60));
+}
+
+const JSON_RANKER_SYSTEM_PROMPT =
+  "You are an Amazon Sponsored Products keyword relevance judge. Respond with ONLY a JSON object, no commentary and no markdown code fence.";
+
+const JSON_RANKER_SHAPE_INSTRUCTION =
+  'Respond with exactly this JSON shape: {"keywords": [{"text": string, "category": "tropes" | "comp-names" | "drop", "score": integer 0-100}, ...]}';
+
+/** OpenRouter/Groq structured-output schema, mirroring RESPONSE_SCHEMA's Gemini form. */
+const JSON_RANKER_SCHEMA = {
+  name: "keyword_verdicts",
+  schema: {
+    type: "object",
+    properties: {
+      keywords: {
+        type: "array",
+        items: {
+          type: "object",
+          properties: {
+            text: { type: "string" },
+            category: { type: "string", enum: ["tropes", "comp-names", "drop"] },
+            score: { type: "integer" },
+          },
+          required: ["text", "category", "score"],
+        },
+      },
+    },
+    required: ["keywords"],
+  },
+};
 
 /** Gemini leg of rankKeywordsWithAi — its documented generateContent + responseSchema contract. */
 async function rankWithGemini(prompt: string): Promise<AiRankedKeyword[] | null> {
@@ -212,27 +252,39 @@ async function rankWithGemini(prompt: string): Promise<AiRankedKeyword[] | null>
 }
 
 /**
- * OpenRouter leg of rankKeywordsWithAi (lib/llmClient.ts) — the fallback
- * when Gemini isn't configured or its call failed. Same prompt, but since
- * OpenRouter's free models have no structured-output contract to lean on,
- * the instruction to return bare JSON is spelled out and the response is
- * parsed leniently by parseRankedKeywordsJson.
+ * OpenRouter leg of rankKeywordsWithAi (lib/llmClient.ts). Asks for
+ * structured output via `response_format` — honoured by most models and
+ * ignored by the rest — and parses leniently either way.
+ *
+ * Previously this called `callOpenRouter` with no options at all, which meant
+ * the client's defaults applied: `max_tokens: 800` and `temperature: 0.8`.
+ * 800 tokens is nowhere near enough for a verdict per candidate, so the JSON
+ * came back truncated and unparseable on essentially every run, and 0.8 is
+ * the wrong temperature for a judge. Both are now set explicitly, and the
+ * chunk size keeps each response comfortably inside the budget.
  */
-async function rankWithOpenRouter(prompt: string): Promise<AiRankedKeyword[] | null> {
+async function rankWithOpenRouter(prompt: string, candidateCount: number): Promise<AiRankedKeyword[] | null> {
   if (!isOpenRouterConfigured()) return null;
 
   try {
-    const { text } = await callOpenRouter([
+    const { text } = await callOpenRouter(
+      [
+        { role: "system", content: JSON_RANKER_SYSTEM_PROMPT },
+        { role: "user", content: `${prompt}\n\n${JSON_RANKER_SHAPE_INSTRUCTION}` },
+      ],
       {
-        role: "system",
-        content:
-          "You are an Amazon Sponsored Products keyword relevance judge. Respond with ONLY a JSON object, no commentary and no markdown code fence.",
-      },
-      {
-        role: "user",
-        content: `${prompt}\n\nRespond with exactly this JSON shape: {"keywords": [{"text": string, "category": "tropes" | "comp-names" | "drop", "score": integer 0-100}, ...]}`,
-      },
-    ]);
+        temperature: 0.1,
+        maxTokens: chunkMaxTokens(candidateCount),
+        responseFormat: { type: "json_schema", json_schema: { name: JSON_RANKER_SCHEMA.name, strict: false, schema: JSON_RANKER_SCHEMA.schema } },
+        // One chunk is one slice of a parallel pass, so it gets a tight
+        // budget: better to leave a chunk unjudged (its candidates keep their
+        // heuristic order) than to spend the route's whole timeout on it.
+        timeoutMs: 15_000,
+        attemptsPerModel: 1,
+        budgetMs: 20_000,
+        label: "ai-ranker",
+      }
+    );
 
     const parsed = parseRankedKeywordsJson(text);
     if (!parsed) {
@@ -247,27 +299,19 @@ async function rankWithOpenRouter(prompt: string): Promise<AiRankedKeyword[] | n
 }
 
 /**
- * Groq leg of rankKeywordsWithAi — the final fallback when both Gemini and
- * OpenRouter aren't configured or failed. Uses Groq's fast LLaMA inference.
- * Same JSON prompt/response contract as the OpenRouter leg.
+ * Groq leg of rankKeywordsWithAi — Groq's fast LLaMA inference, same JSON
+ * prompt/response contract as the OpenRouter leg.
  */
-async function rankWithGroq(prompt: string): Promise<AiRankedKeyword[] | null> {
+async function rankWithGroq(prompt: string, candidateCount: number): Promise<AiRankedKeyword[] | null> {
   if (!isGroqConfigured()) return null;
 
   try {
     const { text } = await callGroq(
       [
-        {
-          role: "system",
-          content:
-            "You are an Amazon Sponsored Products keyword relevance judge. Respond with ONLY a JSON object, no commentary and no markdown code fence.",
-        },
-        {
-          role: "user",
-          content: `${prompt}\n\nRespond with exactly this JSON shape: {"keywords": [{"text": string, "category": "tropes" | "comp-names" | "drop", "score": integer 0-100}, ...]}`,
-        },
+        { role: "system", content: JSON_RANKER_SYSTEM_PROMPT },
+        { role: "user", content: `${prompt}\n\n${JSON_RANKER_SHAPE_INSTRUCTION}` },
       ],
-      { temperature: 0.1, maxTokens: 4096 }
+      { temperature: 0.1, maxTokens: chunkMaxTokens(candidateCount), responseFormat: { type: "json_object" } }
     );
 
     const parsed = parseRankedKeywordsJson(text);
@@ -282,20 +326,67 @@ async function rankWithGroq(prompt: string): Promise<AiRankedKeyword[] | null> {
   }
 }
 
+type RankCandidate = { text: string; category: "tropes" | "comp-names"; semantic?: KeywordSemantic };
+
+interface RankProvider {
+  id: "gemini" | "openrouter" | "groq";
+  configured: () => boolean;
+  run: (prompt: string, candidateCount: number) => Promise<AiRankedKeyword[] | null>;
+}
+
+const RANK_PROVIDERS: RankProvider[] = [
+  { id: "gemini", configured: () => !!GEMINI_API_KEY, run: (prompt) => rankWithGemini(prompt) },
+  { id: "openrouter", configured: isOpenRouterConfigured, run: rankWithOpenRouter },
+  { id: "groq", configured: isGroqConfigured, run: rankWithGroq },
+];
+
 /**
- * Sends the pre-filtered shortlist to an LLM for a final relevance pass:
- * Gemini first when `GEMINI_API_KEY` is set, falling back to OpenRouter
- * (lib/llmClient.ts) when Gemini isn't configured or its call fails, then
- * falling back to Groq (lib/groqClient.ts) as a final option. Returns null
- * (triggering the caller's heuristic-only fallback) if none are configured,
- * all calls fail, or the response doesn't parse — never throws.
+ * Provider order, `AI_RANKER_PROVIDER_ORDER`-overridable (comma-separated
+ * ids). Unconfigured providers are dropped; unrecognised ids are ignored, and
+ * any provider the env list omits is appended so a typo can't silently
+ * disable the whole pass.
+ */
+function orderedProviders(): RankProvider[] {
+  const requested = (process.env.AI_RANKER_PROVIDER_ORDER ?? "")
+    .split(",")
+    .map((id) => id.trim().toLowerCase())
+    .filter(Boolean);
+
+  const byPreference = [
+    ...requested.map((id) => RANK_PROVIDERS.find((p) => p.id === id)).filter((p): p is RankProvider => !!p),
+    ...RANK_PROVIDERS,
+  ];
+
+  const seen = new Set<string>();
+  return byPreference.filter((provider) => {
+    if (seen.has(provider.id) || !provider.configured()) return false;
+    seen.add(provider.id);
+    return true;
+  });
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
+  return chunks;
+}
+
+/**
+ * Sends the pre-filtered shortlist to an LLM for a final relevance pass, in
+ * parallel chunks (see AI_RANK_CHUNK_SIZE). Walks the configured providers in
+ * order and returns the first one that produced any verdicts at all;
+ * candidates whose chunk failed simply go unjudged and keep their heuristic
+ * position. Returns null (triggering the caller's heuristic-only fallback) if
+ * no provider is configured or every chunk of every provider failed — never
+ * throws.
  */
 export async function rankKeywordsWithAi(
   context: BookContext,
   tropesShortlist: KeywordCandidate[],
-  compNamesShortlist: KeywordCandidate[]
+  compNamesShortlist: KeywordCandidate[],
+  options: { chunkSize?: number; concurrency?: number; budgetMs?: number } = {}
 ): Promise<AiRankedKeyword[] | null> {
-  const candidates = [
+  const candidates: RankCandidate[] = [
     ...tropesShortlist.map((c) => ({
       text: c.text,
       category: "tropes" as const,
@@ -309,15 +400,30 @@ export async function rankKeywordsWithAi(
   ];
   if (candidates.length === 0) return [];
 
-  const prompt = buildPrompt(context, candidates);
+  const chunks = chunk(candidates, Math.max(1, options.chunkSize ?? AI_RANK_CHUNK_SIZE));
+  const concurrency = Math.max(1, options.concurrency ?? AI_RANK_CONCURRENCY);
+  const budgetMs = options.budgetMs ?? AI_RANK_BUDGET_MS;
 
-  const geminiResult = await rankWithGemini(prompt);
-  if (geminiResult) return geminiResult;
+  for (const provider of orderedProviders()) {
+    const deadline = Date.now() + budgetMs;
+    const perChunk = await mapWithConcurrency(chunks, concurrency, async (group) => {
+      if (Date.now() >= deadline) return null;
+      return provider.run(buildPrompt(context, group), group.length);
+    });
 
-  const openRouterResult = await rankWithOpenRouter(prompt);
-  if (openRouterResult) return openRouterResult;
+    const verdicts = perChunk.filter((result): result is AiRankedKeyword[] => !!result).flat();
+    if (verdicts.length > 0) {
+      const failed = perChunk.filter((result) => !result).length;
+      if (failed > 0) {
+        console.error(
+          `[rankKeywordsWithAi] ${provider.id} judged ${chunks.length - failed}/${chunks.length} chunks; the rest keep their heuristic order`
+        );
+      }
+      return verdicts;
+    }
+  }
 
-  return rankWithGroq(prompt);
+  return null;
 }
 
 /**

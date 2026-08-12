@@ -18,26 +18,38 @@ export interface SourceDefinition {
   id: string;
   label: string;
   description: string;
+  /** Pipelines whose rows this source is written as the `source` of. */
   usedFor: SourceKind[];
+  /**
+   * Pipelines this source feeds without owning the resulting rows. Autocomplete
+   * engines and the persona LLMs produce *search phrases*, not ASINs — they
+   * drive competitor discovery by supplying the queries that SerpApi/ZenRows/
+   * Decodo run (lib/asinDiscovery.ts), and the ASIN is credited to whichever
+   * of those returned it. Listing them here keeps the Sources page honest:
+   * they're doing work for competitor generation, but a zero in the
+   * "Competitor ASINs" column is the truth, not a broken source.
+   */
+  seedsFor?: SourceKind[];
   /** Env var gating this source. Unset means the source needs no API key (a free/unofficial endpoint, or user-supplied data). */
   configEnvVar?: string;
 }
 
 export const SOURCE_REGISTRY: SourceDefinition[] = [
-  { id: "ads-api", label: "Amazon Ads API", description: "Official keyword recommendations for the ASIN.", usedFor: ["keywords", "competitors"], configEnvVar: "AMAZON_ADS_CLIENT_ID" },
-  { id: "autocomplete", label: "Amazon autocomplete", description: "Unofficial Amazon search-box suggestions.", usedFor: ["keywords"] },
-  { id: "amazon-autocomplete", label: "Amazon autocomplete", description: "Unofficial Amazon search-box suggestions (ASIN discovery).", usedFor: ["competitors"] },
-  { id: "google-autocomplete", label: "Google autocomplete", description: "Google's unofficial search-suggest endpoint.", usedFor: ["keywords", "competitors"] },
-  { id: "youtube-autocomplete", label: "YouTube autocomplete", description: "YouTube search-box suggestions (BookTok/BookTube register).", usedFor: ["keywords", "competitors"] },
-  { id: "duckduckgo-autocomplete", label: "DuckDuckGo autocomplete", description: "DuckDuckGo's unofficial autocomplete endpoint.", usedFor: ["keywords", "competitors"] },
+  { id: "ads-api", label: "Amazon Ads API", description: "Official keyword recommendations for the ASIN; recommended ASINs become competitor rows.", usedFor: ["keywords", "competitors"], configEnvVar: "AMAZON_ADS_CLIENT_ID" },
+  { id: "autocomplete", label: "Amazon autocomplete", description: "Unofficial Amazon search-box suggestions. Its top phrases also seed competitor-ASIN discovery.", usedFor: ["keywords"], seedsFor: ["competitors"] },
+  { id: "amazon-autocomplete", label: "Amazon autocomplete (legacy ASIN tag)", description: "Tag on competitor rows added before ASIN discovery moved to the search providers. Amazon autocomplete now seeds those searches instead.", usedFor: ["competitors"] },
+  { id: "google-autocomplete", label: "Google autocomplete", description: "Google's unofficial search-suggest endpoint. Its top phrases also seed competitor-ASIN discovery.", usedFor: ["keywords"], seedsFor: ["competitors"] },
+  { id: "youtube-autocomplete", label: "YouTube autocomplete", description: "YouTube search-box suggestions (BookTok/BookTube register). Its top phrases also seed competitor-ASIN discovery.", usedFor: ["keywords"], seedsFor: ["competitors"] },
+  { id: "duckduckgo-autocomplete", label: "DuckDuckGo autocomplete", description: "DuckDuckGo's unofficial autocomplete endpoint. Its top phrases also seed competitor-ASIN discovery.", usedFor: ["keywords"], seedsFor: ["competitors"] },
   { id: "serpapi-related", label: "SerpApi (related searches)", description: "Amazon's own \"related searches\" via SerpApi.", usedFor: ["keywords"], configEnvVar: "SERPAPI_API_KEY" },
   { id: "serpapi-organic", label: "SerpApi (organic)", description: "Competitor titles/authors ranking for a seed term.", usedFor: ["keywords"], configEnvVar: "SERPAPI_API_KEY" },
   { id: "serpapi-autocomplete", label: "SerpApi (autocomplete)", description: "Amazon search-bar suggestions via SerpApi.", usedFor: ["keywords"], configEnvVar: "SERPAPI_API_KEY" },
-  { id: "serpapi", label: "SerpApi", description: "SerpApi Amazon Search results (ASIN discovery).", usedFor: ["competitors"], configEnvVar: "SERPAPI_API_KEY" },
-  { id: "decodo", label: "Decodo", description: "Decodo SERP Scraping API — live fetch or pasted CSV/JSON export.", usedFor: ["keywords", "competitors"], configEnvVar: "DECODO_API_KEY" },
-  { id: "zenrows", label: "ZenRows", description: "ZenRows scraping API — live Amazon search-results HTML, parsed locally.", usedFor: ["keywords", "competitors"], configEnvVar: "ZENROWS_API_KEY" },
-  { id: "persona-llm", label: "Persona LLM (OpenRouter)", description: "LLM-generated buyer search queries via OpenRouter.", usedFor: ["keywords", "competitors"], configEnvVar: "OPENROUTER_API_KEY" },
-  { id: "groq-persona", label: "Persona LLM (Groq)", description: "LLM-generated buyer search queries via Groq.", usedFor: ["keywords", "competitors"], configEnvVar: "GROQ_API_KEY" },
+  { id: "serpapi", label: "SerpApi", description: "SerpApi Amazon Search — ASINs ranking for a discovery query, with their title, author and price.", usedFor: ["competitors"], configEnvVar: "SERPAPI_API_KEY" },
+  { id: "decodo", label: "Decodo", description: "Decodo SERP Scraping API — keyword terms plus the ASINs ranking for a discovery query. Live fetch or pasted CSV/JSON export.", usedFor: ["keywords", "competitors"], configEnvVar: "DECODO_API_KEY" },
+  { id: "zenrows", label: "ZenRows", description: "ZenRows scraping API — live Amazon search-results HTML, parsed locally for both keyword terms and ranking ASINs.", usedFor: ["keywords", "competitors"], configEnvVar: "ZENROWS_API_KEY" },
+  { id: "persona-llm", label: "Persona LLM (OpenRouter)", description: "LLM-generated buyer search queries, written in the persona of this book's own genre. Its comp/genre queries also seed competitor-ASIN discovery.", usedFor: ["keywords"], seedsFor: ["competitors"], configEnvVar: "OPENROUTER_API_KEY" },
+  { id: "comp-discovery", label: "Comp discovery (OpenRouter)", description: "LLM-named comparable authors, series and subgenre phrasings, searched to find competitor ASINs. The ASIN is credited to whichever provider returned it.", usedFor: [], seedsFor: ["competitors"], configEnvVar: "OPENROUTER_API_KEY" },
+  { id: "groq-persona", label: "Persona LLM (Groq)", description: "LLM-generated buyer search queries via Groq, same persona prompt as the OpenRouter source. Its comp/genre queries also seed competitor-ASIN discovery.", usedFor: ["keywords"], seedsFor: ["competitors"], configEnvVar: "GROQ_API_KEY" },
   { id: "firecrawl", label: "Firecrawl", description: "LLM-extracted categories/keywords/features from the product page.", usedFor: ["keywords"], configEnvVar: "FIRECRAWL_API_KEY" },
   { id: "comp-title", label: "Comp titles", description: "Competitor titles crawled from the product page's \"also bought\" carousel.", usedFor: ["keywords"] },
   { id: "comp-name", label: "Comp names", description: "Competitor author/title names from tracked competitor ASINs.", usedFor: ["keywords"] },

@@ -77,6 +77,16 @@ export interface SerpApiAmazonProduct {
   formats?: string[];
 }
 
+/** One organic result, kept whole so competitor discovery gets an ASIN *and* its metadata from the same credit. */
+export interface SerpApiOrganicProduct {
+  asin: string;
+  title?: string;
+  author?: string;
+  price?: number;
+  /** 1-based position in the results list — the rank signal competitor scoring uses. */
+  position: number;
+}
+
 export interface SerpApiAmazonSearch {
   /** Amazon's own keyword expansions for the query — the highest-value section for Broad/Phrase. */
   relatedSearches: string[];
@@ -86,6 +96,13 @@ export interface SerpApiAmazonSearch {
   organicAuthors: string[];
   /** ASINs for the product-targeting list and the snowball crawl. */
   asins: string[];
+  /**
+   * Organic results with their ASIN, title, author and rank together.
+   * Competitor-ASIN generation reads this rather than `asins` alone, so a row
+   * lands with title/author/price already filled in instead of needing a
+   * separate product-page fetch per ASIN.
+   */
+  organicProducts: SerpApiOrganicProduct[];
   /** Titles/brands paying for the term — a proxy for its commercial value. */
   sponsoredTitles: string[];
 }
@@ -287,20 +304,38 @@ export async function searchAmazonViaSerpApi(
 
   const organicTitles: string[] = [];
   const organicAuthors: string[] = [];
-  for (const entry of list(data.organic_results).slice(0, 15)) {
-    const result = rec(entry);
-    if (!result) continue;
-    const title = cleanBookTitle(str(result.title));
-    if (title) organicTitles.push(title);
-    const author = extractAuthor(result);
-    if (author) organicAuthors.push(author.replace(/\s+/g, " ").trim());
-  }
+  const organicProducts: SerpApiOrganicProduct[] = [];
+  list(data.organic_results)
+    .slice(0, 15)
+    .forEach((entry, index) => {
+      const result = rec(entry);
+      if (!result) return;
+      const title = cleanBookTitle(str(result.title));
+      if (title) organicTitles.push(title);
+      const author = extractAuthor(result);
+      if (author) organicAuthors.push(author.replace(/\s+/g, " ").trim());
+
+      const asin = str(result.asin);
+      if (asin && /^[A-Z0-9]{10}$/i.test(asin)) {
+        const price = rec(result.price);
+        organicProducts.push({
+          asin: asin.toUpperCase(),
+          // The full title, not the subtitle-stripped keyword form — this is
+          // metadata for a competitor row, not a keyword candidate.
+          title: str(result.title),
+          author: author?.replace(/\s+/g, " ").trim(),
+          price: parsePrice(price?.value ?? price?.raw ?? result.price ?? result.extracted_price),
+          position: num(result.position) ?? index + 1,
+        });
+      }
+    });
 
   return {
     relatedSearches: asStringArray(data.related_searches, 25),
     organicTitles,
     organicAuthors,
     asins: Array.from(asins),
+    organicProducts,
     sponsoredTitles: [
       ...asStringArray(data.sponsored_brands, 10),
       ...asStringArray(data.product_ads, 10),

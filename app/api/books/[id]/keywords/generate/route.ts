@@ -57,6 +57,7 @@ import { fetchDecodoKeywordRows, isDecodoConfigured } from "@/lib/decodoClient";
 import { buildZenrowsCandidates } from "@/lib/zenrowsSource";
 import { fetchZenrowsKeywordRows, isZenrowsConfigured } from "@/lib/zenrowsClient";
 import { buildPersonaLlmCandidates } from "@/lib/llmPersonaSource";
+import type { PersonaBookContext } from "@/lib/personaPrompt";
 import { buildGroqPersonaCandidates } from "@/lib/groqKeywordSource";
 import { buildStorygraphTagsCandidates } from "@/lib/storygraphTags";
 import { buildLibrarySubjectsCandidates } from "@/lib/librarySubjects";
@@ -75,11 +76,12 @@ import { KeywordCandidate, KeywordCategory, KeywordSource, MatchType } from "@/l
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-// How many keywords per bucket the AI relevance pass judges. Its whole design
-// is a small, fast call over a pre-filtered shortlist (see lib/aiRanker.ts) —
-// handing it the full research list makes one slow call that comes back
-// partial regardless.
-const AI_REVIEW_LIMIT = 80;
+// How many keywords per bucket the AI relevance pass judges. The pass now
+// splits its shortlist into parallel chunks (lib/aiRanker.ts), so the ceiling
+// is about the serverless timeout rather than about one response's token
+// budget — it was 80 back when a single call had to cover the whole list and
+// came back truncated past roughly that point.
+const AI_REVIEW_LIMIT = 160;
 
 /**
  * The sources the pipeline draws on. Everything scraped from Amazon (product
@@ -361,6 +363,27 @@ export async function POST(
 
     const serpApiSeeds = [...genreSeedTerms.slice(0, 3), ...(snapshot.seriesName ? [snapshot.seriesName] : [])];
 
+    // Shared context for both persona-LLM sources. They previously got title
+    // + author only, against a prompt that hardcoded a crime-fiction reader —
+    // so a cookbook or a romance got crime queries. Everything here is
+    // metadata the snapshot already holds (see lib/personaPrompt.ts).
+    const personaContext: PersonaBookContext = {
+      title: snapshot.title,
+      author: snapshot.author,
+      asin: snapshot.asin,
+      seriesName: snapshot.seriesName,
+      genreTerms: genreSeedTerms,
+      categories: snapshot.categories,
+      description: snapshot.description,
+      compTitles: snapshot.compTitles.slice(0, 8),
+      compAuthors: snapshot.competitors
+        .map((competitor) => competitor.author)
+        .filter((author): author is string => !!author)
+        .slice(0, 8),
+      keyTropes,
+      marketplace: snapshot.marketplace,
+    };
+
     const [
       adsApiCandidates,
       amazonAutocomplete,
@@ -386,19 +409,15 @@ export async function POST(
       getDuckDuckGoAutocompleteKeywordSet(seedTerms),
       getSerpApiKeywordCandidates(serpApiSeeds, snapshot.marketplace),
       // OpenRouter persona: gracefully returns [] when key isn't configured.
-      buildPersonaLlmCandidates({ title: snapshot.title, author: snapshot.author, asin: snapshot.asin }).catch(
-        (err: Error) => {
-          console.error("[generate] persona-llm generation failed:", err.message);
-          return [] as KeywordCandidate[];
-        }
-      ),
+      buildPersonaLlmCandidates(personaContext).catch((err: Error) => {
+        console.error("[generate] persona-llm generation failed:", err.message);
+        return [] as KeywordCandidate[];
+      }),
       // Groq persona: gracefully returns [] when GROQ_API_KEY isn't configured.
-      buildGroqPersonaCandidates({ title: snapshot.title, author: snapshot.author, asin: snapshot.asin }).catch(
-        (err: Error) => {
-          console.error("[generate] groq-persona generation failed:", err.message);
-          return [] as KeywordCandidate[];
-        }
-      ),
+      buildGroqPersonaCandidates(personaContext).catch((err: Error) => {
+        console.error("[generate] groq-persona generation failed:", err.message);
+        return [] as KeywordCandidate[];
+      }),
       decodoRows.length === 0 && isDecodoConfigured()
         ? fetchDecodoKeywordRows(serpApiSeeds, snapshot.marketplace).catch((err: Error) => {
             console.error("[generate] live Decodo fetch failed:", err.message);
@@ -417,14 +436,18 @@ export async function POST(
       existingAsinRowsPromise,
     ]);
 
+    // Competitor notes are " — "-separated: the book's title and author, then
+    // a provenance segment. Only the name parts are comparable-name material —
+    // a provenance segment now carries the discovery query that found the ASIN
+    // (see the competitors generate route), which is not a keyword.
     const manualCompNames: KeywordCandidate[] = [];
     for (const row of existingAsinRows) {
       if (!row.notes) continue;
-      const parts = row.notes.split(" — ");
-      for (let part of parts) {
-        part = part.replace(/^(Frequently bought together|Similar title|Discovered via [\w-]+)/, "").trim();
-        if (part && part.length > 2) {
-          manualCompNames.push({ text: part, sources: ["comp-name"] });
+      for (const part of row.notes.split(" — ")) {
+        if (/^Discovered via /i.test(part.trim())) continue;
+        const name = part.replace(/^(Frequently bought together|Similar title)/i, "").trim();
+        if (name && name.length > 2) {
+          manualCompNames.push({ text: name, sources: ["comp-name"] });
         }
       }
     }

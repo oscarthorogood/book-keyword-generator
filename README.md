@@ -94,6 +94,42 @@ consistent with match-type assignment so a comparable-title keyword rarely
 reads as "Broad". Requires `sql/09-keyword-specificity.sql`; keywords
 generated before that migration show no rating.
 
+### Competitor-ASIN discovery
+
+Competitor generation starts from the snapshot crawl (the "also bought"
+carousel, frequently-bought-together, compare-with-similar), then looks for
+ASINs the crawl missed by *searching for them*.
+
+The distinction that matters: autocomplete engines and the persona LLMs
+return **search phrases**, not ASINs. Feeding their output through an
+"is this text an ASIN?" check — which is what this route used to do — matched
+nothing, so every one of those sources contributed zero competitors and the
+whole competitor set came from the snapshot. They now supply the queries
+instead, and three providers answer "which books rank for this?":
+
+| Provider | What it reads |
+| --- | --- |
+| SerpApi | Structured Amazon search results — ASIN, title, author, price and rank, so rows land enriched without a per-ASIN product-page fetch (1 credit per query) |
+| ZenRows | Real Amazon search HTML through a proxy pool, parsed locally for both keyword terms and ranking ASINs |
+| Decodo | Parsed SERP JSON — the `asin` on each organic/paid result |
+
+Queries are run best-first within each provider's credit budget
+(`lib/asinDiscovery.ts`): the book's genre/series seeds, then the comparable
+authors, series and subgenre phrasings OpenRouter names for this specific
+book (`lib/llmCompDiscovery.ts`), then the persona LLMs' comp/genre queries,
+then autocomplete phrases. Each discovered ASIN records the provider that
+returned it, the query that found it and its rank, so competitor scoring can
+use source agreement and mean position exactly as the snapshot path does.
+
+The LLM is used strictly as a *query generator*, never as a source of truth —
+the ASINs come back from Amazon, and every candidate still goes through the
+same metadata fetch, author de-duplication and bid scoring. A hallucinated
+author name costs one search that returns nothing relevant.
+
+On the Sources page, a source that supplies queries without owning the
+resulting rows is tagged "seeds competitors": a zero in its Competitor ASINs
+column is by design, not a broken source.
+
 ### Relevance filtering
 
 Generation is source-led: every source contributes what it found. Nothing
@@ -393,18 +429,35 @@ handle that, in order:
    returns a 0-100 relevance score used for final sort order and the
    per-ad-group cap.
 
+The shortlist is judged in **parallel chunks** (`AI_RANK_CHUNK_SIZE` in
+`lib/aiRanker.ts`) rather than one request. A single call covering the whole
+list reliably came back truncated mid-JSON, and a truncated body fails to
+parse, which threw away the entire pass; chunking bounds each response, hides
+latency, and degrades to a partial verdict set — anything left unjudged keeps
+its heuristic position instead of being dropped.
+
 Tries Google Gemini's free tier first (no credit card required for Google AI
-Studio's free tier), and falls back to OpenRouter (`lib/llmClient.ts` — the
-same free-tier chat client `lib/llmPersonaSource.ts` uses for persona-driven
-keyword generation) when `GEMINI_API_KEY` is unset or the Gemini call fails.
-Either way stays on a free provider, per the "keep this free" constraint the
-rest of the app follows. If neither `GEMINI_API_KEY` nor
-`OPENROUTER_API_KEY` is set, or both calls fail or time out, the app
-**silently falls back to the heuristic shortlist** — the AI pass never
-blocks the export, matching the fail-soft pattern every other optional
+Studio's free tier), then OpenRouter (`lib/llmClient.ts` — the same chat
+client `lib/llmPersonaSource.ts` uses for persona-driven keyword generation),
+then Groq. Set `AI_RANKER_PROVIDER_ORDER` (e.g. `openrouter,groq,gemini`) to
+change that order. Either way stays on a free provider, per the "keep this
+free" constraint the rest of the app follows. If none of `GEMINI_API_KEY`,
+`OPENROUTER_API_KEY` or `GROQ_API_KEY` is set, or every call fails or times
+out, the app **silently falls back to the heuristic shortlist** — the AI pass
+never blocks the export, matching the fail-soft pattern every other optional
 source in this app follows. Whether it actually ran is reported via the
 `X-Ai-Ranking-Used` response header and shown in the success banner (it
 doesn't distinguish which provider answered).
+
+### OpenRouter model chain
+
+`lib/llmClient.ts` walks a list of models rather than calling one, since
+free-tier slugs come and go and are rate-limited per model: retryable
+failures (429/5xx) are retried on the same model with backoff, everything
+else moves to the next one. Override the chain with `OPENROUTER_MODEL` and
+`OPENROUTER_FALLBACK_MODELS` (comma-separated) to pin a paid model without a
+code change. Identical prompts within a run are served from an in-process
+cache instead of being paid for twice.
 
 `FIRECRAWL_API_KEY` only has an effect when `GEMINI_API_KEY` or
 `OPENROUTER_API_KEY` is also set — it purely enriches the context the LLM
@@ -509,11 +562,16 @@ Optional:
 - `SCRAPER_PROXY_API_KEY` / `SCRAPINGBEE_API_KEY` — see "Scraping from a
   cloud deployment" below. One of the two is needed on Vercel/most cloud
   hosts; not needed for local dev.
-- `GEMINI_API_KEY` / `OPENROUTER_API_KEY` / `FIRECRAWL_API_KEY` — see
-  "AI-assisted ranking" above. `OPENROUTER_API_KEY` also drives the
-  persona-LLM keyword source (`lib/llmPersonaSource.ts`). None is required;
-  the app ranks keywords with the heuristic scorer alone when both ranking
-  keys are unset.
+- `GEMINI_API_KEY` / `OPENROUTER_API_KEY` / `GROQ_API_KEY` /
+  `FIRECRAWL_API_KEY` — see "AI-assisted ranking" above.
+  `OPENROUTER_API_KEY` also drives the persona-LLM keyword source
+  (`lib/llmPersonaSource.ts`) and the comp-discovery queries behind
+  competitor-ASIN generation (`lib/llmCompDiscovery.ts`). None is required;
+  the app ranks keywords with the heuristic scorer alone when every ranking
+  key is unset.
+- `OPENROUTER_MODEL` / `OPENROUTER_FALLBACK_MODELS` /
+  `AI_RANKER_PROVIDER_ORDER` — optional overrides, see "OpenRouter model
+  chain" above.
 - `FIRECRAWL_API_KEY` — the most reliable way to read an Amazon book page
   from a cloud deployment; see "Scraping from a cloud deployment" below.
 

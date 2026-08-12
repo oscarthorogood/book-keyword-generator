@@ -102,6 +102,31 @@ async function callDecodo(target: string, query: string, marketplace: Marketplac
   }
 }
 
+/** One book ranking for a query, read off the same parsed job the terms come from. */
+export interface DecodoSearchProduct {
+  asin: string;
+  title?: string;
+  author?: string;
+  /** 1-based position in the results list. */
+  position: number;
+}
+
+export interface DecodoSearchResult {
+  /** Related-search phrases and result titles — the keyword half. */
+  terms: string[];
+  /** ASINs ranking for the query — the competitor-discovery half. */
+  products: DecodoSearchProduct[];
+}
+
+const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
+
+/** Navigates to the `results` object inside a parsed "amazon_search" job's first result. */
+function searchResults(data: JsonRecord): JsonRecord | undefined {
+  const firstResult = rec(list(data.results)[0]);
+  const content = rec(firstResult?.content);
+  return rec(content?.results) ?? content;
+}
+
 /**
  * Pulls related-search / organic-title strings out of a parsed
  * "amazon_search" job's first result, in rank order (rank drives the
@@ -109,9 +134,7 @@ async function callDecodo(target: string, query: string, marketplace: Marketplac
  * field this live path has to synthesize).
  */
 function extractSearchTerms(data: JsonRecord): string[] {
-  const firstResult = rec(list(data.results)[0]);
-  const content = rec(firstResult?.content);
-  const results = rec(content?.results) ?? content;
+  const results = searchResults(data);
 
   const terms: string[] = [];
   for (const entry of list(results?.related_searches)) {
@@ -123,6 +146,57 @@ function extractSearchTerms(data: JsonRecord): string[] {
     if (text) terms.push(text);
   }
   return terms;
+}
+
+/**
+ * Pulls the ranking products out of the same parsed job. Each organic entry
+ * carries an `asin` alongside its title — previously read for the title only,
+ * which is why Decodo contributed nothing to competitor-ASIN generation
+ * despite being wired into it. Paid/sponsored slots are read too when
+ * present, since a book paying for the term is a competitor by definition.
+ */
+function extractSearchProducts(data: JsonRecord): DecodoSearchProduct[] {
+  const results = searchResults(data);
+  const products: DecodoSearchProduct[] = [];
+  const seen = new Set<string>();
+
+  for (const entry of [...list(results?.organic), ...list(results?.paid), ...list(results?.sponsored)]) {
+    const record = rec(entry);
+    if (!record) continue;
+    const asin = str(record.asin)?.trim().toUpperCase();
+    if (!asin || !ASIN_PATTERN.test(asin) || seen.has(asin)) continue;
+    seen.add(asin);
+    products.push({
+      asin,
+      title: str(record.title),
+      author: str(record.author) ?? str(record.brand) ?? str(record.manufacturer),
+      position: products.length + 1,
+    });
+  }
+
+  return products;
+}
+
+/**
+ * Runs one live "amazon_search" job and parses both halves out of it.
+ * Returns empty lists (never throws) on any failure so callers degrade to a
+ * missing source rather than a failed run.
+ */
+export async function fetchDecodoSearchResult(query: string, marketplace: Marketplace): Promise<DecodoSearchResult> {
+  const data = await callDecodo("amazon_search", query, marketplace);
+  if (!data) return { terms: [], products: [] };
+  const terms = extractSearchTerms(data);
+  return {
+    terms: terms.length > 0 ? terms : extractAutocompleteTerms(data),
+    products: extractSearchProducts(data),
+  };
+}
+
+/** Seed list shared by the keyword and competitor sweeps: deduped, trimmed, budget-capped. */
+export function decodoSeeds(seedTerms: string[], budget = DECODO_KEYWORD_CREDIT_BUDGET): string[] {
+  return Array.from(
+    new Set(seedTerms.map((s) => s.replace(/\s+/g, " ").trim()).filter((s) => s.length >= 3))
+  ).slice(0, budget);
 }
 
 /** Autocomplete jobs come back as a flat list of suggestion strings (or {value} objects). */
@@ -152,21 +226,14 @@ function extractAutocompleteTerms(data: JsonRecord): string[] {
 export async function fetchDecodoKeywordRows(seedTerms: string[], marketplace: Marketplace): Promise<DecodoRow[]> {
   if (!DECODO_API_KEY) return [];
 
-  const seeds = Array.from(
-    new Set(seedTerms.map((s) => s.replace(/\s+/g, " ").trim()).filter((s) => s.length >= 3))
-  ).slice(0, DECODO_KEYWORD_CREDIT_BUDGET);
+  const seeds = decodoSeeds(seedTerms);
   if (seeds.length === 0) return [];
 
   const rows: DecodoRow[] = [];
   const seen = new Set<string>();
 
   const perSeed = await Promise.all(
-    seeds.map(async (seed) => {
-      const data = await callDecodo("amazon_search", seed, marketplace);
-      if (!data) return [] as string[];
-      const terms = extractSearchTerms(data);
-      return terms.length > 0 ? terms : extractAutocompleteTerms(data);
-    })
+    seeds.map(async (seed) => (await fetchDecodoSearchResult(seed, marketplace)).terms)
   );
 
   for (const terms of perSeed) {
