@@ -170,7 +170,11 @@ export default function KeywordManager({
   const [newMatchType, setNewMatchType] = useState<MatchType>("phrase");
   const [adding, setAdding] = useState(false);
 
-  const [statusFilter, setStatusFilter] = useState<"all" | KeywordStatus>("all");
+  // "ready" is a UI-only pseudo-status: status === "active" but not yet a
+  // member of any campaign. Only rows genuinely in a campaign show as
+  // "Active" — active-but-uncampaigned rows get their own tab instead of
+  // being indistinguishable from campaigned ones.
+  const [statusFilter, setStatusFilter] = useState<"all" | KeywordStatus | "ready">("all");
   const [typeFilter, setTypeFilter] = useState<"all" | BankKind>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | string>("all");
   const [search, setSearch] = useState("");
@@ -505,13 +509,17 @@ export default function KeywordManager({
     [bank]
   );
 
+  const inCampaign = (r: BankRow) => r.campaigns.length > 0;
+
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     const matched = bank.filter((r) => {
       // A generate run produces more rejections than keepers, so the default
       // view is the list you'd actually work with; rejected has its own tab.
       if (statusFilter === "all" && r.status === "rejected") return false;
-      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (statusFilter === "active" && !(r.status === "active" && inCampaign(r))) return false;
+      if (statusFilter === "ready" && !(r.status === "active" && !inCampaign(r))) return false;
+      if (statusFilter !== "all" && statusFilter !== "active" && statusFilter !== "ready" && r.status !== statusFilter) return false;
       if (typeFilter !== "all" && r.kind !== typeFilter) return false;
       if (sourceFilter !== "all" && r.source !== sourceFilter) return false;
       if (filterFilter !== "all" && r.rejected_by_filter !== filterFilter) return false;
@@ -530,6 +538,21 @@ export default function KeywordManager({
   const splitByType = statusFilter !== "all";
   const asinVisible = useMemo(() => visible.filter((r) => r.kind === "asin"), [visible]);
   const keywordVisible = useMemo(() => visible.filter((r) => r.kind === "keyword"), [visible]);
+
+  // Active tab: grouped by campaign rather than a flat list — a row in
+  // multiple campaigns appears under each. Ungrouped/"All" and other tabs
+  // keep the flat combined table.
+  const campaignGroups = useMemo(() => {
+    if (statusFilter !== "active") return [];
+    const byName = new Map<string, BankRow[]>();
+    for (const row of visible) {
+      for (const name of row.campaigns) {
+        if (!byName.has(name)) byName.set(name, []);
+        byName.get(name)!.push(row);
+      }
+    }
+    return Array.from(byName.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [statusFilter, visible]);
 
   const page = visible.slice(0, visibleCount);
 
@@ -804,9 +827,20 @@ export default function KeywordManager({
               onClick={() => changeFilters(() => setStatusFilter(status))}
               className={`tab ${statusFilter === status ? "tab-active" : ""}`}
             >
-              {STATUS_LABELS[status]} ({keywords.filter((k) => k.status === status).length})
+              {status === "active"
+                ? `Active (${bank.filter((r) => r.status === "active" && inCampaign(r)).length})`
+                : `${STATUS_LABELS[status]} (${keywords.filter((k) => k.status === status).length})`}
             </button>
           ))}
+          <button
+            role="tab"
+            aria-selected={statusFilter === "ready"}
+            onClick={() => changeFilters(() => setStatusFilter("ready"))}
+            className={`tab ${statusFilter === "ready" ? "tab-active" : ""}`}
+            title="Passed the relevance filters but not yet part of any campaign"
+          >
+            Ready ({bank.filter((r) => r.status === "active" && !inCampaign(r)).length})
+          </button>
         </div>
       </div>
 
@@ -949,6 +983,17 @@ export default function KeywordManager({
               Clear filters
             </button>
           )}
+        </div>
+      ) : statusFilter === "active" ? (
+        <div className="space-y-6">
+          {campaignGroups.map(([name, rows]) => (
+            <div key={name}>
+              <p className="meta-line text-xs mb-2">
+                {name} ({rows.length})
+              </p>
+              {renderBankTable(rows)}
+            </div>
+          ))}
         </div>
       ) : (
         <>

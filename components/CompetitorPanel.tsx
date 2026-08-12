@@ -90,6 +90,12 @@ async function fetchCompetitorAsins(bookId: string): Promise<CompetitorAsinRow[]
   return res.ok ? (body.competitors ?? []) : [];
 }
 
+async function fetchCompetitorCampaigns(bookId: string): Promise<Record<string, string[]>> {
+  const res = await fetch(`/api/books/${bookId}/target-memberships`);
+  const body = await res.json().catch(() => ({}));
+  return res.ok ? (body.competitorCampaigns ?? {}) : {};
+}
+
 /**
  * Competitor-ASIN manager (spec §6) — the mode="competitors" half of
  * BookKeywordPanel. Managed exactly the same way as KeywordManager, with
@@ -100,6 +106,7 @@ async function fetchCompetitorAsins(bookId: string): Promise<CompetitorAsinRow[]
  */
 export default function CompetitorPanel({ bookId }: { bookId: string }) {
   const [asins, setAsins] = useState<CompetitorAsinRow[]>([]);
+  const [campaigns, setCampaigns] = useState<Record<string, string[]>>({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -107,7 +114,9 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
   const [newSource, setNewSource] = useState<CompetitorAsinSource>("manual");
   const [adding, setAdding] = useState(false);
 
-  const [statusFilter, setStatusFilter] = useState<"all" | CompetitorAsinStatus>("all");
+  // "ready" is a UI-only pseudo-status: status === "active" but not yet a
+  // member of any campaign — only campaigned rows show as "Active".
+  const [statusFilter, setStatusFilter] = useState<"all" | CompetitorAsinStatus | "ready">("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | string>("all");
   const [filterFilter, setFilterFilter] = useState<"all" | string>("all");
   const [search, setSearch] = useState("");
@@ -126,10 +135,11 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
 
   useEffect(() => {
     let active = true;
-    fetchCompetitorAsins(bookId)
-      .then((rows) => {
+    Promise.all([fetchCompetitorAsins(bookId), fetchCompetitorCampaigns(bookId)])
+      .then(([rows, memb]) => {
         if (!active) return;
         setAsins(rows);
+        setCampaigns(memb);
         setLoading(false);
       })
       .catch(() => {
@@ -141,7 +151,9 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
   }, [bookId]);
 
   async function reload() {
-    setAsins(await fetchCompetitorAsins(bookId));
+    const [rows, memb] = await Promise.all([fetchCompetitorAsins(bookId), fetchCompetitorCampaigns(bookId)]);
+    setAsins(rows);
+    setCampaigns(memb);
     setSelected(new Set());
   }
 
@@ -273,11 +285,15 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
   const keptCount = useMemo(() => asins.filter((a) => a.status !== "rejected").length, [asins]);
   const rejectedCount = asins.length - keptCount;
 
+  const inCampaign = (a: CompetitorAsinRow) => (campaigns[a.id] ?? []).length > 0;
+
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
     return asins.filter((a) => {
       if (statusFilter === "all" && a.status === "rejected") return false;
-      if (statusFilter !== "all" && a.status !== statusFilter) return false;
+      if (statusFilter === "active" && !(a.status === "active" && inCampaign(a))) return false;
+      if (statusFilter === "ready" && !(a.status === "active" && !inCampaign(a))) return false;
+      if (statusFilter !== "all" && statusFilter !== "active" && statusFilter !== "ready" && a.status !== statusFilter) return false;
       if (sourceFilter !== "all" && a.source !== sourceFilter) return false;
       if (filterFilter !== "all" && a.rejected_by_filter !== filterFilter) return false;
       if (term && !a.competitor_asin.toLowerCase().includes(term) && !a.notes?.toLowerCase().includes(term)) {
@@ -285,19 +301,22 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
       }
       return true;
     });
-  }, [asins, statusFilter, sourceFilter, filterFilter, search]);
+  }, [asins, campaigns, statusFilter, sourceFilter, filterFilter, search]);
 
   const page = visible.slice(0, visibleCount);
-  const allPageSelected = page.length > 0 && page.every((a) => selected.has(a.id));
 
-  function toggleAllOnPage() {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allPageSelected) page.forEach((a) => next.delete(a.id));
-      else page.forEach((a) => next.add(a.id));
-      return next;
-    });
-  }
+  // Active tab: grouped by campaign rather than a flat list.
+  const campaignGroups = useMemo(() => {
+    if (statusFilter !== "active") return [];
+    const byName = new Map<string, CompetitorAsinRow[]>();
+    for (const row of visible) {
+      for (const name of campaigns[row.id] ?? []) {
+        if (!byName.has(name)) byName.set(name, []);
+        byName.get(name)!.push(row);
+      }
+    }
+    return Array.from(byName.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [statusFilter, visible, campaigns]);
 
   return (
     <section className="card">
@@ -431,9 +450,20 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
               onClick={() => changeFilters(() => setStatusFilter(status))}
               className={`tab ${statusFilter === status ? "tab-active" : ""}`}
             >
-              {STATUS_LABELS[status]} ({asins.filter((a) => a.status === status).length})
+              {status === "active"
+                ? `Active (${asins.filter((a) => a.status === "active" && inCampaign(a)).length})`
+                : `${STATUS_LABELS[status]} (${asins.filter((a) => a.status === status).length})`}
             </button>
           ))}
+          <button
+            role="tab"
+            aria-selected={statusFilter === "ready"}
+            onClick={() => changeFilters(() => setStatusFilter("ready"))}
+            className={`tab ${statusFilter === "ready" ? "tab-active" : ""}`}
+            title="Passed the relevance filters but not yet part of any campaign"
+          >
+            Ready ({asins.filter((a) => a.status === "active" && !inCampaign(a)).length})
+          </button>
         </div>
       </div>
 
@@ -559,154 +589,20 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
             </button>
           )}
         </div>
+      ) : statusFilter === "active" ? (
+        <div className="space-y-6">
+          {campaignGroups.map(([name, rows]) => (
+            <div key={name}>
+              <p className="meta-line text-xs mb-2">
+                {name} ({rows.length})
+              </p>
+              {renderAsinTable(rows)}
+            </div>
+          ))}
+        </div>
       ) : (
         <>
-          <div className="table-wrap overflow-x-auto">
-            <table className="table table-dense">
-              <thead>
-                <tr>
-                  <th scope="col" className="w-8">
-                    <input
-                      type="checkbox"
-                      className="checkbox"
-                      checked={allPageSelected}
-                      onChange={toggleAllOnPage}
-                      aria-label="Select all shown competitor ASINs"
-                    />
-                  </th>
-                  <th scope="col">Competitor ASIN</th>
-                  <th scope="col" className="hidden lg:table-cell">
-                    Title / author
-                  </th>
-                  <th scope="col" className="hidden lg:table-cell">
-                    Source
-                  </th>
-                  <th scope="col" className="hidden lg:table-cell">
-                    Notes
-                  </th>
-                  <th scope="col" className="hidden xl:table-cell">
-                    Filter verdict
-                  </th>
-                  <th scope="col" className="hidden xl:table-cell">
-                    Price
-                  </th>
-                  <th scope="col" className="hidden xl:table-cell">
-                    BSR
-                  </th>
-                  <th scope="col">Bid</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.map((asin) => (
-                  <tr key={asin.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        className="checkbox"
-                        checked={selected.has(asin.id)}
-                        onChange={(e) =>
-                          setSelected((prev) => {
-                            const next = new Set(prev);
-                            if (e.target.checked) next.add(asin.id);
-                            else next.delete(asin.id);
-                            return next;
-                          })
-                        }
-                        aria-label={`Select ${asin.competitor_asin}`}
-                      />
-                    </td>
-                    <td>
-                      <p className="cell-primary">{asin.competitor_asin}</p>
-                    </td>
-                    <td className="hidden lg:table-cell">
-                      {asin.title || asin.author ? (
-                        <>
-                          {asin.title && <p className="cell-primary">{asin.title}</p>}
-                          {asin.author && <p className="meta-line text-xs">{asin.author}</p>}
-                        </>
-                      ) : (
-                        <span style={{ color: "var(--text-placeholder)" }}>—</span>
-                      )}
-                    </td>
-                    <td className="hidden lg:table-cell">{labelForSource(asin.source)}</td>
-                    <td className="hidden lg:table-cell">
-                      <span className="meta-line text-xs">{asin.notes ?? "—"}</span>
-                    </td>
-                    <td className="hidden xl:table-cell">
-                      {asin.rejected_by_filter ? (
-                        <span title={asin.rejection_reason ?? undefined}>
-                          <span className="cell-primary">{labelForFilter(asin.rejected_by_filter).trim()}</span>
-                          {asin.rejection_reason && (
-                            <span className="meta-line block text-xs">{asin.rejection_reason}</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span style={{ color: "var(--text-placeholder)" }}>—</span>
-                      )}
-                    </td>
-                    <td className="hidden xl:table-cell">{asin.price !== null ? `$${asin.price.toFixed(2)}` : "—"}</td>
-                    <td className="hidden xl:table-cell">{asin.bsr !== null ? asin.bsr.toLocaleString() : "—"}</td>
-                    <td>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={asin.bid ?? ""}
-                        onChange={(e) =>
-                          updateAsin(asin.id, {
-                            bid: e.target.value === "" ? null : parseFloat(e.target.value),
-                          })
-                        }
-                        placeholder="—"
-                        className="input input-sm w-20"
-                        aria-label={`Bid for ${asin.competitor_asin}`}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={asin.status}
-                        onChange={(e) => updateAsin(asin.id, { status: e.target.value as CompetitorAsinStatus })}
-                        className={`badge ${statusBadge[asin.status]} cursor-pointer appearance-none pr-3`}
-                        aria-label={`Status for ${asin.competitor_asin}`}
-                      >
-                        {STATUSES.map((status) => (
-                          <option key={status} value={status}>
-                            {STATUS_LABELS[status]}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="text-right">
-                      <div className="flex justify-end gap-1">
-                        {asin.status === "rejected" && (
-                          <button
-                            onClick={() => updateAsin(asin.id, { status: "active" })}
-                            className="btn btn-tertiary btn-icon btn-sm"
-                            aria-label={`Restore ${asin.competitor_asin}`}
-                            title="False positive? Restore"
-                          >
-                            <CheckCircle2 size={16} style={{ color: "var(--icon-default)" }} />
-                          </button>
-                        )}
-                        <button
-                          onClick={() => deleteAsin(asin.id)}
-                          className="btn btn-tertiary btn-icon btn-sm"
-                          aria-label={`Delete ${asin.competitor_asin}`}
-                          title="Delete competitor ASIN"
-                        >
-                          <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {renderAsinTable(page)}
 
           <div className="mt-4 flex items-center justify-between gap-4">
             <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
@@ -722,4 +618,165 @@ export default function CompetitorPanel({ bookId }: { bookId: string }) {
       )}
     </section>
   );
+
+  /** Renders one competitor-ASIN table for the given rows. Declared inside
+   * the component so it closes over state (selection, editing, deletion). */
+  function renderAsinTable(rows: CompetitorAsinRow[]) {
+    const rowsAllSelected = rows.length > 0 && rows.every((a) => selected.has(a.id));
+    return (
+      <div className="table-wrap overflow-x-auto">
+        <table className="table table-dense">
+          <thead>
+            <tr>
+              <th scope="col" className="w-8">
+                <input
+                  type="checkbox"
+                  className="checkbox"
+                  checked={rowsAllSelected}
+                  onChange={() =>
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      if (rowsAllSelected) rows.forEach((a) => next.delete(a.id));
+                      else rows.forEach((a) => next.add(a.id));
+                      return next;
+                    })
+                  }
+                  aria-label="Select all shown competitor ASINs"
+                />
+              </th>
+              <th scope="col">Competitor ASIN</th>
+              <th scope="col" className="hidden lg:table-cell">
+                Title / author
+              </th>
+              <th scope="col" className="hidden lg:table-cell">
+                Source
+              </th>
+              <th scope="col" className="hidden lg:table-cell">
+                Notes
+              </th>
+              <th scope="col" className="hidden xl:table-cell">
+                Filter verdict
+              </th>
+              <th scope="col" className="hidden xl:table-cell">
+                Price
+              </th>
+              <th scope="col" className="hidden xl:table-cell">
+                BSR
+              </th>
+              <th scope="col">Bid</th>
+              <th scope="col">Status</th>
+              <th scope="col">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((asin) => (
+              <tr key={asin.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    className="checkbox"
+                    checked={selected.has(asin.id)}
+                    onChange={(e) =>
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(asin.id);
+                        else next.delete(asin.id);
+                        return next;
+                      })
+                    }
+                    aria-label={`Select ${asin.competitor_asin}`}
+                  />
+                </td>
+                <td>
+                  <p className="cell-primary">{asin.competitor_asin}</p>
+                </td>
+                <td className="hidden lg:table-cell">
+                  {asin.title || asin.author ? (
+                    <>
+                      {asin.title && <p className="cell-primary">{asin.title}</p>}
+                      {asin.author && <p className="meta-line text-xs">{asin.author}</p>}
+                    </>
+                  ) : (
+                    <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                  )}
+                </td>
+                <td className="hidden lg:table-cell">{labelForSource(asin.source)}</td>
+                <td className="hidden lg:table-cell">
+                  <span className="meta-line text-xs">{asin.notes ?? "—"}</span>
+                </td>
+                <td className="hidden xl:table-cell">
+                  {asin.rejected_by_filter ? (
+                    <span title={asin.rejection_reason ?? undefined}>
+                      <span className="cell-primary">{labelForFilter(asin.rejected_by_filter).trim()}</span>
+                      {asin.rejection_reason && (
+                        <span className="meta-line block text-xs">{asin.rejection_reason}</span>
+                      )}
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                  )}
+                </td>
+                <td className="hidden xl:table-cell">{asin.price !== null ? `$${asin.price.toFixed(2)}` : "—"}</td>
+                <td className="hidden xl:table-cell">{asin.bsr !== null ? asin.bsr.toLocaleString() : "—"}</td>
+                <td>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={asin.bid ?? ""}
+                    onChange={(e) =>
+                      updateAsin(asin.id, {
+                        bid: e.target.value === "" ? null : parseFloat(e.target.value),
+                      })
+                    }
+                    placeholder="—"
+                    className="input input-sm w-20"
+                    aria-label={`Bid for ${asin.competitor_asin}`}
+                  />
+                </td>
+                <td>
+                  <select
+                    value={asin.status}
+                    onChange={(e) => updateAsin(asin.id, { status: e.target.value as CompetitorAsinStatus })}
+                    className={`badge ${statusBadge[asin.status]} cursor-pointer appearance-none pr-3`}
+                    aria-label={`Status for ${asin.competitor_asin}`}
+                  >
+                    {STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {STATUS_LABELS[status]}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td className="text-right">
+                  <div className="flex justify-end gap-1">
+                    {asin.status === "rejected" && (
+                      <button
+                        onClick={() => updateAsin(asin.id, { status: "active" })}
+                        className="btn btn-tertiary btn-icon btn-sm"
+                        aria-label={`Restore ${asin.competitor_asin}`}
+                        title="False positive? Restore"
+                      >
+                        <CheckCircle2 size={16} style={{ color: "var(--icon-default)" }} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => deleteAsin(asin.id)}
+                      className="btn btn-tertiary btn-icon btn-sm"
+                      aria-label={`Delete ${asin.competitor_asin}`}
+                      title="Delete competitor ASIN"
+                    >
+                      <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 }
