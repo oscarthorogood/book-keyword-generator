@@ -22,6 +22,7 @@ import {
   selectBrandGuardKeywords,
   selectCatalogCrossSellTargets,
   selectRivalAsinTargets,
+  SINGLE_AD_GROUP_LABEL,
   type CampaignBook,
   type CampaignType,
   type KeywordWithRollups,
@@ -98,14 +99,14 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
   if (brandGuard.length > 0) {
     plans.push({
       campaignType: "brand_guard",
-      name: campaignName(input.book.title, "Brand Guard"),
+      name: campaignName(input.book.title, SINGLE_AD_GROUP_LABEL.brand_guard!),
       dailyBudget,
       targets: brandGuard.map((k) => ({
         keywordId: k.id,
         text: k.text,
         matchType: k.matchType,
         bid: k.bid ?? defaultBid,
-        adGroup: "Brand Guard",
+        adGroup: SINGLE_AD_GROUP_LABEL.brand_guard!,
       })),
       negatives: baseNegatives,
     });
@@ -115,14 +116,14 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
   if (alphaExact.length > 0) {
     plans.push({
       campaignType: "alpha_exact",
-      name: campaignName(input.book.title, "Alpha Exact"),
+      name: campaignName(input.book.title, SINGLE_AD_GROUP_LABEL.alpha_exact!),
       dailyBudget,
       targets: alphaExact.map((k) => ({
         keywordId: k.id,
         text: k.text,
         matchType: k.matchType,
         bid: k.bid ?? defaultBid,
-        adGroup: "Alpha Exact",
+        adGroup: SINGLE_AD_GROUP_LABEL.alpha_exact!,
       })),
       negatives: baseNegatives,
     });
@@ -142,14 +143,14 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
     }));
     plans.push({
       campaignType: "bmm_discovery",
-      name: campaignName(input.book.title, "BMM Discovery"),
+      name: campaignName(input.book.title, SINGLE_AD_GROUP_LABEL.bmm_discovery!),
       dailyBudget,
       targets: bmmDiscovery.map((t) => ({
         keywordId: t.rootKeywordId,
         text: t.text,
         matchType: "broad" as const,
         bid: bidByKeywordId.get(t.rootKeywordId) ?? defaultBid,
-        adGroup: "BMM Discovery",
+        adGroup: SINGLE_AD_GROUP_LABEL.bmm_discovery!,
       })),
       negatives: [...baseNegatives, ...alphaExactNegatives],
     });
@@ -159,7 +160,7 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
   if (rivalAsins.length > 0) {
     plans.push({
       campaignType: "rival_asin_offensive",
-      name: campaignName(input.book.title, "Rival ASIN Offensive"),
+      name: campaignName(input.book.title, SINGLE_AD_GROUP_LABEL.rival_asin_offensive!),
       dailyBudget,
       targets: rivalAsins.map((a) => {
         const expr = `asin="${a.competitor_asin}"`;
@@ -168,7 +169,7 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
           text: expr,
           targetingExpression: expr,
           bid: a.bid ?? defaultBid,
-          adGroup: "Rival ASIN Offensive",
+          adGroup: SINGLE_AD_GROUP_LABEL.rival_asin_offensive!,
         };
       }),
       negatives: baseNegatives,
@@ -179,11 +180,11 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
   if (crossSell.length > 0) {
     plans.push({
       campaignType: "catalog_cross_sell",
-      name: campaignName(input.book.title, "Catalog Cross-Sell"),
+      name: campaignName(input.book.title, SINGLE_AD_GROUP_LABEL.catalog_cross_sell!),
       dailyBudget,
       targets: crossSell.map((t) => {
         const expr = `asin="${t.asin}"`;
-        return { text: expr, targetingExpression: expr, bid: defaultBid, adGroup: "Catalog Cross-Sell" };
+        return { text: expr, targetingExpression: expr, bid: defaultBid, adGroup: SINGLE_AD_GROUP_LABEL.catalog_cross_sell! };
       }),
       negatives: baseNegatives,
     });

@@ -32,6 +32,21 @@ export type CampaignType =
   | "catalog_cross_sell"
   | "auto_discovery";
 
+/**
+ * Every campaign type except Auto Discovery has exactly one ad group,
+ * named after the campaign type itself. Auto Discovery has one per
+ * targeting group (lib/bulksheet.ts's AUTO_TARGETING_GROUPS) and isn't in
+ * this map — Update Campaign (PR 9) only supports the single-ad-group
+ * types for that reason.
+ */
+export const SINGLE_AD_GROUP_LABEL: Partial<Record<CampaignType, string>> = {
+  brand_guard: "Brand Guard",
+  alpha_exact: "Alpha Exact",
+  bmm_discovery: "BMM Discovery",
+  rival_asin_offensive: "Rival ASIN Offensive",
+  catalog_cross_sell: "Catalog Cross-Sell",
+};
+
 export interface CampaignBook {
   id: string;
   author: string;
