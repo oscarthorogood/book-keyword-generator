@@ -31,6 +31,12 @@ export interface CallGroqOptions {
   fallbackModels?: string[];
   temperature?: number;
   maxTokens?: number;
+  /**
+   * Groq's API is OpenAI-compatible, so `{ type: "json_object" }` puts the
+   * model in JSON mode. Requires the word "json" somewhere in the messages —
+   * both persona and ranker prompts say "Respond with JSON only."
+   */
+  responseFormat?: { type: "json_object" };
 }
 
 export interface CallGroqResult {
@@ -66,6 +72,7 @@ async function requestOnce(
         messages,
         temperature: options.temperature ?? 0.8,
         max_tokens: options.maxTokens ?? 800,
+        ...(options.responseFormat ? { response_format: options.responseFormat } : {}),
       }),
     },
     GROQ_TIMEOUT_MS

@@ -52,7 +52,12 @@ export default function SourcesPage() {
 
   const filtered = useMemo(() => {
     return sources
-      .filter((s) => usedForFilter === "all" || s.usedFor.includes(usedForFilter))
+      .filter(
+        (s) =>
+          usedForFilter === "all" ||
+          s.usedFor.includes(usedForFilter) ||
+          (s.seedsFor ?? []).includes(usedForFilter)
+      )
       .filter((s) => !configuredOnly || s.configured)
       .sort((a, b) => b.keywordCount + b.competitorCount - (a.keywordCount + a.competitorCount));
   }, [sources, usedForFilter, configuredOnly]);
@@ -142,10 +147,22 @@ export default function SourcesPage() {
                           <div className="meta-line text-xs">{s.description}</div>
                         </td>
                         <td>
-                          <div className="flex gap-1">
+                          <div className="flex flex-wrap gap-1">
                             {s.usedFor.map((kind) => (
                               <span key={kind} className="chip-tag capitalize">
                                 {kind}
+                              </span>
+                            ))}
+                            {/* A seed source supplies the search queries another
+                                provider answers, so its own row count stays 0 by
+                                design — labelled so that reads as intended. */}
+                            {(s.seedsFor ?? []).map((kind) => (
+                              <span
+                                key={`seeds-${kind}`}
+                                className="chip-tag"
+                                title={`Supplies search queries that drive ${kind} generation — the resulting rows are credited to the provider that returned them.`}
+                              >
+                                seeds {kind}
                               </span>
                             ))}
                           </div>

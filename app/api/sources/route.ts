@@ -8,6 +8,8 @@ export interface SourceUsageRow {
   label: string;
   description: string;
   usedFor: ("keywords" | "competitors")[];
+  /** Pipelines this source feeds without owning the rows — see SourceDefinition.seedsFor. */
+  seedsFor?: ("keywords" | "competitors")[];
   configEnvVar?: string;
   configured: boolean;
   keywordCount: number;
@@ -67,6 +69,7 @@ export async function GET() {
         label: def.label,
         description: def.description,
         usedFor: def.usedFor,
+        seedsFor: def.seedsFor,
         configEnvVar: def.configEnvVar,
         configured: def.configEnvVar ? !!process.env[def.configEnvVar] : true,
         keywordCount: kw?.count ?? 0,

@@ -92,14 +92,31 @@ async function fetchAmazonSearchHtml(query: string, marketplace: Marketplace): P
   }
 }
 
+/** One book ranking for a query, read off the same search-results HTML the terms come from. */
+export interface ZenrowsSearchProduct {
+  asin: string;
+  title?: string;
+  author?: string;
+  /** 1-based position in the results list. */
+  position: number;
+}
+
+export interface ZenrowsSearchResult {
+  /** Related-search phrases and result titles — the keyword half. */
+  terms: string[];
+  /** ASINs ranking for the query — the competitor-discovery half. */
+  products: ZenrowsSearchProduct[];
+}
+
+const ASIN_PATTERN = /^[A-Z0-9]{10}$/;
+
 /**
  * Pulls candidate search terms out of an Amazon search-results page: the
  * "related searches" strip Amazon shows at the bottom of results (the
  * highest-signal phrases, since Amazon itself generated them for this exact
  * query) plus organic result titles as a fallback when that strip is absent.
  */
-function extractSearchTerms(html: string): string[] {
-  const $ = cheerio.load(html);
+function extractSearchTerms($: cheerio.CheerioAPI): string[] {
   const terms: string[] = [];
 
   $("a.s-refinement-link, [data-component-type='s-related-searches'] a, .s-related-searches-cell a").each((_, el) => {
@@ -118,6 +135,65 @@ function extractSearchTerms(html: string): string[] {
 }
 
 /**
+ * Pulls the ranking products out of the same page. Amazon stamps every result
+ * tile with `data-asin`, and the byline sits in the row beneath the title —
+ * so one fetch yields both the keyword terms above and a ranked competitor
+ * list, at no extra credit. (This page was previously parsed for terms only,
+ * which is why ZenRows contributed nothing to competitor-ASIN generation
+ * despite being wired into it.)
+ */
+function extractSearchProducts($: cheerio.CheerioAPI): ZenrowsSearchProduct[] {
+  const products: ZenrowsSearchProduct[] = [];
+  const seen = new Set<string>();
+
+  $("[data-component-type='s-search-result'][data-asin]").each((_, el) => {
+    const node = $(el);
+    const asin = (node.attr("data-asin") ?? "").trim().toUpperCase();
+    if (!asin || !ASIN_PATTERN.test(asin) || seen.has(asin)) return;
+    seen.add(asin);
+
+    const title = node.find("h2 span").first().text().replace(/\s+/g, " ").trim();
+    // Amazon's book results render the byline as "by <author>" in the row
+    // under the title; the class names churn, so match on the text shape.
+    const byline = node
+      .find(".a-row.a-size-base.a-color-secondary, .a-row .a-size-base+.a-size-base")
+      .first()
+      .text()
+      .replace(/\s+/g, " ")
+      .trim();
+    const author = /^by\s+/i.test(byline) ? byline.replace(/^by\s+/i, "").split("|")[0].trim() : undefined;
+
+    products.push({
+      asin,
+      title: title || undefined,
+      author: author || undefined,
+      position: products.length + 1,
+    });
+  });
+
+  return products;
+}
+
+/**
+ * Fetches one Amazon search-results page and parses both halves out of it.
+ * Returns empty lists (never throws) on any failure so callers degrade to a
+ * missing source rather than a failed run.
+ */
+export async function fetchZenrowsSearchResult(query: string, marketplace: Marketplace): Promise<ZenrowsSearchResult> {
+  const html = await fetchAmazonSearchHtml(query, marketplace);
+  if (!html) return { terms: [], products: [] };
+  const $ = cheerio.load(html);
+  return { terms: extractSearchTerms($), products: extractSearchProducts($) };
+}
+
+/** Seed list shared by the keyword and competitor sweeps: deduped, trimmed, budget-capped. */
+export function zenrowsSeeds(seedTerms: string[], budget = ZENROWS_KEYWORD_CREDIT_BUDGET): string[] {
+  return Array.from(
+    new Set(seedTerms.map((s) => s.replace(/\s+/g, " ").trim()).filter((s) => s.length >= 3))
+  ).slice(0, budget);
+}
+
+/**
  * Runs a small, bounded live ZenRows sweep for a set of seed terms (same
  * seed pattern SerpApi/Decodo use: genre/comp phrases and series name, not
  * the book's own title) and normalizes whatever comes back into
@@ -131,19 +207,14 @@ function extractSearchTerms(html: string): string[] {
 export async function fetchZenrowsKeywordRows(seedTerms: string[], marketplace: Marketplace): Promise<ZenrowsRow[]> {
   if (!ZENROWS_API_KEY) return [];
 
-  const seeds = Array.from(
-    new Set(seedTerms.map((s) => s.replace(/\s+/g, " ").trim()).filter((s) => s.length >= 3))
-  ).slice(0, ZENROWS_KEYWORD_CREDIT_BUDGET);
+  const seeds = zenrowsSeeds(seedTerms);
   if (seeds.length === 0) return [];
 
   const rows: ZenrowsRow[] = [];
   const seen = new Set<string>();
 
   const perSeed = await Promise.all(
-    seeds.map(async (seed) => {
-      const html = await fetchAmazonSearchHtml(seed, marketplace);
-      return html ? extractSearchTerms(html) : [];
-    })
+    seeds.map(async (seed) => (await fetchZenrowsSearchResult(seed, marketplace)).terms)
   );
 
   for (const terms of perSeed) {
