@@ -90,12 +90,14 @@ export function buildKeywordRow(params: {
   defaultBid: number;
   status?: string | null;
   source?: string | null;
+  /** Update Campaign (spec §4) needs Create/Update/Archive per row; Create Campaign never sets this, so it keeps today's lowercase default. */
+  operation?: "create" | "Update" | "Archive";
 }): BulksheetRow {
   return {
     ...emptyRow(),
     Product: PRODUCT,
     Entity: "Keyword",
-    Operation: "create",
+    Operation: params.operation ?? "create",
     "Campaign Name": params.campaign,
     "Ad Group Name": params.adGroup,
     "Keyword or Product Targeting": params.text,
@@ -160,12 +162,14 @@ export function buildProductTargetingRow(params: {
   /** Falls back to this (via `money()`) when `bid` is missing/non-positive. Omit for a plain `.toFixed(2)`. */
   fallbackBid?: number;
   source?: string;
+  /** Update Campaign (spec §4) needs Create/Update/Archive per row; Create Campaign never sets this, so it keeps today's lowercase default. */
+  operation?: "create" | "Update" | "Archive";
 }): BulksheetRow {
   return {
     ...emptyRow(),
     Product: PRODUCT,
     Entity: "Product Targeting",
-    Operation: "create",
+    Operation: params.operation ?? "create",
     "Campaign Name": params.campaign,
     "Ad Group Name": params.adGroup,
     "Keyword or Product Targeting": params.targetingExpression,
@@ -282,12 +286,14 @@ export function buildUploadKeywordRow(params: {
   bid: number | null | undefined;
   defaultBid: number;
   status?: string | null;
+  /** Update Campaign (spec §4) needs Create/Update/Archive per row; Create Campaign never sets this, so it keeps today's Create default. */
+  operation?: "Create" | "Update" | "Archive";
 }): UploadRow {
   return {
     ...emptyUploadRow(),
     Product: PRODUCT,
     Entity: "Keyword",
-    Operation: "Create",
+    Operation: params.operation ?? "Create",
     "Campaign Name": params.campaign,
     "Ad Group Name": params.adGroup,
     "Keyword or Product Targeting": params.text,
@@ -340,12 +346,14 @@ export function buildUploadProductTargetingRow(params: {
   targetingExpression: string;
   bid: number;
   fallbackBid?: number;
+  /** Update Campaign (spec §4) needs Create/Update/Archive per row; Create Campaign never sets this, so it keeps today's Create default. */
+  operation?: "Create" | "Update" | "Archive";
 }): UploadRow {
   return {
     ...emptyUploadRow(),
     Product: PRODUCT,
     Entity: "Product Targeting",
-    Operation: "Create",
+    Operation: params.operation ?? "Create",
     "Campaign Name": params.campaign,
     "Ad Group Name": params.adGroup,
     "Keyword or Product Targeting": params.targetingExpression,

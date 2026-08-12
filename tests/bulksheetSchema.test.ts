@@ -138,6 +138,14 @@ describe("bulksheetSchema", () => {
     });
   });
 
+  it("buildKeywordRow defaults Operation to lowercase 'create' but accepts an explicit operation (Update Campaign, spec §4)", () => {
+    const defaulted = buildKeywordRow({ campaign: "x", adGroup: "y", text: "t", matchType: "exact", bid: 0.5, defaultBid: 0.5 });
+    expect(defaulted.Operation).toBe("create");
+
+    const updated = buildKeywordRow({ campaign: "x", adGroup: "y", text: "t", matchType: "exact", bid: 0.6, defaultBid: 0.5, operation: "Update" });
+    expect(updated.Operation).toBe("Update");
+  });
+
   it("buildNegativeKeywordRow prefixes the match type with 'negative'", () => {
     const row = buildNegativeKeywordRow({
       campaign: "My Book – Descriptive",

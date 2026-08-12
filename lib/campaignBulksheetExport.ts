@@ -29,6 +29,7 @@ import {
   type UploadRow,
 } from "./bulksheetSchema";
 import type { CampaignPlan, CampaignPlanTarget } from "./campaignBulksheetPlan";
+import type { DiffedCampaignTarget } from "./campaignDiff";
 
 function adGroupsInOrder(targets: CampaignPlanTarget[]): string[] {
   const seen = new Set<string>();
@@ -145,4 +146,59 @@ export function buildCampaignUploadRows(plans: CampaignPlan[], sku: string): Upl
   }
 
   return rows;
+}
+
+// --- Update Campaign (spec §4) — one row per diffed target, no campaign/ad
+// group/negative structure re-created, since those already exist in Amazon.
+// Reuses the same entity-row builders as Create, extended with an
+// `operation` parameter (spec: "extend the existing bulksheet builder ...
+// don't fork a second builder") rather than a parallel set of row builders.
+
+export function buildUpdateReviewRows(campaign: string, adGroup: string, diffed: DiffedCampaignTarget[]): BulksheetRow[] {
+  return diffed.map((target) => {
+    const operation = target.operation === "Create" ? "create" : target.operation;
+    if (target.matchType) {
+      return buildKeywordRow({
+        campaign,
+        adGroup,
+        text: target.text,
+        matchType: target.matchType,
+        bid: target.bid,
+        defaultBid: target.bid ?? 0.5,
+        status: target.state,
+        operation,
+      });
+    }
+    return buildProductTargetingRow({
+      campaign,
+      adGroup,
+      targetingExpression: target.targetingExpression ?? target.text,
+      bid: target.bid ?? 0.5,
+      operation,
+    });
+  });
+}
+
+export function buildUpdateUploadRows(campaign: string, adGroup: string, diffed: DiffedCampaignTarget[]): UploadRow[] {
+  return diffed.map((target) => {
+    if (target.matchType) {
+      return buildUploadKeywordRow({
+        campaign,
+        adGroup,
+        text: target.text,
+        matchType: target.matchType,
+        bid: target.bid,
+        defaultBid: target.bid ?? 0.5,
+        status: target.state,
+        operation: target.operation,
+      });
+    }
+    return buildUploadProductTargetingRow({
+      campaign,
+      adGroup,
+      targetingExpression: target.targetingExpression ?? target.text,
+      bid: target.bid ?? 0.5,
+      operation: target.operation,
+    });
+  });
 }

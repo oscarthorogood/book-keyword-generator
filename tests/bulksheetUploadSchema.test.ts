@@ -124,4 +124,11 @@ describe("bulksheetSchema upload row builders (campaigns spec §1.1/§8 PR 3)", 
     expect("Source" in keywordRow).toBe(false);
     expect("Source" in targetingRow).toBe(false);
   });
+
+  it("buildUploadKeywordRow and buildUploadProductTargetingRow accept an explicit operation for Update Campaign (spec §4)", () => {
+    const keywordRow = buildUploadKeywordRow({ campaign: "x", adGroup: "y", text: "t", matchType: "exact", bid: 0.5, defaultBid: 0.5, operation: "Archive" });
+    const targetingRow = buildUploadProductTargetingRow({ campaign: "x", adGroup: "y", targetingExpression: "e", bid: 0.5, operation: "Update" });
+    expect(keywordRow.Operation).toBe("Archive");
+    expect(targetingRow.Operation).toBe("Update");
+  });
 });
