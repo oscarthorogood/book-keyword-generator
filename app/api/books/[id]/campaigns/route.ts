@@ -24,7 +24,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   const supabase = await supabaseServer();
   const { data, error } = await supabase
     .from("campaigns")
-    .select("id, campaign_type, name, daily_budget, status, amazon_campaign_id, export_batch_id, updated_at")
+    .select(
+      "id, campaign_type, name, daily_budget, status, amazon_campaign_id, export_batch_id, updated_at, bulksheet_path, last_export_error, last_export_error_at"
+    )
     .eq("book_id", bookId)
     .eq("user_id", user.id)
     .order("updated_at", { ascending: false });
@@ -185,7 +187,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
       const { data: exportedCampaigns, error: flipError } = await supabase
         .from("campaigns")
-        .update({ status: "exported", bulksheet_path: uploadPath, bulksheet_download_url: signedUpload?.signedUrl ?? null })
+        .update({
+          status: "exported",
+          bulksheet_path: uploadPath,
+          bulksheet_download_url: signedUpload?.signedUrl ?? null,
+          last_export_error: null,
+          last_export_error_at: null,
+        })
         .in(
           "id",
           insertedCampaigns.map((c) => c.id)
@@ -204,6 +212,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       // that doesn't exist. The insert already succeeded, so this is
       // recoverable: a retry re-runs Create Campaign for the same book.
       const message = uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed";
+      await supabase
+        .from("campaigns")
+        .update({ last_export_error: message, last_export_error_at: new Date().toISOString() })
+        .in(
+          "id",
+          insertedCampaigns.map((c) => c.id)
+        );
       return Response.json(
         { error: `Campaigns created as draft, but the bulksheet upload failed: ${message}`, campaignIds: insertedCampaigns.map((c) => c.id) },
         { status: 500 }

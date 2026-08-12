@@ -39,6 +39,49 @@ interface Keyword {
   specificity?: number | null;
 }
 
+interface CompetitorAsinRow {
+  id: string;
+  competitor_asin: string;
+  source: string | null;
+  status: KeywordStatus;
+  bid: number | null;
+  rejection_reason: string | null;
+  rejected_by_filter: string | null;
+  created_at: string;
+}
+
+/** Row type badge (batch 12 item 3): the book detail page's target bank is
+ * one table across both keywords and competitor ASINs. */
+type BankKind = "keyword" | "asin";
+
+interface BankRow {
+  id: string;
+  kind: BankKind;
+  text: string;
+  match_type: MatchType | null;
+  status: KeywordStatus;
+  bid: number | null;
+  source: string | null;
+  rejection_reason: string | null;
+  rejected_by_filter: string | null;
+  specificity: number | null;
+  campaigns: string[];
+}
+
+async function fetchCompetitors(bookId: string): Promise<CompetitorAsinRow[]> {
+  const res = await fetch(`/api/books/${bookId}/competitors`);
+  const body = await res.json().catch(() => ({}));
+  return res.ok ? (body.competitors ?? []) : [];
+}
+
+async function fetchTargetMemberships(
+  bookId: string
+): Promise<{ keywordCampaigns: Record<string, string[]>; competitorCampaigns: Record<string, string[]> }> {
+  const res = await fetch(`/api/books/${bookId}/target-memberships`);
+  const body = await res.json().catch(() => ({}));
+  return res.ok ? { keywordCampaigns: body.keywordCampaigns ?? {}, competitorCampaigns: body.competitorCampaigns ?? {} } : { keywordCampaigns: {}, competitorCampaigns: {} };
+}
+
 const SPECIFICITY_LABELS: Record<number, string> = {
   1: "Broad",
   2: "Somewhat broad",
@@ -119,12 +162,19 @@ export default function KeywordManager({
   onKeywordsChanged,
 }: KeywordManagerProps) {
   const [keywords, setKeywords] = useState<Keyword[]>([]);
+  const [competitors, setCompetitors] = useState<CompetitorAsinRow[]>([]);
+  const [memberships, setMemberships] = useState<{ keywordCampaigns: Record<string, string[]>; competitorCampaigns: Record<string, string[]> }>({
+    keywordCampaigns: {},
+    competitorCampaigns: {},
+  });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [newText, setNewText] = useState("");
   const [newMatchType, setNewMatchType] = useState<MatchType>("phrase");
   const [adding, setAdding] = useState(false);
 
   const [statusFilter, setStatusFilter] = useState<"all" | KeywordStatus>("all");
+  const [typeFilter, setTypeFilter] = useState<"all" | BankKind>("all");
   const [sourceFilter, setSourceFilter] = useState<"all" | string>("all");
   const [search, setSearch] = useState("");
   const [visibleCount, setVisibleCount] = useState(PAGE_SIZE);
@@ -137,6 +187,7 @@ export default function KeywordManager({
   const [refilterResult, setRefilterResult] = useState<string | null>(null);
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [promoteNotice, setPromoteNotice] = useState<string | null>(null);
+  const [restoreError, setRestoreError] = useState<string | null>(null);
 
   const [showGenerateForm, setShowGenerateForm] = useState(false);
   const [generating, setGenerating] = useState(false);
@@ -150,14 +201,19 @@ export default function KeywordManager({
 
   useEffect(() => {
     let active = true;
-    fetchKeywords(bookId)
-      .then((rows) => {
+    Promise.all([fetchKeywords(bookId), fetchCompetitors(bookId), fetchTargetMemberships(bookId)])
+      .then(([kw, comp, memb]) => {
         if (!active) return;
-        setKeywords(rows);
+        setKeywords(kw);
+        setCompetitors(comp);
+        setMemberships(memb);
+        setLoadError(null);
         setLoading(false);
       })
-      .catch(() => {
-        if (active) setLoading(false);
+      .catch((err) => {
+        if (!active) return;
+        setLoadError(err instanceof Error ? err.message : "Could not load the keyword/ASIN bank.");
+        setLoading(false);
       });
     return () => {
       active = false;
@@ -165,9 +221,33 @@ export default function KeywordManager({
   }, [bookId]);
 
   async function reload() {
-    setKeywords(await fetchKeywords(bookId));
+    const [kw, comp, memb] = await Promise.all([fetchKeywords(bookId), fetchCompetitors(bookId), fetchTargetMemberships(bookId)]);
+    setKeywords(kw);
+    setCompetitors(comp);
+    setMemberships(memb);
     setSelected(new Set());
     onKeywordsChanged?.();
+  }
+
+  /** Restores an archived keyword or ASIN — gated server-side on the
+   * recommendation engine no longer suggesting it be archived (item 6). */
+  async function restoreArchived(row: BankRow) {
+    setPromotingId(row.id);
+    setRestoreError(null);
+    try {
+      const endpoint = row.kind === "keyword" ? `/api/keywords/${row.id}/restore` : `/api/competitors/${row.id}/restore`;
+      const res = await fetch(endpoint, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setRestoreError(body.error || "Could not restore this row.");
+        return;
+      }
+      await reload();
+    } catch (err) {
+      setRestoreError(err instanceof Error ? err.message : "Could not restore this row.");
+    } finally {
+      setPromotingId(null);
+    }
   }
 
   async function addKeyword() {
@@ -288,26 +368,54 @@ export default function KeywordManager({
   async function bulkUpdate(status: KeywordStatus) {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
+    const keywordIds = ids.filter((id) => rowById(id)?.kind === "keyword");
+    const asinIds = ids.filter((id) => rowById(id)?.kind === "asin");
     setKeywords((prev) => prev.map((k) => (selected.has(k.id) ? { ...k, status } : k)));
+    setCompetitors((prev) => prev.map((a) => (selected.has(a.id) ? { ...a, status } : a)));
     setSelected(new Set());
-    await fetch(`/api/books/${bookId}/keywords`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids, status }),
-    });
+    await Promise.all([
+      keywordIds.length > 0
+        ? fetch(`/api/books/${bookId}/keywords`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: keywordIds, status }),
+          })
+        : Promise.resolve(),
+      asinIds.length > 0
+        ? fetch(`/api/books/${bookId}/competitors`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: asinIds, status }),
+          })
+        : Promise.resolve(),
+    ]);
     onKeywordsChanged?.();
   }
 
   async function bulkDelete() {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
+    const keywordIds = ids.filter((id) => rowById(id)?.kind === "keyword");
+    const asinIds = ids.filter((id) => rowById(id)?.kind === "asin");
     setKeywords((prev) => prev.filter((k) => !selected.has(k.id)));
+    setCompetitors((prev) => prev.filter((a) => !selected.has(a.id)));
     setSelected(new Set());
-    await fetch(`/api/books/${bookId}/keywords`, {
-      method: "DELETE",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ids }),
-    });
+    await Promise.all([
+      keywordIds.length > 0
+        ? fetch(`/api/books/${bookId}/keywords`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: keywordIds }),
+          })
+        : Promise.resolve(),
+      asinIds.length > 0
+        ? fetch(`/api/books/${bookId}/competitors`, {
+            method: "DELETE",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ids: asinIds }),
+          })
+        : Promise.resolve(),
+    ]);
     onKeywordsChanged?.();
   }
 
@@ -385,52 +493,105 @@ export default function KeywordManager({
     setSelected(new Set());
   }
 
+  /** Combined ASIN + keyword bank (batch 12 item 3): one table, each row
+   * tagged with its type and the campaign(s) it's currently active in. */
+  const bank: BankRow[] = useMemo(() => {
+    const keywordRows: BankRow[] = keywords.map((k) => ({
+      id: k.id,
+      kind: "keyword",
+      text: k.text,
+      match_type: k.match_type,
+      status: k.status,
+      bid: k.bid,
+      source: k.source,
+      rejection_reason: k.rejection_reason ?? null,
+      rejected_by_filter: k.rejected_by_filter ?? null,
+      specificity: k.specificity ?? null,
+      campaigns: memberships.keywordCampaigns[k.id] ?? [],
+    }));
+    const asinRows: BankRow[] = competitors.map((a) => ({
+      id: a.id,
+      kind: "asin",
+      text: a.competitor_asin,
+      match_type: null,
+      status: a.status,
+      bid: a.bid,
+      source: a.source,
+      rejection_reason: a.rejection_reason,
+      rejected_by_filter: a.rejected_by_filter,
+      specificity: null,
+      campaigns: memberships.competitorCampaigns[a.id] ?? [],
+    }));
+    return [...keywordRows, ...asinRows];
+  }, [keywords, competitors, memberships]);
+
   const sources = useMemo(
-    () => Array.from(new Set(keywords.map((k) => k.source).filter((s): s is string => !!s))).sort(),
-    [keywords]
+    () => Array.from(new Set(bank.map((r) => r.source).filter((s): s is string => !!s))).sort(),
+    [bank]
   );
 
   // Rejections are research exhaust, not part of the working list — they get
   // their own tab rather than padding every count in the UI.
-  const keptCount = useMemo(() => keywords.filter((k) => k.status !== "rejected").length, [keywords]);
-  const rejectedCount = keywords.length - keptCount;
+  const keptCount = useMemo(() => bank.filter((r) => r.status !== "rejected").length, [bank]);
+  const rejectedCount = bank.length - keptCount;
 
   const rejectingFilters = useMemo(
-    () =>
-      Array.from(
-        new Set(keywords.map((k) => k.rejected_by_filter).filter((f): f is string => !!f))
-      ).sort(),
-    [keywords]
+    () => Array.from(new Set(bank.map((r) => r.rejected_by_filter).filter((f): f is string => !!f))).sort(),
+    [bank]
   );
 
   const visible = useMemo(() => {
     const term = search.trim().toLowerCase();
-    const matched = keywords.filter((k) => {
+    const matched = bank.filter((r) => {
       // A generate run produces more rejections than keepers, so the default
       // view is the list you'd actually work with; rejected has its own tab.
-      if (statusFilter === "all" && k.status === "rejected") return false;
-      if (statusFilter !== "all" && k.status !== statusFilter) return false;
-      if (sourceFilter !== "all" && k.source !== sourceFilter) return false;
-      if (filterFilter !== "all" && k.rejected_by_filter !== filterFilter) return false;
-      if (specificityFilter !== "all" && k.specificity !== specificityFilter) return false;
-      if (term && !k.text.toLowerCase().includes(term)) return false;
+      if (statusFilter === "all" && r.status === "rejected") return false;
+      if (statusFilter !== "all" && r.status !== statusFilter) return false;
+      if (typeFilter !== "all" && r.kind !== typeFilter) return false;
+      if (sourceFilter !== "all" && r.source !== sourceFilter) return false;
+      if (filterFilter !== "all" && r.rejected_by_filter !== filterFilter) return false;
+      if (specificityFilter !== "all" && r.specificity !== specificityFilter) return false;
+      if (term && !r.text.toLowerCase().includes(term)) return false;
       return true;
     });
     if (specificitySort === "none") return matched;
     const sorted = [...matched].sort((a, b) => (a.specificity ?? 0) - (b.specificity ?? 0));
     return specificitySort === "desc" ? sorted.reverse() : sorted;
-  }, [keywords, statusFilter, sourceFilter, filterFilter, specificityFilter, specificitySort, search]);
+  }, [bank, statusFilter, typeFilter, sourceFilter, filterFilter, specificityFilter, specificitySort, search]);
+
+  // Item 5: within a specific status tab, split the visible rows into ASIN
+  // and Keyword sub-lists rather than one mixed list. "All" and "Rejected"
+  // keep the single combined table (there's no status grouping to split).
+  const splitByType = statusFilter !== "all";
+  const asinVisible = useMemo(() => visible.filter((r) => r.kind === "asin"), [visible]);
+  const keywordVisible = useMemo(() => visible.filter((r) => r.kind === "keyword"), [visible]);
 
   const page = visible.slice(0, visibleCount);
-  const allPageSelected = page.length > 0 && page.every((k) => selected.has(k.id));
 
-  function toggleAllOnPage() {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (allPageSelected) page.forEach((k) => next.delete(k.id));
-      else page.forEach((k) => next.add(k.id));
-      return next;
-    });
+  function rowById(id: string): BankRow | undefined {
+    return bank.find((r) => r.id === id);
+  }
+
+  async function updateRow(row: BankRow, updates: { status?: KeywordStatus; bid?: number | null; match_type?: MatchType }) {
+    if (row.kind === "keyword") {
+      await updateKeyword(row.id, updates);
+    } else {
+      setCompetitors((prev) => prev.map((a) => (a.id === row.id ? { ...a, ...updates } : a)));
+      await fetch(`/api/competitors/${row.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates.status !== undefined ? { status: updates.status } : { bid: updates.bid }),
+      });
+    }
+  }
+
+  async function deleteRow(row: BankRow) {
+    if (row.kind === "keyword") {
+      await deleteKeyword(row.id);
+    } else {
+      setCompetitors((prev) => prev.filter((a) => a.id !== row.id));
+      await fetch(`/api/competitors/${row.id}`, { method: "DELETE" });
+    }
   }
 
   return (
@@ -509,6 +670,26 @@ export default function KeywordManager({
         <div className="alert mb-6" aria-live="polite">
           <ShieldMinus size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
           <p>{promoteNotice}</p>
+        </div>
+      )}
+
+      {restoreError && (
+        <div className="alert alert-error mb-6" role="alert">
+          <AlertCircle size={20} className="mt-0.5 shrink-0" />
+          <p className="flex-1">{restoreError}</p>
+          <button className="btn btn-tertiary btn-icon btn-sm" onClick={() => setRestoreError(null)} aria-label="Dismiss error">
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {loadError && (
+        <div className="alert alert-error mb-6" role="alert">
+          <AlertTriangle size={20} className="mt-0.5 shrink-0" />
+          <div>
+            <p className="alert-title">Couldn&apos;t load the keyword/ASIN bank</p>
+            <p className="mt-1">{loadError}</p>
+          </div>
         </div>
       )}
 
@@ -724,6 +905,17 @@ export default function KeywordManager({
         </div>
 
         <select
+          value={typeFilter}
+          onChange={(e) => changeFilters(() => setTypeFilter(e.target.value as "all" | BankKind))}
+          className="input w-auto"
+          aria-label="Filter by type"
+        >
+          <option value="all">ASINs &amp; keywords</option>
+          <option value="keyword">Keywords only</option>
+          <option value="asin">ASINs only</option>
+        </select>
+
+        <select
           value={sourceFilter}
           onChange={(e) => changeFilters(() => setSourceFilter(e.target.value))}
           className="input w-auto"
@@ -791,7 +983,7 @@ export default function KeywordManager({
       )}
 
       {loading ? (
-        <div className="table-wrap" aria-busy="true" aria-label="Loading keywords">
+        <div className="table-wrap" aria-busy="true" aria-label="Loading keyword/ASIN bank">
           {[0, 1, 2, 3].map((row) => (
             <div key={row} className="flex items-center gap-4 border-b p-4" style={{ borderColor: "var(--line)" }}>
               <div className="skeleton h-4 w-4 shrink-0" />
@@ -806,16 +998,14 @@ export default function KeywordManager({
             <Sparkles size={24} />
           </span>
           <div className="space-y-1">
-            <p className="empty-state-title">
-              {keywords.length === 0 ? "No keywords yet" : "No keywords match these filters"}
-            </p>
+            <p className="empty-state-title">{bank.length === 0 ? "No keywords or ASINs yet" : "Nothing matches these filters"}</p>
             <p className="empty-state-body">
-              {keywords.length === 0
-                ? "Generate them from this book's metadata, or add your own above."
+              {bank.length === 0
+                ? "Generate keywords from this book's metadata, or add your own above."
                 : "Try a different status tab, or clear the search."}
             </p>
           </div>
-          {keywords.length === 0 ? (
+          {bank.length === 0 ? (
             <button onClick={() => setShowGenerateForm(true)} className="btn btn-primary">
               <Sparkles size={20} />
               Generate keywords
@@ -826,6 +1016,7 @@ export default function KeywordManager({
                 changeFilters(() => {
                   setSearch("");
                   setStatusFilter("all");
+                  setTypeFilter("all");
                   setSourceFilter("all");
                   setFilterFilter("all");
                 })
@@ -838,203 +1029,26 @@ export default function KeywordManager({
         </div>
       ) : (
         <>
-          <div className="table-wrap overflow-x-auto">
-            <table className="table table-dense">
-              <thead>
-                <tr>
-                  <th scope="col" className="w-8">
-                    <input
-                      type="checkbox"
-                      className="checkbox"
-                      checked={allPageSelected}
-                      onChange={toggleAllOnPage}
-                      aria-label="Select all shown keywords"
-                    />
-                  </th>
-                  <th scope="col">Keyword</th>
-                  <th scope="col">Match</th>
-                  <th scope="col" className="hidden lg:table-cell">
-                    Source
-                  </th>
-                  <th scope="col" className="hidden xl:table-cell">
-                    Filter verdict
-                  </th>
-                  <th scope="col" className="hidden md:table-cell">
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setSpecificitySort((prev) =>
-                          prev === "none" ? "asc" : prev === "asc" ? "desc" : "none"
-                        )
-                      }
-                      className="flex items-center gap-1"
-                      aria-label="Sort by specificity"
-                      title="Broad → Specific"
-                    >
-                      Specificity
-                      {specificitySort !== "none" && <span aria-hidden="true">{specificitySort === "asc" ? "↑" : "↓"}</span>}
-                    </button>
-                  </th>
-                  <th scope="col">Bid</th>
-                  <th scope="col">Status</th>
-                  <th scope="col">
-                    <span className="sr-only">Actions</span>
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {page.map((keyword) => (
-                  <tr key={keyword.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        className="checkbox"
-                        checked={selected.has(keyword.id)}
-                        onChange={(e) =>
-                          setSelected((prev) => {
-                            const next = new Set(prev);
-                            if (e.target.checked) next.add(keyword.id);
-                            else next.delete(keyword.id);
-                            return next;
-                          })
-                        }
-                        aria-label={`Select ${keyword.text}`}
-                      />
-                    </td>
-                    <td>
-                      <p className="cell-primary">{keyword.text}</p>
-                      {keyword.category && (
-                        <p className="meta-line text-xs">{keyword.category.replace(/-/g, " ")}</p>
-                      )}
-                    </td>
-                    <td>
-                      <select
-                        value={keyword.match_type}
-                        onChange={(e) => updateKeyword(keyword.id, { match_type: e.target.value as MatchType })}
-                        className="input input-sm w-auto"
-                        aria-label={`Match type for ${keyword.text}`}
-                      >
-                        <option value="broad">Broad</option>
-                        <option value="phrase">Phrase</option>
-                        <option value="exact">Exact</option>
-                      </select>
-                    </td>
-                    <td className="hidden lg:table-cell">{labelForSource(keyword.source)}</td>
-                    <td className="hidden xl:table-cell">
-                      {keyword.rejected_by_filter ? (
-                        <span title={keyword.rejection_reason ?? undefined}>
-                          <span className="cell-primary">{labelForFilter(keyword.rejected_by_filter).trim()}</span>
-                          {keyword.rejection_reason && (
-                            <span className="meta-line block text-xs">{keyword.rejection_reason}</span>
-                          )}
-                        </span>
-                      ) : (
-                        <span style={{ color: "var(--text-placeholder)" }}>—</span>
-                      )}
-                    </td>
-                    <td className="hidden md:table-cell">
-                      {keyword.specificity ? (
-                        <span
-                          className="inline-flex items-center gap-0.5"
-                          title={SPECIFICITY_LABELS[keyword.specificity]}
-                          aria-label={`Specificity: ${SPECIFICITY_LABELS[keyword.specificity]}`}
-                        >
-                          {[1, 2, 3, 4, 5].map((step) => (
-                            <span
-                              key={step}
-                              aria-hidden="true"
-                              style={{
-                                display: "inline-block",
-                                width: 6,
-                                height: 6,
-                                borderRadius: "50%",
-                                background:
-                                  step <= keyword.specificity!
-                                    ? "var(--icon-active, currentColor)"
-                                    : "var(--border-default, #d1d5db)",
-                              }}
-                            />
-                          ))}
-                        </span>
-                      ) : (
-                        <span style={{ color: "var(--text-placeholder)" }}>—</span>
-                      )}
-                    </td>
-                    <td>
-                      <input
-                        type="number"
-                        step="0.01"
-                        min="0"
-                        value={keyword.bid ?? ""}
-                        onChange={(e) =>
-                          updateKeyword(keyword.id, {
-                            bid: e.target.value === "" ? null : parseFloat(e.target.value),
-                          })
-                        }
-                        placeholder="—"
-                        className="input input-sm w-20"
-                        aria-label={`Bid for ${keyword.text}`}
-                      />
-                    </td>
-                    <td>
-                      <select
-                        value={keyword.status}
-                        onChange={(e) => updateKeyword(keyword.id, { status: e.target.value as KeywordStatus })}
-                        className={`badge ${statusBadge[keyword.status]} cursor-pointer appearance-none pr-3`}
-                        aria-label={`Status for ${keyword.text}`}
-                      >
-                        {STATUSES.map((status) => (
-                          <option key={status} value={status}>
-                            {STATUS_LABELS[status]}
-                          </option>
-                        ))}
-                      </select>
-                    </td>
-                    <td className="text-right">
-                      <div className="flex justify-end gap-1">
-                        {keyword.status === "rejected" && (
-                          <>
-                            <button
-                              onClick={() => restoreAndAllowlist(keyword)}
-                              disabled={promotingId === keyword.id}
-                              className="btn btn-tertiary btn-icon btn-sm"
-                              aria-label={`Restore ${keyword.text} and add it to the filter allowlist`}
-                              title="False positive? Restore & allowlist"
-                            >
-                              <CheckCircle2 size={16} style={{ color: "var(--icon-default)" }} />
-                            </button>
-                            <button
-                              onClick={() => promoteToNegativeLibrary(keyword)}
-                              disabled={promotingId === keyword.id}
-                              className="btn btn-tertiary btn-icon btn-sm"
-                              aria-label={`Promote ${keyword.text} to the negative-keyword library`}
-                              title="Promote to negative library"
-                            >
-                              <ShieldMinus size={16} style={{ color: "var(--icon-default)" }} />
-                            </button>
-                          </>
-                        )}
-                        <button
-                          onClick={() => deleteKeyword(keyword.id)}
-                          className="btn btn-tertiary btn-icon btn-sm"
-                          aria-label={`Delete ${keyword.text}`}
-                          title="Delete keyword"
-                        >
-                          <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          {splitByType ? (
+            <div className="space-y-6">
+              <div>
+                <p className="meta-line text-xs mb-2">ASINs ({asinVisible.length})</p>
+                {asinVisible.length > 0 ? renderBankTable(asinVisible) : <p className="meta-line text-xs">None</p>}
+              </div>
+              <div>
+                <p className="meta-line text-xs mb-2">Keywords ({keywordVisible.length})</p>
+                {keywordVisible.length > 0 ? renderBankTable(keywordVisible) : <p className="meta-line text-xs">None</p>}
+              </div>
+            </div>
+          ) : (
+            renderBankTable(page)
+          )}
 
           <div className="mt-4 flex items-center justify-between gap-4">
             <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-              Showing {page.length} of {visible.length}
+              Showing {splitByType ? visible.length : page.length} of {visible.length}
             </p>
-            {page.length < visible.length && (
+            {!splitByType && page.length < visible.length && (
               <button onClick={() => setVisibleCount((count) => count + PAGE_SIZE)} className="btn btn-secondary">
                 Show more
               </button>
@@ -1044,4 +1058,245 @@ export default function KeywordManager({
       )}
     </section>
   );
+
+  /** Renders one combined ASIN+keyword table for the given rows (batch 12
+   * items 3 & 5). Declared inside the component so it closes over state. */
+  function renderBankTable(rows: BankRow[]) {
+    const pageAllSelected = rows.length > 0 && rows.every((r) => selected.has(r.id));
+    return (
+      <div className="table-wrap overflow-x-auto">
+        <table className="table table-dense">
+          <thead>
+            <tr>
+              <th scope="col" className="w-8">
+                <input
+                  type="checkbox"
+                  className="checkbox"
+                  checked={pageAllSelected}
+                  onChange={() =>
+                    setSelected((prev) => {
+                      const next = new Set(prev);
+                      if (pageAllSelected) rows.forEach((r) => next.delete(r.id));
+                      else rows.forEach((r) => next.add(r.id));
+                      return next;
+                    })
+                  }
+                  aria-label="Select all shown rows"
+                />
+              </th>
+              <th scope="col">Type</th>
+              <th scope="col">Keyword / ASIN</th>
+              <th scope="col">Match</th>
+              <th scope="col" className="hidden lg:table-cell">
+                Source
+              </th>
+              <th scope="col" className="hidden xl:table-cell">
+                Filter verdict
+              </th>
+              <th scope="col" className="hidden md:table-cell">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSpecificitySort((prev) => (prev === "none" ? "asc" : prev === "asc" ? "desc" : "none"))
+                  }
+                  className="flex items-center gap-1"
+                  aria-label="Sort by specificity"
+                  title="Broad → Specific"
+                >
+                  Specificity
+                  {specificitySort !== "none" && <span aria-hidden="true">{specificitySort === "asc" ? "↑" : "↓"}</span>}
+                </button>
+              </th>
+              <th scope="col">Bid</th>
+              <th scope="col">Status</th>
+              <th scope="col">Campaigns</th>
+              <th scope="col">
+                <span className="sr-only">Actions</span>
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((row) => (
+              <tr key={row.id}>
+                <td>
+                  <input
+                    type="checkbox"
+                    className="checkbox"
+                    checked={selected.has(row.id)}
+                    onChange={(e) =>
+                      setSelected((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) next.add(row.id);
+                        else next.delete(row.id);
+                        return next;
+                      })
+                    }
+                    aria-label={`Select ${row.text}`}
+                  />
+                </td>
+                <td>
+                  <span className="badge badge-gray">{row.kind === "keyword" ? "Keyword" : "ASIN"}</span>
+                </td>
+                <td>
+                  <p className="cell-primary">{row.text}</p>
+                </td>
+                <td>
+                  {row.kind === "keyword" ? (
+                    <select
+                      value={row.match_type ?? "phrase"}
+                      onChange={(e) => updateRow(row, { match_type: e.target.value as MatchType })}
+                      className="input input-sm w-auto"
+                      aria-label={`Match type for ${row.text}`}
+                    >
+                      <option value="broad">Broad</option>
+                      <option value="phrase">Phrase</option>
+                      <option value="exact">Exact</option>
+                    </select>
+                  ) : (
+                    <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                  )}
+                </td>
+                <td className="hidden lg:table-cell">{labelForSource(row.source)}</td>
+                <td className="hidden xl:table-cell">
+                  {row.rejected_by_filter ? (
+                    <span title={row.rejection_reason ?? undefined}>
+                      <span className="cell-primary">{labelForFilter(row.rejected_by_filter).trim()}</span>
+                      {row.rejection_reason && <span className="meta-line block text-xs">{row.rejection_reason}</span>}
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                  )}
+                </td>
+                <td className="hidden md:table-cell">
+                  {row.specificity ? (
+                    <span
+                      className="inline-flex items-center gap-0.5"
+                      title={SPECIFICITY_LABELS[row.specificity]}
+                      aria-label={`Specificity: ${SPECIFICITY_LABELS[row.specificity]}`}
+                    >
+                      {[1, 2, 3, 4, 5].map((step) => (
+                        <span
+                          key={step}
+                          aria-hidden="true"
+                          style={{
+                            display: "inline-block",
+                            width: 6,
+                            height: 6,
+                            borderRadius: "50%",
+                            background: step <= row.specificity! ? "var(--icon-active, currentColor)" : "var(--border-default, #d1d5db)",
+                          }}
+                        />
+                      ))}
+                    </span>
+                  ) : (
+                    <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                  )}
+                </td>
+                <td>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0"
+                    value={row.bid ?? ""}
+                    onChange={(e) => updateRow(row, { bid: e.target.value === "" ? null : parseFloat(e.target.value) })}
+                    placeholder="—"
+                    className="input input-sm w-20"
+                    aria-label={`Bid for ${row.text}`}
+                  />
+                </td>
+                <td>
+                  <select
+                    value={row.status}
+                    onChange={(e) => updateRow(row, { status: e.target.value as KeywordStatus })}
+                    className={`badge ${statusBadge[row.status]} cursor-pointer appearance-none pr-3`}
+                    aria-label={`Status for ${row.text}`}
+                  >
+                    {STATUSES.map((status) => (
+                      <option key={status} value={status}>
+                        {STATUS_LABELS[status]}
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td>
+                  {row.campaigns.length > 0 ? (
+                    <div className="flex flex-wrap gap-1">
+                      {row.campaigns.map((name) => (
+                        <span key={name} className="chip-tag" title={name}>
+                          {name}
+                        </span>
+                      ))}
+                    </div>
+                  ) : (
+                    <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                  )}
+                </td>
+                <td className="text-right">
+                  <div className="flex justify-end gap-1">
+                    {row.status === "rejected" && row.kind === "keyword" && (
+                      <>
+                        <button
+                          onClick={() => {
+                            const kw = keywords.find((k) => k.id === row.id);
+                            if (kw) restoreAndAllowlist(kw);
+                          }}
+                          disabled={promotingId === row.id}
+                          className="btn btn-tertiary btn-icon btn-sm"
+                          aria-label={`Restore ${row.text} and add it to the filter allowlist`}
+                          title="False positive? Restore & allowlist"
+                        >
+                          <CheckCircle2 size={16} style={{ color: "var(--icon-default)" }} />
+                        </button>
+                        <button
+                          onClick={() => {
+                            const kw = keywords.find((k) => k.id === row.id);
+                            if (kw) promoteToNegativeLibrary(kw);
+                          }}
+                          disabled={promotingId === row.id}
+                          className="btn btn-tertiary btn-icon btn-sm"
+                          aria-label={`Promote ${row.text} to the negative-keyword library`}
+                          title="Promote to negative library"
+                        >
+                          <ShieldMinus size={16} style={{ color: "var(--icon-default)" }} />
+                        </button>
+                      </>
+                    )}
+                    {row.status === "rejected" && row.kind === "asin" && (
+                      <button
+                        onClick={() => updateRow(row, { status: "active" })}
+                        className="btn btn-tertiary btn-icon btn-sm"
+                        aria-label={`Restore ${row.text}`}
+                        title="False positive? Restore"
+                      >
+                        <CheckCircle2 size={16} style={{ color: "var(--icon-default)" }} />
+                      </button>
+                    )}
+                    {row.status === "archived" && (
+                      <button
+                        onClick={() => restoreArchived(row)}
+                        disabled={promotingId === row.id}
+                        className="btn btn-tertiary btn-icon btn-sm"
+                        aria-label={`Restore ${row.text} to active`}
+                        title="Restore to active — only allowed while the recommendation engine no longer suggests archiving it"
+                      >
+                        <CheckCircle2 size={16} style={{ color: "var(--icon-default)" }} />
+                      </button>
+                    )}
+                    <button
+                      onClick={() => deleteRow(row)}
+                      className="btn btn-tertiary btn-icon btn-sm"
+                      aria-label={`Delete ${row.text}`}
+                      title="Delete"
+                    >
+                      <Trash2 size={16} style={{ color: "var(--icon-default)" }} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    );
+  }
 }

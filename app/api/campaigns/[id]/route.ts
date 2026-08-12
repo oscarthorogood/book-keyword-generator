@@ -33,7 +33,9 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       supabase.from("books").select("id, title, author, asin").eq("id", campaign.book_id).maybeSingle(),
       supabase
         .from("campaign_targets")
-        .select("id, target_text, match_type, targeting_expression, bid, state, operation, is_negative, negative_scope, created_at")
+        .select(
+          "id, keyword_id, competitor_asin_id, target_text, match_type, targeting_expression, bid, state, operation, is_negative, negative_scope, created_at"
+        )
         .eq("campaign_id", campaignId)
         .order("created_at", { ascending: false }),
       supabase

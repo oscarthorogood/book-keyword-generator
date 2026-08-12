@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Megaphone } from "lucide-react";
+import { AlertTriangle, Download, Megaphone } from "lucide-react";
 import Link from "next/link";
 
 interface CampaignRow {
@@ -18,6 +18,8 @@ interface CampaignRow {
   updated_at: string;
   book_title: string | null;
   book_author: string | null;
+  bulksheet_path?: string | null;
+  last_export_error?: string | null;
 }
 
 function labelForType(type: string): string {
@@ -146,6 +148,9 @@ export default function CampaignsOverviewPage() {
                         <th scope="col">Budget</th>
                         <th scope="col">Status</th>
                         <th scope="col">Amazon ID</th>
+                        <th scope="col">
+                          <span className="sr-only">Download</span>
+                        </th>
                       </tr>
                     </thead>
                     <tbody>
@@ -155,6 +160,11 @@ export default function CampaignsOverviewPage() {
                             <Link href={`/campaigns/${row.id}`} className="cell-primary">
                               {row.name}
                             </Link>
+                            {row.last_export_error && (
+                              <span className="badge badge-error ml-2" title={row.last_export_error}>
+                                export failed
+                              </span>
+                            )}
                           </td>
                           <td>
                             {row.book_id && (
@@ -171,6 +181,17 @@ export default function CampaignsOverviewPage() {
                           <td>
                             {row.amazon_campaign_id ?? (
                               <span className="badge badge-warning">needs Amazon ID</span>
+                            )}
+                          </td>
+                          <td>
+                            {row.bulksheet_path && (
+                              <a
+                                href={`/api/campaigns/${row.id}/download`}
+                                className="btn btn-tertiary btn-sm"
+                                title="Download the current bulksheet for this campaign"
+                              >
+                                <Download size={14} /> Download
+                              </a>
                             )}
                           </td>
                         </tr>
