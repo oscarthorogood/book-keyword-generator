@@ -127,6 +127,31 @@ export function buildNegativeKeywordRow(params: {
   };
 }
 
+/**
+ * A negative that blocks a term across every ad group in the campaign, not
+ * just the one it's attached to (campaigns spec §1.3) — e.g. the future
+ * Alpha Exact → BMM Discovery safeguard. No "Ad Group Name": Amazon's
+ * `Campaign Negative Keyword` entity is campaign-scoped by definition.
+ */
+export function buildCampaignNegativeKeywordRow(params: {
+  campaign: string;
+  text: string;
+  matchType: NegativeKeyword["matchType"];
+  reason: string;
+}): BulksheetRow {
+  return {
+    ...emptyRow(),
+    Product: PRODUCT,
+    Entity: "Campaign Negative Keyword",
+    Operation: "create",
+    "Campaign Name": params.campaign,
+    "Keyword or Product Targeting": params.text,
+    "Match Type": `negative ${params.matchType}`,
+    State: "enabled",
+    Source: params.reason,
+  };
+}
+
 export function buildProductTargetingRow(params: {
   campaign: string;
   adGroup: string;
@@ -168,7 +193,14 @@ export function buildProductTargetingRow(params: {
 // informational-only readback columns, etc.) this app doesn't model. Treat
 // it as unverified until the PR 3.5 human upload gate confirms it.
 
-export type Entity = "Campaign" | "Ad Group" | "Product Ad" | "Keyword" | "Product Targeting" | "Negative Keyword";
+export type Entity =
+  | "Campaign"
+  | "Ad Group"
+  | "Product Ad"
+  | "Keyword"
+  | "Product Targeting"
+  | "Negative Keyword"
+  | "Campaign Negative Keyword";
 export type Operation = "Create" | "Update" | "Archive";
 
 export const BULKSHEET_UPLOAD_COLUMNS = [
@@ -278,6 +310,24 @@ export function buildUploadNegativeKeywordRow(params: {
     Operation: "Create",
     "Campaign Name": params.campaign,
     "Ad Group Name": params.adGroup,
+    "Keyword or Product Targeting": params.text,
+    "Match Type": negativeMatchTypeCode(params.matchType),
+    State: "enabled",
+  };
+}
+
+/** Upload-side twin of buildCampaignNegativeKeywordRow — see its doc comment. */
+export function buildUploadCampaignNegativeKeywordRow(params: {
+  campaign: string;
+  text: string;
+  matchType: NegativeKeyword["matchType"];
+}): UploadRow {
+  return {
+    ...emptyUploadRow(),
+    Product: PRODUCT,
+    Entity: "Campaign Negative Keyword",
+    Operation: "Create",
+    "Campaign Name": params.campaign,
     "Keyword or Product Targeting": params.text,
     "Match Type": negativeMatchTypeCode(params.matchType),
     State: "enabled",

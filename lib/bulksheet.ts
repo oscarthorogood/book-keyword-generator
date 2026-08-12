@@ -22,6 +22,7 @@
 import {
   BULKSHEET_COLUMNS,
   buildAdGroupRow,
+  buildCampaignNegativeKeywordRow,
   buildCampaignRow,
   buildKeywordRow,
   buildNegativeKeywordRow,
@@ -128,18 +129,38 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
   // so the Exact and Product Targeting campaigns had no protection from
   // known-bad queries. Every campaign type accepts negative keywords for
   // query exclusion (product-targeting campaigns included), so every
-  // campaign this run creates gets the same negative list.
-  const addNegativeRows = (campaign: string, adGroup: string) => {
-    for (const negative of negatives) {
-      rows.push(
-        buildNegativeKeywordRow({
-          campaign,
-          adGroup,
-          text: negative.text,
-          matchType: negative.matchType,
-          reason: negative.reason,
-        })
-      );
+  // campaign this run creates gets the same negative list by default.
+  //
+  // §1.3: each negative's own `scope` decides the entity — `campaign`
+  // (e.g. the future Alpha Exact → BMM Discovery safeguard) blocks the term
+  // everywhere in that campaign via a Campaign Negative Keyword row with no
+  // ad group; `ad_group` (the default, matching today's starter-list junk
+  // terms) attaches only where called, as before. `entries` defaults to the
+  // shared list so every existing call site is unchanged; passing a
+  // different list per campaign is what lets a future caller (e.g. Create
+  // Campaign) give one campaign negatives another doesn't have.
+  const addNegativeRows = (campaign: string, adGroup: string, entries: NegativeKeyword[] = negatives) => {
+    for (const negative of entries) {
+      if ((negative.scope ?? "ad_group") === "campaign") {
+        rows.push(
+          buildCampaignNegativeKeywordRow({
+            campaign,
+            text: negative.text,
+            matchType: negative.matchType,
+            reason: negative.reason,
+          })
+        );
+      } else {
+        rows.push(
+          buildNegativeKeywordRow({
+            campaign,
+            adGroup,
+            text: negative.text,
+            matchType: negative.matchType,
+            reason: negative.reason,
+          })
+        );
+      }
     }
   };
 

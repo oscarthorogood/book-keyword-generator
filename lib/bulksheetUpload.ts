@@ -26,12 +26,14 @@ import {
 import {
   buildProductAdRow,
   buildUploadAdGroupRow,
+  buildUploadCampaignNegativeKeywordRow,
   buildUploadCampaignRow,
   buildUploadKeywordRow,
   buildUploadNegativeKeywordRow,
   buildUploadProductTargetingRow,
   type UploadRow,
 } from "./bulksheetSchema";
+import type { NegativeKeyword } from "./negativeKeywords";
 
 /**
  * Builds the upload row set. Requires `input.sku` (the book's own ASIN) —
@@ -77,16 +79,27 @@ export function buildUploadRows(input: BulksheetInput): UploadRow[] {
     }
   };
 
-  const addNegativeRows = (campaign: string, adGroup: string) => {
-    for (const negative of negatives) {
-      rows.push(
-        buildUploadNegativeKeywordRow({
-          campaign,
-          adGroup,
-          text: negative.text,
-          matchType: negative.matchType,
-        })
-      );
+  // §1.3 — see the matching comment in lib/bulksheet.ts's addNegativeRows.
+  const addNegativeRows = (campaign: string, adGroup: string, entries: NegativeKeyword[] = negatives) => {
+    for (const negative of entries) {
+      if ((negative.scope ?? "ad_group") === "campaign") {
+        rows.push(
+          buildUploadCampaignNegativeKeywordRow({
+            campaign,
+            text: negative.text,
+            matchType: negative.matchType,
+          })
+        );
+      } else {
+        rows.push(
+          buildUploadNegativeKeywordRow({
+            campaign,
+            adGroup,
+            text: negative.text,
+            matchType: negative.matchType,
+          })
+        );
+      }
     }
   };
 
