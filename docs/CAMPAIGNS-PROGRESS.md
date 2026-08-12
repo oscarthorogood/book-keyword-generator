@@ -18,14 +18,12 @@ All rows currently ship as commits on PR [#42](https://github.com/oscarthorogood
 - [ ] **PR 10** — Recommendation engine, accept/reject UI, review CSV.
 - [ ] **PR 11** — `/campaigns`, `/campaigns/[id]`, sidebar.
 
-## Open decisions (spec §10) — not yet answered
+## Open decisions (spec §10) — resolved
 
-1. Auto Discovery: drop, or keep as optional sixth campaign?
-2. Budget: per-campaign figure as input, total split proportionally — confirm threshold for the typed confirmation.
-3. Currency/marketplace: confirm from a real report export. Note: `lib/bulksheet.ts` does not actually hardcode a `$`/`£` symbol anywhere (checked directly) — bids/budgets are unitless `.toFixed(2)` strings. Live book data is 100% `marketplace = 'UK'` (4/4 rows) though the `books.marketplace` column default is `'US'`.
-4. `series_key`: manual, ISBN prefix, or title-pattern?
-5. Target ACOS: flat 30%, or derive break-even from royalty per unit?
-6. Rival exclusion thresholds: confirm `maxBsr: 500`, `minPrice: 2.99`.
-7. Recommendation cooldown: 30 days, or shorter?
-
-PRs 5, 7, and 10 touch schema/behaviour that depends on decisions 2-7 — will stop and ask inline if reached before these are answered, per the spec's own guardrails.
+1. **Auto Discovery**: keep, optional and off by default (spec's own recommendation).
+2. **Budget**: $25/campaign default (≈$125/day total across 5), typed confirmation required above $50/day.
+3. **Currency/marketplace**: per-book, derived from `books.marketplace` at write time — no hardcoded schema default (`campaigns.currency`/`campaign_results.currency` are `NOT NULL` with no `DEFAULT`, forcing every insert to supply it explicitly).
+4. **`series_key`**: manual per book; UI suggests author name as a default, human confirms/edits (spec §2.5's own recommendation).
+5. **Target ACOS**: flat 30% default (`books.target_acos NUMERIC DEFAULT 0.30`).
+6. **Rival exclusion thresholds**: `maxBsr: 500`, `minPrice: 2.99` (spec's own defaults).
+7. **Recommendation cooldown**: 30 days after rejection.
