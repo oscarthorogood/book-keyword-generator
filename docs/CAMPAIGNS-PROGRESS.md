@@ -11,7 +11,7 @@ All rows currently ship as commits on PR [#42](https://github.com/oscarthorogood
 - [ ] **PR 3.5** — Human gate: upload a generated file to Amazon in draft, confirm accepted. *(Not automatable — needs a human with Amazon Ads access. PR 3's format is best-effort/documented, not verified against a real export — this is the step that verifies it.)*
 - [x] **PR 4** — `NegativeKeyword.scope` (`campaign`/`ad_group`, defaults `ad_group`), new `Campaign Negative Keyword` entity/builders in `lib/bulksheetSchema.ts`, and both `addNegativeRows` (review + upload) route by scope. `lib/negativeKeywords.ts` untouched (stays campaign-unaware) per spec §1.3.
 - [x] **PR 5** — Migrations `sql/21`-`26`, one concern per file, trigger drop first (fixed via `DROP FUNCTION ... CASCADE` rather than a `DROP TRIGGER ... ON campaigns` that would fail pre-table-creation). Not applied to Supabase — needs a human to run them. Schema reflects the §10 decisions above (currency columns have no `DEFAULT`, $25 budget, 30% ACOS).
-- [ ] **PR 6** — `lib/campaignSelection.ts` + unit tests.
+- [x] **PR 6** — `lib/campaignSelection.ts`: five pure selection functions + `toModifiedBroadSyntax`, reusing `scoreForRank()`. Both spec-named bug fixes applied (Brand Guard filter-before-slice, independent mega-bestseller/race-to-bottom rules). One spec/code contradiction fixed (code wins): `"comp-name"` is a `KeywordSource`, not `KeywordCategory`.
 - [ ] **PR 7** — Create Campaign end-to-end.
 - [ ] **PR 8** — Results import: parser extension, job table, matching, rollups.
 - [ ] **PR 9** — Update Campaign + diff.
