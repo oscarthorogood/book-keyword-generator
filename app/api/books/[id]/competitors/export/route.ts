@@ -1,5 +1,7 @@
 import { loadBookWithSnapshot } from "@/lib/bookStore";
-import { buildBulksheetCsv } from "@/lib/bulksheet";
+import { buildBulksheetCsv, type BulksheetInput } from "@/lib/bulksheet";
+import { buildUploadRows } from "@/lib/bulksheetUpload";
+import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
 import type { ProductTarget } from "@/lib/productTargets";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
@@ -54,20 +56,34 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     }));
 
     const { snapshot } = loaded;
-    const csv = buildBulksheetCsv({
+    const bulksheetInput: BulksheetInput = {
       bookTitle: snapshot.title ?? loaded.book.title ?? snapshot.asin,
+      sku: loaded.book.asin,
       keywords: [],
       productTargets,
       defaultBid,
       dailyBudget,
-    });
+    };
 
-    const filename = `${(snapshot.title ?? snapshot.asin).replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 50)}-competitor-asins-bulksheet.csv`;
+    const baseFilename = `${(snapshot.title ?? snapshot.asin).replace(/[^a-z0-9]+/gi, "-").toLowerCase().slice(0, 50)}-competitor-asins`;
+
+    if (url.searchParams.get("format") === "upload") {
+      const xlsx = await buildUploadXlsx(buildUploadRows(bulksheetInput));
+      return new Response(new Uint8Array(xlsx), {
+        headers: {
+          "Content-Type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "Content-Disposition": `attachment; filename="${baseFilename}-upload.xlsx"`,
+          "Cache-Control": "no-store",
+        },
+      });
+    }
+
+    const csv = buildBulksheetCsv(bulksheetInput);
 
     return new Response(csv, {
       headers: {
         "Content-Type": "text/csv; charset=utf-8",
-        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Disposition": `attachment; filename="${baseFilename}-review.csv"`,
         "Cache-Control": "no-store",
       },
     });

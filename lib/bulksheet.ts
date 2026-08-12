@@ -54,13 +54,15 @@ export interface BulksheetInput {
   brandTargets?: BrandTarget[];
   dailyBudget?: number;
   defaultBid?: number;
+  /** The book's own ASIN, used as the SKU on Product Ad rows in the *-upload.xlsx path (lib/bulksheetUpload.ts). Unused by the review CSV. */
+  sku?: string;
 }
 
 /**
  * Manual campaigns default to $100/day (brief F11): the $10 default this
  * generator previously emitted was a config bug, not an intended budget.
  */
-const DEFAULT_MANUAL_DAILY_BUDGET = 100;
+export const DEFAULT_MANUAL_DAILY_BUDGET = 100;
 
 /**
  * Auto campaigns are the discovery engine that feeds search-term
@@ -68,18 +70,18 @@ const DEFAULT_MANUAL_DAILY_BUDGET = 100;
  * $1/day floor — ~2 clicks/day, which discovers almost nothing (brief F11).
  * ~10% of the manual budget is a more useful default at any budget size.
  */
-const AUTO_BUDGET_RATIO = 0.1;
-const AUTO_BUDGET_MIN = 1;
+export const AUTO_BUDGET_RATIO = 0.1;
+export const AUTO_BUDGET_MIN = 1;
 
 /** Close > substitutes > loose > complements: closer matches earn the higher bid. */
-const AUTO_TARGETING_GROUPS: Array<{ expression: string; label: string; bidMultiplier: number }> = [
+export const AUTO_TARGETING_GROUPS: Array<{ expression: string; label: string; bidMultiplier: number }> = [
   { expression: "close-match", label: "Auto: close match", bidMultiplier: 1 },
   { expression: "substitutes", label: "Auto: substitutes", bidMultiplier: 0.8 },
   { expression: "loose-match", label: "Auto: loose match", bidMultiplier: 0.6 },
   { expression: "complements", label: "Auto: complements", bidMultiplier: 0.4 },
 ];
 
-function campaignName(bookTitle: string, suffix: string): string {
+export function campaignName(bookTitle: string, suffix: string): string {
   const title = bookTitle.replace(/[",]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60);
   return `${title} – ${suffix}`;
 }
