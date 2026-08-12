@@ -15,12 +15,22 @@ import type { CompetitorAsin, KeywordCandidate, MatchType } from "./types";
 export interface CampaignKeyword extends KeywordCandidate {
   id: string;
   status: "active" | "paused" | "negative" | "archived" | "rejected";
+  /** The persisted keywords.bid column — distinct from KeywordCandidate's generation-time suggestedBid. */
+  bid?: number | null;
 }
 
 /** A campaign keyword joined with its lifetime performance (keyword_result_rollups, sql/24). */
 export interface KeywordWithRollups extends CampaignKeyword {
   lifetimeOrders?: number;
 }
+
+export type CampaignType =
+  | "brand_guard"
+  | "alpha_exact"
+  | "bmm_discovery"
+  | "rival_asin_offensive"
+  | "catalog_cross_sell"
+  | "auto_discovery";
 
 export interface CampaignBook {
   id: string;
