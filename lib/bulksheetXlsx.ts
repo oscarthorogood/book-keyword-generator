@@ -30,3 +30,48 @@ export async function buildUploadXlsx(rows: UploadRow[]): Promise<ArrayBuffer> {
 
   return workbook.xlsx.writeBuffer();
 }
+
+export interface CampaignReviewSheetRow {
+  targetText: string;
+  type: string;
+  bid: number | null;
+}
+
+export interface CampaignReviewSheet {
+  /** Excel sheet names are capped at 31 chars and can't contain \ / ? * [ ] : — sanitized/truncated by the caller. */
+  sheetName: string;
+  rows: CampaignReviewSheetRow[];
+}
+
+/**
+ * "Export campaigns" — one workbook, one sheet per campaign, columns
+ * ASIN/Keyword | Type | Bid. This is the human-facing review export,
+ * distinct from the Amazon-importable *-upload.xlsx built by
+ * buildUploadXlsx above.
+ */
+export async function buildCampaignReviewWorkbook(sheets: CampaignReviewSheet[]): Promise<ArrayBuffer> {
+  const workbook = new ExcelJS.Workbook();
+  const usedNames = new Set<string>();
+
+  for (const { sheetName, rows } of sheets) {
+    let name = sheetName.replace(/[\\/?*[\]:]/g, "-").slice(0, 31) || "Campaign";
+    let suffix = 2;
+    while (usedNames.has(name)) {
+      const base = sheetName.replace(/[\\/?*[\]:]/g, "-").slice(0, 28);
+      name = `${base}-${suffix++}`;
+    }
+    usedNames.add(name);
+
+    const sheet = workbook.addWorksheet(name);
+    sheet.columns = [
+      { header: "ASIN/Keyword", key: "targetText", width: 40 },
+      { header: "Type", key: "type", width: 16 },
+      { header: "Bid", key: "bid", width: 10 },
+    ];
+    for (const row of rows) {
+      sheet.addRow({ targetText: row.targetText, type: row.type, bid: row.bid ?? "" });
+    }
+  }
+
+  return workbook.xlsx.writeBuffer();
+}

@@ -25,6 +25,12 @@ interface KeywordRow {
   specificity: number | null;
   source: string | null;
   rejection_reason: string | null;
+  last_impressions: number | null;
+  last_clicks: number | null;
+  last_spend: number | null;
+  last_sales: number | null;
+  last_orders: number | null;
+  results_updated_at: string | null;
 }
 
 interface CompetitorAsinRow {
@@ -36,6 +42,24 @@ interface CompetitorAsinRow {
   bsr: number | null;
   mean_rank: number | null;
   relationship: string | null;
+  last_impressions: number | null;
+  last_clicks: number | null;
+  last_spend: number | null;
+  last_sales: number | null;
+  last_orders: number | null;
+  results_updated_at: string | null;
+}
+
+/** Full lifetime + last-period performance for one keyword or ASIN — feeds lib/recommendations.ts and lib/campaignRebalance.ts. */
+export interface EntityPerformance {
+  lifetimeClicks: number | null;
+  lifetimeOrders: number | null;
+  lifetimeSpend: number | null;
+  lastClicks: number | null;
+  lastSpend: number | null;
+  lastSales: number | null;
+  lastOrders: number | null;
+  resultsUpdatedAt: string | null;
 }
 
 export interface CampaignContext {
@@ -46,6 +70,8 @@ export interface CampaignContext {
   siblingBooks: CampaignBook[];
   negatives: NegativeKeyword[];
   anchors: BookAnchors;
+  /** Performance for every keyword and ASIN in `bank`/`asinBank`, keyed by id — used to update campaigns against real results. */
+  performanceById: Map<string, EntityPerformance>;
 }
 
 export async function loadCampaignContext(
@@ -69,13 +95,17 @@ export async function loadCampaignContext(
     await Promise.all([
       supabase
         .from("keywords")
-        .select("id, text, match_type, status, bid, specificity, source, rejection_reason")
+        .select(
+          "id, text, match_type, status, bid, specificity, source, rejection_reason, last_impressions, last_clicks, last_spend, last_sales, last_orders, results_updated_at"
+        )
         .eq("book_id", bookId)
         .eq("user_id", userId)
         .in("status", ["active", "paused", "negative"]),
       supabase
         .from("competitor_asins")
-        .select("id, competitor_asin, status, bid, price, bsr, mean_rank, relationship")
+        .select(
+          "id, competitor_asin, status, bid, price, bsr, mean_rank, relationship, last_impressions, last_clicks, last_spend, last_sales, last_orders, results_updated_at"
+        )
         .eq("book_id", bookId)
         .eq("user_id", userId)
         .in("status", ["active", "paused"]),
@@ -101,21 +131,72 @@ export async function loadCampaignContext(
     bid: row.bid,
   }));
 
+  const performanceById = new Map<string, EntityPerformance>();
+
   if (bank.length > 0) {
     const { data: rollups } = await supabase
       .from("keyword_result_rollups")
-      .select("keyword_id, lifetime_orders")
+      .select("keyword_id, lifetime_clicks, lifetime_spend, lifetime_orders")
       .in(
         "keyword_id",
         bank.map((k) => k.id)
       );
-    const ordersByKeywordId = new Map((rollups ?? []).map((r) => [r.keyword_id as string, r.lifetime_orders as number | null]));
+    const rollupByKeywordId = new Map(
+      (rollups ?? []).map((r) => [
+        r.keyword_id as string,
+        { lifetimeClicks: r.lifetime_clicks as number | null, lifetimeSpend: r.lifetime_spend as number | null, lifetimeOrders: r.lifetime_orders as number | null },
+      ])
+    );
     for (const keyword of bank) {
-      keyword.lifetimeOrders = ordersByKeywordId.get(keyword.id) ?? undefined;
+      const rollup = rollupByKeywordId.get(keyword.id);
+      keyword.lifetimeOrders = rollup?.lifetimeOrders ?? undefined;
+    }
+    for (const row of activeKeywords) {
+      const rollup = rollupByKeywordId.get(row.id);
+      performanceById.set(row.id, {
+        lifetimeClicks: rollup?.lifetimeClicks ?? null,
+        lifetimeOrders: rollup?.lifetimeOrders ?? null,
+        lifetimeSpend: rollup?.lifetimeSpend ?? null,
+        lastClicks: row.last_clicks ?? null,
+        lastSpend: row.last_spend ?? null,
+        lastSales: row.last_sales ?? null,
+        lastOrders: row.last_orders ?? null,
+        resultsUpdatedAt: row.results_updated_at ?? null,
+      });
     }
   }
 
-  const asinBank: CompetitorAsin[] = ((asinRows ?? []) as CompetitorAsinRow[]).map((row) => ({
+  const asinRowList = (asinRows ?? []) as CompetitorAsinRow[];
+  if (asinRowList.length > 0) {
+    const { data: asinRollups } = await supabase
+      .from("competitor_asin_result_rollups")
+      .select("competitor_asin_id, lifetime_clicks, lifetime_spend, lifetime_orders")
+      .in(
+        "competitor_asin_id",
+        asinRowList.map((a) => a.id)
+      );
+    const asinRollupById = new Map(
+      (asinRollups ?? []).map((r) => [
+        r.competitor_asin_id as string,
+        { lifetimeClicks: r.lifetime_clicks as number | null, lifetimeSpend: r.lifetime_spend as number | null, lifetimeOrders: r.lifetime_orders as number | null },
+      ])
+    );
+    for (const row of asinRowList) {
+      const rollup = asinRollupById.get(row.id);
+      performanceById.set(row.id, {
+        lifetimeClicks: rollup?.lifetimeClicks ?? null,
+        lifetimeOrders: rollup?.lifetimeOrders ?? null,
+        lifetimeSpend: rollup?.lifetimeSpend ?? null,
+        lastClicks: row.last_clicks ?? null,
+        lastSpend: row.last_spend ?? null,
+        lastSales: row.last_sales ?? null,
+        lastOrders: row.last_orders ?? null,
+        resultsUpdatedAt: row.results_updated_at ?? null,
+      });
+    }
+  }
+
+  const asinBank: CompetitorAsin[] = asinRowList.map((row) => ({
     id: row.id,
     book_id: bookId,
     competitor_asin: row.competitor_asin,
@@ -177,5 +258,5 @@ export async function loadCampaignContext(
     reviewSnippets: snapshot.reviewSnippets,
   });
 
-  return { book, campaignBook, bank, asinBank, siblingBooks, negatives, anchors };
+  return { book, campaignBook, bank, asinBank, siblingBooks, negatives, anchors, performanceById };
 }

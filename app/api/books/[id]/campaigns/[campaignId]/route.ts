@@ -5,6 +5,10 @@ import { loadCampaignContext } from "@/lib/campaignContext";
 import { toCsv } from "@/lib/bulksheetSchema";
 import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
 import { diffCampaignTargets, targetKey, type DiffCampaignTarget } from "@/lib/campaignDiff";
+import { isOpenRouterConfigured } from "@/lib/llmClient";
+import { rebalanceCampaignTargets, type RebalanceCandidate } from "@/lib/campaignRebalance";
+import { scoreForRank } from "@/lib/keywordCapAndRank";
+import type { KeywordPerformance } from "@/lib/recommendations";
 import { SINGLE_AD_GROUP_LABEL, type CampaignType } from "@/lib/campaignSelection";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import type { MatchType } from "@/lib/types";
@@ -132,7 +136,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const context = await loadCampaignContext(supabase, bookId, user.id);
     if (!context) return Response.json({ error: "Book not found" }, { status: 404 });
-    const { campaignBook, bank, asinBank, siblingBooks, negatives, anchors } = context;
+    const { campaignBook, bank, asinBank, siblingBooks, negatives, anchors, performanceById: rawPerformanceById } = context;
+
+    const { data: bookAcosRow } = await supabase.from("books").select("target_acos").eq("id", bookId).eq("user_id", user.id).maybeSingle();
+    const targetAcos = typeof bookAcosRow?.target_acos === "number" ? bookAcosRow.target_acos : 0.3;
 
     const plans = buildCampaignPlans({
       book: campaignBook,
@@ -144,7 +151,84 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       dailyBudgetPerCampaign: campaign.daily_budget,
       includeAutoDiscovery: false,
     });
-    const plan = plans.find((p) => p.campaignType === campaignType);
+    let plan = plans.find((p) => p.campaignType === campaignType);
+
+    // Update Campaign's "replace what isn't working" step: swap targets
+    // that real results (lib/recommendations.ts's archive rule) flag as
+    // underperforming for the best untapped candidates from the rest of the
+    // active bank ("ready"), keeping the campaign between 15 and 25 terms.
+    if (plan) {
+      const bidById = new Map(bank.map((k) => [k.id, k.bid]));
+      const performanceById = new Map<string, KeywordPerformance>();
+      for (const k of bank) {
+        const perf = rawPerformanceById.get(k.id);
+        performanceById.set(k.id, {
+          id: k.id,
+          bid: k.bid ?? null,
+          status: k.status,
+          campaignType,
+          resultsUpdatedAt: perf?.resultsUpdatedAt ?? null,
+          lifetimeClicks: perf?.lifetimeClicks ?? null,
+          lifetimeOrders: perf?.lifetimeOrders ?? null,
+          lifetimeSpend: perf?.lifetimeSpend ?? null,
+          lastClicks: perf?.lastClicks ?? null,
+          lastSpend: perf?.lastSpend ?? null,
+          lastSales: perf?.lastSales ?? null,
+          lastOrders: perf?.lastOrders ?? null,
+        });
+      }
+      for (const a of asinBank) {
+        const perf = rawPerformanceById.get(a.id);
+        performanceById.set(a.id, {
+          id: a.id,
+          bid: a.bid ?? null,
+          status: a.status === "active" || a.status === "paused" ? a.status : "active",
+          resultsUpdatedAt: perf?.resultsUpdatedAt ?? null,
+          lifetimeClicks: perf?.lifetimeClicks ?? null,
+          lifetimeOrders: perf?.lifetimeOrders ?? null,
+          lifetimeSpend: perf?.lifetimeSpend ?? null,
+          lastClicks: perf?.lastClicks ?? null,
+          lastSpend: perf?.lastSpend ?? null,
+          lastSales: perf?.lastSales ?? null,
+          lastOrders: perf?.lastOrders ?? null,
+        });
+      }
+
+      const currentIds = new Set(plan.targets.map((t) => t.keywordId ?? t.competitorAsinId).filter(Boolean));
+      const currentTexts = new Set(plan.targets.map((t) => t.text));
+
+      const readyKeywords: RebalanceCandidate[] = bank
+        .filter((k) => k.status === "active" && !currentIds.has(k.id) && !currentTexts.has(k.text))
+        .map((k) => ({
+          keywordId: k.id,
+          text: k.text,
+          matchType: k.matchType,
+          bid: bidById.get(k.id) ?? null,
+          adGroup,
+          score: scoreForRank(k, anchors) + (rawPerformanceById.get(k.id)?.lifetimeOrders ?? 0) * 10,
+        }));
+      const readyAsins: RebalanceCandidate[] = asinBank
+        .filter((a) => a.status === "active" && !currentIds.has(a.id))
+        .map((a) => ({
+          competitorAsinId: a.id,
+          text: `asin="${a.competitor_asin}"`,
+          targetingExpression: `asin="${a.competitor_asin}"`,
+          bid: a.bid ?? null,
+          adGroup,
+          score: -(a.mean_rank ?? 999) + (rawPerformanceById.get(a.id)?.lifetimeOrders ?? 0) * 10,
+        }));
+      const ready = campaignType === "rival_asin_offensive" || campaignType === "catalog_cross_sell" ? readyAsins : readyKeywords;
+
+      const rebalanced = await rebalanceCampaignTargets({
+        campaignName: campaign.name,
+        current: plan.targets.map((t) => ({ ...t, score: 0 })),
+        ready,
+        performanceById,
+        targetAcos,
+        useLlm: isOpenRouterConfigured(),
+      });
+      plan = { ...plan, targets: rebalanced.targets };
+    }
 
     const current: DiffCampaignTarget[] = (plan?.targets ?? []).map((t) => ({
       keywordId: t.keywordId,

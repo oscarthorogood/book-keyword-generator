@@ -11,7 +11,9 @@ import {
   Rocket,
   RefreshCw,
   Sparkles,
+  Upload,
 } from "lucide-react";
+import ResultsUploadModal from "./ResultsUploadModal";
 
 interface Campaign {
   id: string;
@@ -56,6 +58,7 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
   const [updatingCampaigns, setUpdatingCampaigns] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [showResultsUpload, setShowResultsUpload] = useState(false);
 
   const fetchCampaigns = useCallback(async (): Promise<Campaign[] | null> => {
     const res = await fetch(`/api/books/${bookId}/campaigns`);
@@ -226,13 +229,28 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
 
   const exportable = campaigns.filter((c) => c.bulksheet_path);
 
-  function exportCampaigns() {
+  async function exportCampaigns() {
     if (exportable.length === 0) {
       setNotice("No campaign bulksheets to export yet — create or update a campaign first.");
       return;
     }
-    for (const c of exportable) {
-      window.open(`/api/books/${bookId}/campaigns/${c.id}/download`, "_blank", "noopener");
+    setError(null);
+    try {
+      const res = await fetch(`/api/books/${bookId}/campaigns/export`);
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? "Failed to export campaigns");
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "campaigns-export.xlsx";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch {
+      setError("Failed to export campaigns");
     }
   }
 
@@ -275,6 +293,23 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
             </span>
           </div>
           <span className="text-md font-semibold">{refreshingMeta ? "Re-fetching…" : "Refresh metadata"}</span>
+        </button>
+
+        <button
+          onClick={() => {
+            setError(null);
+            setNotice(null);
+            setShowResultsUpload(true);
+          }}
+          className="action-card action-card-secondary"
+          title="Upload an Amazon Search Term Report to feed Update Campaigns real performance data"
+        >
+          <div className="flex items-start justify-between">
+            <span className="icon-tile">
+              <Upload size={20} style={{ color: "var(--icon-active)" }} />
+            </span>
+          </div>
+          <span className="text-md font-semibold">Upload results</span>
         </button>
 
         <button onClick={() => createCampaigns(false)} disabled={creatingCampaigns} className="action-card">
@@ -337,6 +372,17 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
           <CheckCircle2 size={18} className="mt-0.5 shrink-0" />
           <p className="flex-1">{notice}</p>
         </div>
+      )}
+
+      {showResultsUpload && (
+        <ResultsUploadModal
+          bookId={bookId}
+          onClose={() => setShowResultsUpload(false)}
+          onImported={() => {
+            setNotice("Results imported — Update campaigns will now weigh real performance.");
+            onDataChanged();
+          }}
+        />
       )}
     </div>
   );
