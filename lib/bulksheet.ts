@@ -19,26 +19,22 @@
  * source supplied one.
  */
 
+import {
+  BULKSHEET_COLUMNS,
+  buildAdGroupRow,
+  buildCampaignRow,
+  buildKeywordRow,
+  buildNegativeKeywordRow,
+  buildProductTargetingRow,
+  toCsv,
+  type BulksheetRow,
+} from "./bulksheetSchema";
 import type { NegativeKeyword } from "./negativeKeywords";
 import type { BrandTarget, ProductTarget } from "./productTargets";
 import type { MatchType } from "./types";
 
-export const BULKSHEET_COLUMNS = [
-  "Product",
-  "Entity",
-  "Operation",
-  "Campaign Name",
-  "Ad Group Name",
-  "Keyword or Product Targeting",
-  "Match Type",
-  "Bid",
-  "Daily Budget",
-  "Campaign Targeting Type",
-  "State",
-  "Source",
-] as const;
-
-export type BulksheetRow = Record<(typeof BULKSHEET_COLUMNS)[number], string>;
+export { BULKSHEET_COLUMNS };
+export type { BulksheetRow };
 
 export interface ExportKeyword {
   text: string;
@@ -59,8 +55,6 @@ export interface BulksheetInput {
   dailyBudget?: number;
   defaultBid?: number;
 }
-
-const PRODUCT = "Sponsored Products";
 
 /**
  * Manual campaigns default to $100/day (brief F11): the $10 default this
@@ -90,20 +84,6 @@ function campaignName(bookTitle: string, suffix: string): string {
   return `${title} – ${suffix}`;
 }
 
-function emptyRow(): BulksheetRow {
-  return Object.fromEntries(BULKSHEET_COLUMNS.map((column) => [column, ""])) as BulksheetRow;
-}
-
-function money(value: number | null | undefined, fallback: number): string {
-  const amount = typeof value === "number" && Number.isFinite(value) && value > 0 ? value : fallback;
-  return amount.toFixed(2);
-}
-
-/** Ads bulk sheets use "enabled"/"paused"; the app's other statuses have no upload meaning. */
-function stateFor(status: string | null | undefined): string {
-  return status === "paused" ? "paused" : "enabled";
-}
-
 /**
  * Builds the full row set: a campaign + ad group header for each group that
  * has content, then its keywords, negatives and targets.
@@ -118,46 +98,27 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
   const compNames = keywords.filter((keyword) => keyword.group === "comp-names");
 
   const addCampaign = (name: string, targetingType: string) => {
-    rows.push({
-      ...emptyRow(),
-      Product: PRODUCT,
-      Entity: "Campaign",
-      Operation: "create",
-      "Campaign Name": name,
-      "Daily Budget": dailyBudget.toFixed(2),
-      "Campaign Targeting Type": targetingType,
-      State: "enabled",
-    });
+    rows.push(buildCampaignRow({ name, dailyBudget, targetingType }));
   };
 
   const addAdGroup = (campaign: string, adGroup: string) => {
-    rows.push({
-      ...emptyRow(),
-      Product: PRODUCT,
-      Entity: "Ad Group",
-      Operation: "create",
-      "Campaign Name": campaign,
-      "Ad Group Name": adGroup,
-      Bid: defaultBid.toFixed(2),
-      State: "enabled",
-    });
+    rows.push(buildAdGroupRow({ campaign, adGroup, bid: defaultBid }));
   };
 
   const addKeywordRows = (campaign: string, adGroup: string, entries: ExportKeyword[]) => {
     for (const entry of entries) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Keyword",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": adGroup,
-        "Keyword or Product Targeting": entry.text,
-        "Match Type": entry.matchType,
-        Bid: money(entry.bid, defaultBid),
-        State: stateFor(entry.status),
-        Source: entry.source ?? "",
-      });
+      rows.push(
+        buildKeywordRow({
+          campaign,
+          adGroup,
+          text: entry.text,
+          matchType: entry.matchType,
+          bid: entry.bid,
+          defaultBid,
+          status: entry.status,
+          source: entry.source,
+        })
+      );
     }
   };
 
@@ -168,18 +129,15 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
   // campaign this run creates gets the same negative list.
   const addNegativeRows = (campaign: string, adGroup: string) => {
     for (const negative of negatives) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Negative Keyword",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": adGroup,
-        "Keyword or Product Targeting": negative.text,
-        "Match Type": `negative ${negative.matchType}`,
-        State: "enabled",
-        Source: negative.reason,
-      });
+      rows.push(
+        buildNegativeKeywordRow({
+          campaign,
+          adGroup,
+          text: negative.text,
+          matchType: negative.matchType,
+          reason: negative.reason,
+        })
+      );
     }
   };
 
@@ -206,40 +164,30 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
   // No Ads API involved: this is bulksheet-only, same as everything else here.
   if (descriptive.length > 0 || compNames.length > 0) {
     const campaign = campaignName(bookTitle, "Auto Discovery");
-    const autoBudget = Math.max(AUTO_BUDGET_MIN, Math.round(dailyBudget * AUTO_BUDGET_RATIO * 100) / 100);
-    rows.push({
-      ...emptyRow(),
-      Product: PRODUCT,
-      Entity: "Campaign",
-      Operation: "create",
-      "Campaign Name": campaign,
-      "Daily Budget": autoBudget.toFixed(2),
-      "Campaign Targeting Type": "auto",
-      State: "enabled",
-    });
+    const autoBudget = Math.max(
+      AUTO_BUDGET_MIN,
+      Math.round(dailyBudget * AUTO_BUDGET_RATIO * 100) / 100
+    );
+    rows.push(buildCampaignRow({ name: campaign, dailyBudget: autoBudget, targetingType: "auto" }));
     for (const group of AUTO_TARGETING_GROUPS) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Ad Group",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": group.label,
-        Bid: money(defaultBid * group.bidMultiplier, defaultBid),
-        State: "enabled",
-      });
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Product Targeting",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": group.label,
-        "Keyword or Product Targeting": `targetingExpression="${group.expression}"`,
-        Bid: money(defaultBid * group.bidMultiplier, defaultBid),
-        State: "enabled",
-        Source: "auto",
-      });
+      rows.push(
+        buildAdGroupRow({
+          campaign,
+          adGroup: group.label,
+          bid: defaultBid * group.bidMultiplier,
+          fallbackBid: defaultBid,
+        })
+      );
+      rows.push(
+        buildProductTargetingRow({
+          campaign,
+          adGroup: group.label,
+          targetingExpression: `targetingExpression="${group.expression}"`,
+          bid: defaultBid * group.bidMultiplier,
+          fallbackBid: defaultBid,
+          source: "auto",
+        })
+      );
     }
     addNegativeRows(campaign, AUTO_TARGETING_GROUPS[0].label);
   }
@@ -251,50 +199,31 @@ export function buildBulksheetRows(input: BulksheetInput): BulksheetRow[] {
     addNegativeRows(campaign, "ASIN & brand targets");
 
     for (const target of productTargets) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Product Targeting",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": "ASIN & brand targets",
-        "Keyword or Product Targeting": `asin="${target.asin}"`,
-        Bid: defaultBid.toFixed(2),
-        State: "enabled",
-        Source: target.title ?? "",
-      });
+      rows.push(
+        buildProductTargetingRow({
+          campaign,
+          adGroup: "ASIN & brand targets",
+          targetingExpression: `asin="${target.asin}"`,
+          bid: defaultBid,
+          source: target.title ?? "",
+        })
+      );
     }
 
     for (const target of brandTargets) {
-      rows.push({
-        ...emptyRow(),
-        Product: PRODUCT,
-        Entity: "Product Targeting",
-        Operation: "create",
-        "Campaign Name": campaign,
-        "Ad Group Name": "ASIN & brand targets",
-        "Keyword or Product Targeting": `brand="${target.brand}"`,
-        Bid: defaultBid.toFixed(2),
-        State: "enabled",
-        Source: `${target.titles} comparable title${target.titles === 1 ? "" : "s"}`,
-      });
+      rows.push(
+        buildProductTargetingRow({
+          campaign,
+          adGroup: "ASIN & brand targets",
+          targetingExpression: `brand="${target.brand}"`,
+          bid: defaultBid,
+          source: `${target.titles} comparable title${target.titles === 1 ? "" : "s"}`,
+        })
+      );
     }
   }
 
   return rows;
-}
-
-function escapeCsv(value: string): string {
-  return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
-}
-
-/** Renders rows as CSV, header first. */
-export function toCsv(rows: BulksheetRow[]): string {
-  const lines = [BULKSHEET_COLUMNS.join(",")];
-  for (const row of rows) {
-    lines.push(BULKSHEET_COLUMNS.map((column) => escapeCsv(row[column] ?? "")).join(","));
-  }
-  return lines.join("\n");
 }
 
 /** One call from keywords to a downloadable bulksheet CSV. */

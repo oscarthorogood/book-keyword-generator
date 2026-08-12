@@ -6,7 +6,7 @@ All rows currently ship as commits on PR [#42](https://github.com/oscarthorogood
 
 - [x] **PR 0** — Preflight: confirm live-DB unknowns, write `docs/CAMPAIGNS-PREFLIGHT.md`. No code.
 - [x] **PR 1** — `competitor_keywords` corrective migration (`sql/20-fix-competitor-keywords-drift.sql`). Also bundled the `sql/19` source-check drift found in the same audit, by user decision.
-- [ ] **PR 2** — Extract the bulksheet column contract into `lib/bulksheetSchema.ts`. No behaviour change.
+- [x] **PR 2** — Extracted the bulksheet column contract into `lib/bulksheetSchema.ts` (columns, row type, `PRODUCT`, `toCsv`, and one pure builder per entity: campaign/ad group/keyword/negative/product-targeting). `lib/bulksheet.ts` now calls these instead of building rows inline. No behaviour change — `tests/listingPipeline.test.ts`'s existing row/CSV assertions pass unchanged, plus 8 new tests in `tests/bulksheetSchema.test.ts`.
 - [ ] **PR 3** — Prerequisite A: Product Ad rows, SKU/ASIN column, drop `Source` column, fix `Operation`/negative match-type casing. `*-review.csv` + `*-upload.xlsx`.
 - [ ] **PR 3.5** — Human gate: upload a generated file to Amazon in draft, confirm accepted. *(Not automatable — needs a human with Amazon Ads access.)*
 - [ ] **PR 4** — Per-campaign negative lists with `campaign`/`ad_group` scope.
