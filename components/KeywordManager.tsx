@@ -15,6 +15,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import CampaignActions from "./CampaignActions";
 import CannibalizationPanel from "./CannibalizationPanel";
 import RecommendationsPanel from "./RecommendationsPanel";
 
@@ -447,6 +448,7 @@ export default function KeywordManager({
 
       <CannibalizationPanel bookId={bookId} onResolved={reload} />
       <RecommendationsPanel bookId={bookId} />
+      <CampaignActions bookId={bookId} />
 
       {/* Primary actions, as the reference screens' action-card row. */}
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
