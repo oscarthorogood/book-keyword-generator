@@ -319,7 +319,7 @@ export async function getSerpApiAmazonAutocomplete(
   const data = await callSerpApi({
     engine: "amazon_autocomplete",
     amazon_domain: domainFor(marketplace),
-    q: seed,
+    k: seed,
   });
   if (!data) return [];
   return asStringArray(data.suggestions, 20);
