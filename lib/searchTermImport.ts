@@ -6,9 +6,19 @@
  */
 
 import { normalize } from "./keywordMerge";
-import { KeywordCandidate, NegativeSuggestion } from "./types";
+import { KeywordCandidate, MatchType, NegativeSuggestion } from "./types";
 
-/** One normalized row from a Search Term Report CSV/export. */
+/**
+ * One normalized row from a Search Term Report CSV/export.
+ *
+ * `text` is the *customer's* search term (buyer-intent discovery input, used
+ * by buildSearchTermReportCandidates below). `campaignName`/`adGroupName`/
+ * `targeting`/`matchType` are the *parent target's* identity — the
+ * keyword/product-target that actually served the ad and matched this
+ * search term — captured for campaigns spec §5's performance rollup
+ * (lib/resultsMatching.ts). A report always has both; this parser
+ * previously discarded the parent identity entirely.
+ */
 export interface SearchTermReportRow {
   text: string;
   clicks: number;
@@ -16,6 +26,13 @@ export interface SearchTermReportRow {
   cost: number;
   /** Advertising cost of sale, 0-1 (e.g. 0.25 = 25%). */
   acos: number;
+  campaignName?: string;
+  adGroupName?: string;
+  /** The keyword text or targeting expression that matched (Amazon's "Targeting" column) — not the customer's search term. */
+  targeting?: string;
+  matchType?: MatchType;
+  impressions?: number;
+  sales?: number;
 }
 
 /** Minimum orders for a search term to be trusted as a buyer-intent keyword. */
@@ -52,6 +69,16 @@ export function parseSearchTermReportRows(
     return 0;
   };
 
+  const pickString = (row: Record<string, unknown>, keys: string[]): string | undefined => {
+    const value = pick(row, keys);
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  };
+  const toMatchType = (value: string | undefined): MatchType | undefined => {
+    if (!value) return undefined;
+    const lower = value.toLowerCase();
+    return lower === "exact" || lower === "phrase" || lower === "broad" ? lower : undefined;
+  };
+
   const rows: SearchTermReportRow[] = [];
   for (const raw of rawRows) {
     const text = pick(raw, ["Customer Search Term", "Search Term", "text", "searchTerm", "query"]);
@@ -63,6 +90,12 @@ export function parseSearchTermReportRows(
       orders: toNumber(pick(raw, ["7 Day Total Orders (#)", "Orders", "orders"])),
       cost: toNumber(pick(raw, ["Spend", "Cost", "cost"])),
       acos: toNumber(pick(raw, ["ACOS", "Acos", "acos", "7 Day Advertising Cost of Sales (ACOS)"])),
+      campaignName: pickString(raw, ["Campaign Name", "campaignName"]),
+      adGroupName: pickString(raw, ["Ad Group Name", "adGroupName"]),
+      targeting: pickString(raw, ["Targeting", "targeting"]),
+      matchType: toMatchType(pickString(raw, ["Match Type", "matchType"])),
+      impressions: toNumber(pick(raw, ["Impressions", "impressions"])),
+      sales: toNumber(pick(raw, ["7 Day Total Sales", "Sales", "sales"])),
     });
   }
   return rows;
