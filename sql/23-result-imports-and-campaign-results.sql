@@ -46,10 +46,16 @@ CREATE TABLE IF NOT EXISTS campaign_results (
   keyword_id UUID REFERENCES keywords(id) ON DELETE SET NULL,
   competitor_asin_id UUID REFERENCES competitor_asins(id) ON DELETE SET NULL,
 
-  campaign_name TEXT,
-  ad_group_name TEXT,
-  keyword_text TEXT,
-  match_type TEXT,
+  -- NOT NULL DEFAULT '' (not nullable) so the unique index below can be a
+  -- plain column list instead of wrapping every column in coalesce(...):
+  -- Postgres CAN target an expression-based unique index via ON CONFLICT,
+  -- but the Supabase JS client's .upsert({ onConflict }) only ever emits a
+  -- plain column list, so an expression-based index is unusable from the
+  -- app layer (PR 8b's import route needs a working upsert).
+  campaign_name TEXT NOT NULL DEFAULT '',
+  ad_group_name TEXT NOT NULL DEFAULT '',
+  keyword_text TEXT NOT NULL DEFAULT '',
+  match_type TEXT NOT NULL DEFAULT '',
   targeting_expression TEXT,
 
   report_start DATE NOT NULL,
@@ -74,8 +80,7 @@ CREATE TABLE IF NOT EXISTS campaign_results (
 -- (sql/24-keyword-result-rollups.sql) or in TypeScript.
 
 CREATE UNIQUE INDEX IF NOT EXISTS uq_campaign_results_period ON campaign_results (
-  book_id, coalesce(campaign_name, ''), coalesce(ad_group_name, ''),
-  coalesce(keyword_text, ''), coalesce(match_type, ''), report_start, report_end
+  book_id, campaign_name, ad_group_name, keyword_text, match_type, report_start, report_end
 );
 CREATE INDEX IF NOT EXISTS idx_campaign_results_keyword ON campaign_results(keyword_id);
 CREATE INDEX IF NOT EXISTS idx_campaign_results_asin ON campaign_results(competitor_asin_id);
