@@ -57,15 +57,26 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  const loadCampaigns = useCallback(async () => {
+  const fetchCampaigns = useCallback(async (): Promise<Campaign[] | null> => {
     const res = await fetch(`/api/books/${bookId}/campaigns`);
     const body = await res.json().catch(() => ({}));
-    if (Array.isArray(body.campaigns)) setCampaigns(body.campaigns);
+    return Array.isArray(body.campaigns) ? body.campaigns : null;
   }, [bookId]);
 
+  const loadCampaigns = useCallback(async () => {
+    const loaded = await fetchCampaigns();
+    if (loaded) setCampaigns(loaded);
+  }, [fetchCampaigns]);
+
   useEffect(() => {
-    void loadCampaigns();
-  }, [loadCampaigns]);
+    let active = true;
+    fetchCampaigns().then((loaded) => {
+      if (active && loaded) setCampaigns(loaded);
+    });
+    return () => {
+      active = false;
+    };
+  }, [fetchCampaigns]);
 
   async function generateAll() {
     setGenerating(true);
