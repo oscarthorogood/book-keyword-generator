@@ -34,9 +34,13 @@ CREATE TABLE IF NOT EXISTS keyword_recommendations (
 
 -- Stops the recommendations panel filling with the same suggestion after
 -- every import — only one pending recommendation of a given type per
--- keyword at a time; regeneration supersedes rather than duplicates (PR 10).
+-- keyword (or per competitor ASIN — the spec's DDL only covers keywords;
+-- recommendForCompetitorAsin, lib/recommendations.ts, needs the same dedupe)
+-- at a time; regeneration supersedes rather than duplicates (PR 10).
 CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_rec_per_keyword_type
   ON keyword_recommendations (keyword_id, type) WHERE status = 'pending';
+CREATE UNIQUE INDEX IF NOT EXISTS uq_pending_rec_per_asin_type
+  ON keyword_recommendations (competitor_asin_id, type) WHERE status = 'pending';
 CREATE INDEX IF NOT EXISTS idx_keyword_recommendations_book ON keyword_recommendations(book_id);
 
 ALTER TABLE keyword_recommendations ENABLE ROW LEVEL SECURITY;
