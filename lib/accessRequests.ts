@@ -1,14 +1,11 @@
-import { randomUUID } from "crypto";
-import { jwtVerify, SignJWT } from "jose";
-import { AUTH_CONFIG } from "./config";
 import { supabaseAdmin } from "./supabaseAdmin";
 
 /**
- * Allowlist gating magic-link sign-in.
- *
- * An address is only ever sent a login link once it has status 'approved'.
- * A first-time address is recorded as 'pending' and the admin is emailed a
- * pair of signed approve/deny links.
+ * Sign-in is open to anyone with a plausible email — there's no approval
+ * gate. This table now doubles as a usage log: every sign-in request bumps
+ * `sign_in_count` and `last_signed_in_at`, which is what the admin console
+ * reads to show who's actually using the app. An admin can still block a
+ * specific address by setting its status to 'denied'.
  *
  * SERVER ONLY — every function here uses the service-role client.
  */
@@ -20,17 +17,10 @@ export type AccessStatus = "pending" | "approved" | "denied";
 export interface AccessRequest {
   email: string;
   status: AccessStatus;
-  decision_token: string | null;
   requested_at: string;
-  notified_at: string | null;
-  decided_at: string | null;
+  sign_in_count: number;
+  last_signed_in_at: string | null;
 }
-
-/** Don't re-email the admin more than once per hour for the same address. */
-const RENOTIFY_AFTER_MS = 60 * 60 * 1000;
-
-/** Approve/deny links stop working after this long. */
-const DECISION_TOKEN_TTL = "14d";
 
 /**
  * Lowercase and trim. Every lookup and insert goes through this so
@@ -62,79 +52,60 @@ export async function findAccessRequest(
 }
 
 /**
- * Record a first-time address as pending. Returns the stored row, including
- * the nonce that the approve/deny links are signed against.
+ * Record a sign-in request: first time seeing this address, insert it as
+ * approved; otherwise bump its usage counters. A row already marked 'denied'
+ * is left untouched — the caller checks the returned status and skips
+ * sending a link when blocked.
  */
-export async function createPendingRequest(
-  email: string
-): Promise<AccessRequest> {
+export async function recordSignInAttempt(email: string): Promise<AccessRequest> {
+  const normalized = normalizeEmail(email);
+  const existing = await findAccessRequest(normalized);
+  const now = new Date().toISOString();
+
+  if (!existing) {
+    const { data, error } = await supabaseAdmin()
+      .from(TABLE)
+      .insert({
+        email: normalized,
+        status: "approved",
+        sign_in_count: 1,
+        last_signed_in_at: now,
+      })
+      .select("*")
+      .single();
+
+    if (error) {
+      throw new Error(`Could not record sign-in: ${error.message}`);
+    }
+    return data as AccessRequest;
+  }
+
+  if (existing.status === "denied") {
+    return existing;
+  }
+
   const { data, error } = await supabaseAdmin()
     .from(TABLE)
-    .insert({ email: normalizeEmail(email), status: "pending" })
+    .update({
+      last_signed_in_at: now,
+      sign_in_count: existing.sign_in_count + 1,
+    })
+    .eq("email", normalized)
     .select("*")
     .single();
 
   if (error) {
-    throw new Error(`Could not record access request: ${error.message}`);
+    throw new Error(`Could not record sign-in: ${error.message}`);
   }
   return data as AccessRequest;
 }
 
-/** True when enough time has passed to email the admin about this row again. */
-export function shouldRenotify(request: AccessRequest): boolean {
-  if (request.status !== "pending") return false;
-  if (!request.notified_at) return true;
-  return Date.now() - new Date(request.notified_at).getTime() > RENOTIFY_AFTER_MS;
-}
-
-export async function markNotified(email: string): Promise<void> {
-  const { error } = await supabaseAdmin()
-    .from(TABLE)
-    .update({ notified_at: new Date().toISOString() })
-    .eq("email", normalizeEmail(email));
-  if (error) {
-    // Non-fatal: the admin email already went out, this only affects throttling.
-    console.error("Could not update notified_at:", error.message);
-  }
-}
-
-/**
- * Apply a decision, but only to a row that is still pending and still holds
- * the nonce the link was signed against. The conditional update is what makes
- * the link single-use: a second click matches zero rows.
- */
-export async function applyDecision(
-  email: string,
-  nonce: string,
-  status: Exclude<AccessStatus, "pending">
-): Promise<AccessRequest | null> {
-  const { data, error } = await supabaseAdmin()
-    .from(TABLE)
-    .update({
-      status,
-      decided_at: new Date().toISOString(),
-      // Column is NOT NULL, so burn the token by rotating it rather than
-      // nulling it — either way the nonce the link was signed against stops matching.
-      decision_token: randomUUID(),
-    })
-    .eq("email", normalizeEmail(email))
-    .eq("decision_token", nonce)
-    .eq("status", "pending")
-    .select("*")
-    .maybeSingle();
-
-  if (error) {
-    throw new Error(`Could not apply decision: ${error.message}`);
-  }
-  return (data as AccessRequest) ?? null;
-}
-
-/** Every request, newest first. Admin view. */
+/** Every known address, most recently active first. Admin view. */
 export async function listAccessRequests(): Promise<AccessRequest[]> {
   const { data, error } = await supabaseAdmin()
     .from(TABLE)
     .select("*")
-    .order("requested_at", { ascending: false });
+    .order("last_signed_in_at", { ascending: false, nullsFirst: false });
 
   if (error) {
     throw new Error(`Could not list access requests: ${error.message}`);
@@ -143,11 +114,8 @@ export async function listAccessRequests(): Promise<AccessRequest[]> {
 }
 
 /**
- * Set a status directly, bypassing the nonce check the email links use. This
- * is the admin-console path, where authorization is the caller's session.
- *
- * Unlike `applyDecision` this works on an already-decided row, which is what
- * makes revoking (approved -> denied) and reinstating possible.
+ * Block or unblock an address. This is the admin-console path, where
+ * authorization is the caller's session rather than a signed link.
  */
 export async function setAccessStatus(
   email: string,
@@ -155,13 +123,7 @@ export async function setAccessStatus(
 ): Promise<AccessRequest | null> {
   const { data, error } = await supabaseAdmin()
     .from(TABLE)
-    .update({
-      status,
-      decided_at: new Date().toISOString(),
-      // Burn any outstanding email link so it can't undo this later. Column
-      // is NOT NULL, so rotate to a fresh token rather than nulling it.
-      decision_token: randomUUID(),
-    })
+    .update({ status })
     .eq("email", normalizeEmail(email))
     .select("*")
     .maybeSingle();
@@ -210,44 +172,5 @@ export async function destroyAuthUser(email: string): Promise<void> {
       `Could not remove auth user for ${target}:`,
       err instanceof Error ? err.message : err
     );
-  }
-}
-
-interface DecisionClaims {
-  email: string;
-  action: Exclude<AccessStatus, "pending">;
-  nonce: string;
-}
-
-/**
- * Sign an approve/deny link payload. Signed with AUTH_SECRET so a guessed URL
- * can't grant access, and bound to the row's nonce so it can only be used once.
- */
-export async function signDecisionToken(
-  claims: DecisionClaims
-): Promise<string> {
-  return new SignJWT({ ...claims })
-    .setProtectedHeader({ alg: "HS256" })
-    .setIssuedAt()
-    .setExpirationTime(DECISION_TOKEN_TTL)
-    .sign(AUTH_CONFIG.secretKey());
-}
-
-export async function verifyDecisionToken(
-  token: string
-): Promise<DecisionClaims | null> {
-  try {
-    const { payload } = await jwtVerify(token, AUTH_CONFIG.secretKey());
-    const { email, action, nonce } = payload as Partial<DecisionClaims>;
-    if (
-      typeof email !== "string" ||
-      typeof nonce !== "string" ||
-      (action !== "approved" && action !== "denied")
-    ) {
-      return null;
-    }
-    return { email, action, nonce };
-  } catch {
-    return null;
   }
 }

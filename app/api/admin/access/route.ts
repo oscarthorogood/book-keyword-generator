@@ -7,14 +7,14 @@ import {
   setAccessStatus,
 } from "@/lib/accessRequests";
 import { isAdminEmail, isCurrentUserAdmin } from "@/lib/admin";
-import { sendApprovedEmail } from "@/lib/email";
+import { sendReinstatedEmail } from "@/lib/email";
 import { createMagicLink, siteUrl } from "@/lib/magicLink";
 
 /**
- * Admin console API: list access requests, and approve / deny / revoke.
+ * Admin console API: list users and their usage, and block / unblock an
+ * address. Sign-up itself is open — there's nothing left to approve.
  *
- * Authorization here is the caller's session matching ADMIN_EMAIL — not a
- * signed token like the one-click email links use.
+ * Authorization here is the caller's session matching ADMIN_EMAIL.
  */
 
 export async function GET() {
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
   // against it is the same as matching the caller's own address.
   if (status === "denied" && isAdminEmail(email)) {
     return NextResponse.json(
-      { error: "You can't revoke your own access." },
+      { error: "You can't block your own access." },
       { status: 400 }
     );
   }
@@ -72,7 +72,7 @@ export async function POST(req: NextRequest) {
   try {
     const updated = await setAccessStatus(email, status);
     if (!updated) {
-      return NextResponse.json({ error: "No such request." }, { status: 404 });
+      return NextResponse.json({ error: "No such user." }, { status: 404 });
     }
 
     if (status === "denied") {
@@ -82,13 +82,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ request: updated, emailed: false });
     }
 
-    // Approved from the console: send them a link, same as the email flow.
+    // Unblocked from the console: send them a fresh link so they're not
+    // stuck waiting on their own next sign-in attempt.
     let emailed = false;
     try {
       const link = await createMagicLink(email, siteUrl(req.url));
-      emailed = await sendApprovedEmail({ to: email, magicLink: link });
+      emailed = await sendReinstatedEmail({ to: email, magicLink: link });
     } catch (err) {
-      console.error("Approved, but magic link failed:", err);
+      console.error("Unblocked, but magic link failed:", err);
     }
     return NextResponse.json({ request: updated, emailed });
   } catch (err) {

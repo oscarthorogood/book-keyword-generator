@@ -5,6 +5,7 @@ import { toCsv } from "@/lib/bulksheetSchema";
 import { describeExportFailure } from "@/lib/campaignExportError";
 import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
 import { loadCampaignContext } from "@/lib/campaignContext";
+import { sendCampaignActivityEmail } from "@/lib/email";
 import { describePrepare, prepareBank, type PrepareBankResult } from "@/lib/campaignPrepare";
 import type { KeywordWithRollups } from "@/lib/campaignSelection";
 import { marketplaceCurrency } from "@/lib/marketplaceCurrency";
@@ -325,6 +326,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .in("id", campaignIds)
         .select();
       if (flipError) throw new Error(flipError.message);
+
+      // Best-effort: a failed notification email should never turn a
+      // successful campaign creation into an error response.
+      try {
+        await sendCampaignActivityEmail({
+          to: user.email,
+          bookTitle: book.title ?? bookId,
+          action: "created",
+          changeLines: plans.map(
+            (p) => `${p.name}: ${p.targets.length} target(s), $${p.dailyBudget.toFixed(2)}/day`
+          ),
+          attachments: [
+            { filename: "campaigns-upload.xlsx", content: Buffer.from(xlsxBuffer).toString("base64") },
+            { filename: "campaigns-review.csv", content: Buffer.from(reviewCsv).toString("base64") },
+          ],
+        });
+      } catch (emailErr) {
+        console.error("Campaign-created email failed:", emailErr);
+      }
 
       return Response.json({
         campaigns: exportedCampaigns,

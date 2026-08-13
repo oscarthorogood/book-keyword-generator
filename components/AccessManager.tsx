@@ -7,7 +7,8 @@ export interface AccessRequest {
   email: string;
   status: "pending" | "approved" | "denied";
   requested_at: string;
-  decided_at: string | null;
+  sign_in_count: number;
+  last_signed_in_at: string | null;
 }
 
 const STATUS_BADGE: Record<AccessRequest["status"], string> = {
@@ -17,9 +18,9 @@ const STATUS_BADGE: Record<AccessRequest["status"], string> = {
 };
 
 const STATUS_LABEL: Record<AccessRequest["status"], string> = {
-  pending: "Pending",
-  approved: "Approved",
-  denied: "Revoked",
+  pending: "Active",
+  approved: "Active",
+  denied: "Blocked",
 };
 
 function formatDate(value: string | null): string {
@@ -51,12 +52,12 @@ export function AccessManager({
       const res = await fetch("/api/admin/access");
       const data = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(data.error ?? "Could not reload requests.");
+        setError(data.error ?? "Could not reload users.");
         return;
       }
       setRequests(data.requests ?? []);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Could not reload requests.");
+      setError(err instanceof Error ? err.message : "Could not reload users.");
     }
   }
 
@@ -78,9 +79,9 @@ export function AccessManager({
       setNotice(
         status === "approved"
           ? data.emailed
-            ? `${email} approved and emailed a sign-in link.`
-            : `${email} approved, but the email failed to send — they can request a link themselves.`
-          : `${email} revoked. Any active session has been ended.`
+            ? `${email} unblocked and emailed a sign-in link.`
+            : `${email} unblocked, but the email failed to send — they can request a link themselves.`
+          : `${email} blocked. Any active session has been ended.`
       );
       await reload();
     } finally {
@@ -106,9 +107,9 @@ export function AccessManager({
       {requests.length === 0 ? (
         <div className="empty-state">
           <div className="space-y-1">
-            <p className="empty-state-title">No access requests yet</p>
+            <p className="empty-state-title">No users yet</p>
             <p className="empty-state-body">
-              When someone asks for a sign-in link, they&apos;ll appear here for approval.
+              Once someone signs in, they&apos;ll appear here.
             </p>
           </div>
         </div>
@@ -120,7 +121,13 @@ export function AccessManager({
                 <th scope="col">Email</th>
                 <th scope="col">Status</th>
                 <th scope="col" className="hidden sm:table-cell">
-                  Requested
+                  Sign-ins
+                </th>
+                <th scope="col" className="hidden sm:table-cell">
+                  Last seen
+                </th>
+                <th scope="col" className="hidden sm:table-cell">
+                  First seen
                 </th>
                 <th scope="col">
                   <span className="sr-only">Actions</span>
@@ -130,6 +137,7 @@ export function AccessManager({
             <tbody>
               {requests.map((r) => {
                 const isSelf = r.email === adminEmail;
+                const blocked = r.status === "denied";
                 return (
                   <tr key={r.email}>
                     <td>
@@ -146,10 +154,12 @@ export function AccessManager({
                     <td>
                       <span className={`badge ${STATUS_BADGE[r.status]}`}>{STATUS_LABEL[r.status]}</span>
                     </td>
+                    <td className="hidden sm:table-cell">{r.sign_in_count}</td>
+                    <td className="hidden sm:table-cell">{formatDate(r.last_signed_in_at)}</td>
                     <td className="hidden sm:table-cell">{formatDate(r.requested_at)}</td>
                     <td>
                       <div className="flex items-center justify-end gap-2">
-                        {r.status !== "approved" && (
+                        {blocked && (
                           <button
                             type="button"
                             disabled={busy === r.email}
@@ -157,17 +167,18 @@ export function AccessManager({
                             className="btn btn-primary btn-sm"
                           >
                             {busy === r.email && <Loader2 size={16} className="animate-spin" />}
-                            {r.status === "denied" ? "Reinstate" : "Approve"}
+                            Unblock
                           </button>
                         )}
-                        {r.status !== "denied" && !isSelf && (
+                        {!blocked && !isSelf && (
                           <button
                             type="button"
                             disabled={busy === r.email}
                             onClick={() => decide(r.email, "denied")}
                             className="btn btn-secondary btn-sm"
                           >
-                            {r.status === "approved" ? "Revoke" : "Deny"}
+                            {busy === r.email && <Loader2 size={16} className="animate-spin" />}
+                            Block
                           </button>
                         )}
                       </div>
