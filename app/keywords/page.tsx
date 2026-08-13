@@ -1,10 +1,6 @@
-import AppShell from "@/components/AppShell";
-import AllKeywordsPage from "@/components/AllKeywordsPage";
+import { redirect } from "next/navigation";
 
+// Keywords moved into the Databases tab switcher (Enhancements spec §2).
 export default function KeywordsPage() {
-  return (
-    <AppShell active="keywords">
-      <AllKeywordsPage />
-    </AppShell>
-  );
+  redirect("/databases?tab=keywords");
 }

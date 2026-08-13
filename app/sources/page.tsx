@@ -1,10 +1,6 @@
-import AppShell from "@/components/AppShell";
-import SourcesPage from "@/components/SourcesPage";
+import { redirect } from "next/navigation";
 
+// Sources moved into the Databases tab switcher (Enhancements spec §2).
 export default function Sources() {
-  return (
-    <AppShell active="sources">
-      <SourcesPage />
-    </AppShell>
-  );
+  redirect("/databases?tab=sources");
 }

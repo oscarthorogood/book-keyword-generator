@@ -141,6 +141,170 @@ export function topKeywordsByGenre(
     .sort((a, b) => b.keywords.length - a.keywords.length);
 }
 
+export interface CampaignSummaryCampaignRow {
+  id: string;
+  status: string;
+}
+
+export interface CampaignSummaryResultRow {
+  campaign_id: string | null;
+  spend: number | string;
+  sales: number | string;
+  orders: number;
+  clicks: number;
+  impressions: number;
+  report_start: string;
+  report_end: string;
+}
+
+export interface SpendPeriod {
+  reportStart: string;
+  reportEnd: string;
+  spend: number;
+  sales: number;
+}
+
+export interface CampaignSummary {
+  totalCampaigns: number;
+  byStatus: Record<string, number>;
+  totals: { spend: number; sales: number; orders: number; clicks: number; impressions: number };
+  /** Blended ACOS across every imported result period (spend / sales), null with no sales yet. */
+  acos: number | null;
+  /** Spend/sales grouped by report period, oldest first, for the spend-over-time widget. */
+  spendByPeriod: SpendPeriod[];
+}
+
+/**
+ * Cross-book campaign spend/ACOS summary — the dashboard "Campaign
+ * performance" widget. Sums every `campaign_results` row the user has ever
+ * imported (campaigns spec §2.3), grouped by report period for the
+ * spend-over-time bars and rolled up into lifetime totals + blended ACOS.
+ */
+export function summarizeCampaigns(
+  campaigns: CampaignSummaryCampaignRow[],
+  results: CampaignSummaryResultRow[]
+): CampaignSummary {
+  const totals = { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 };
+  const byPeriod = new Map<string, SpendPeriod>();
+
+  for (const r of results) {
+    const spend = Number(r.spend ?? 0);
+    const sales = Number(r.sales ?? 0);
+    totals.spend += spend;
+    totals.sales += sales;
+    totals.orders += r.orders ?? 0;
+    totals.clicks += r.clicks ?? 0;
+    totals.impressions += r.impressions ?? 0;
+
+    const key = `${r.report_start}_${r.report_end}`;
+    const existing = byPeriod.get(key);
+    if (existing) {
+      existing.spend += spend;
+      existing.sales += sales;
+    } else {
+      byPeriod.set(key, { reportStart: r.report_start, reportEnd: r.report_end, spend, sales });
+    }
+  }
+
+  return {
+    totalCampaigns: campaigns.length,
+    byStatus: countBy(campaigns, (c) => c.status),
+    totals,
+    acos: totals.sales > 0 ? totals.spend / totals.sales : null,
+    spendByPeriod: Array.from(byPeriod.values()).sort(
+      (a, b) => new Date(a.reportStart).getTime() - new Date(b.reportStart).getTime()
+    ),
+  };
+}
+
+export interface AttentionBookRow {
+  id: string;
+  title: string;
+  total_keywords: number;
+  metadata_json: unknown;
+}
+
+export interface AttentionKeywordCountRow {
+  book_id: string;
+  status: string;
+}
+
+export interface AttentionCampaignRow {
+  book_id: string;
+  name: string;
+  last_export_error: string | null;
+}
+
+export type AttentionReason = "capture_issue" | "no_active_keywords" | "export_failed";
+
+export interface AttentionItem {
+  bookId: string;
+  bookTitle: string;
+  reason: AttentionReason;
+  detail: string;
+}
+
+const ATTENTION_REASON_LABEL: Record<AttentionReason, string> = {
+  capture_issue: "Capture issue",
+  no_active_keywords: "No active keywords",
+  export_failed: "Campaign export failed",
+};
+
+/**
+ * "Books needing attention" widget: flags books whose capture snapshot
+ * reported a problem (lib/bookSnapshot.ts's `capture.ok`), books that have
+ * keywords but none are `active` (nothing would actually get targeted), and
+ * campaigns whose last export failed (`campaigns.last_export_error`, sql/28).
+ * One book can surface more than once if it has more than one issue.
+ */
+export function booksNeedingAttention(
+  books: AttentionBookRow[],
+  keywordRows: AttentionKeywordCountRow[],
+  campaigns: AttentionCampaignRow[]
+): AttentionItem[] {
+  const items: AttentionItem[] = [];
+  const bookById = new Map(books.map((b) => [b.id, b]));
+
+  const activeCountByBook = new Map<string, number>();
+  for (const row of keywordRows) {
+    if (row.status !== "active") continue;
+    activeCountByBook.set(row.book_id, (activeCountByBook.get(row.book_id) ?? 0) + 1);
+  }
+
+  for (const book of books) {
+    const snapshot = (book.metadata_json ?? {}) as { capture?: { ok?: boolean } };
+    if (snapshot.capture?.ok === false) {
+      items.push({
+        bookId: book.id,
+        bookTitle: book.title,
+        reason: "capture_issue",
+        detail: ATTENTION_REASON_LABEL.capture_issue,
+      });
+    }
+    if (book.total_keywords > 0 && (activeCountByBook.get(book.id) ?? 0) === 0) {
+      items.push({
+        bookId: book.id,
+        bookTitle: book.title,
+        reason: "no_active_keywords",
+        detail: ATTENTION_REASON_LABEL.no_active_keywords,
+      });
+    }
+  }
+
+  for (const campaign of campaigns) {
+    if (!campaign.last_export_error) continue;
+    const book = bookById.get(campaign.book_id);
+    items.push({
+      bookId: campaign.book_id,
+      bookTitle: book?.title ?? "Unknown book",
+      reason: "export_failed",
+      detail: `${campaign.name}: ${campaign.last_export_error}`,
+    });
+  }
+
+  return items;
+}
+
 export interface RecentBookRow {
   id: string;
   title: string;

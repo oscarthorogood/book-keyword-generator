@@ -170,6 +170,8 @@ export interface CompetitorAsin {
   competitor_count: number | null;
   /** Average 1-based position across the discovery lists this ASIN appeared in. */
   mean_rank: number | null;
+  /** Broad (1) – Very specific (5) "closest match to book" rating (lib/asinSpecificity.ts, sql/29-competitor-asin-specificity.sql). Null until metadata (title/author) has been captured. */
+  specificity: number | null;
   created_at: string;
   updated_at: string;
   /** Campaigns spec §2.5 (sql/25-catalog-cross-sell-support.sql). Defaults 'rival'; 'own' marks this book's own other titles for Catalog Cross-Sell. */

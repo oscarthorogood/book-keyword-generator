@@ -45,6 +45,8 @@ interface CompetitorAsinRow {
   bid: number | null;
   rejection_reason: string | null;
   rejected_by_filter: string | null;
+  /** Broad (1) – Very specific (5) "closest match to book" rating, from lib/asinSpecificity.ts. */
+  specificity?: number | null;
   created_at: string;
 }
 
@@ -101,6 +103,8 @@ interface GenerateSummary {
   filterSummary?: {
     byVerdict: Record<string, number>;
     byFilter: Record<string, number>;
+    /** Positive-verdict codes for passed keywords — COMP_TITLE_MATCH, CORE_GENRE_MATCH, … */
+    byPassCode?: Record<string, number>;
   };
   /** True when the database predates sql/08 and only the active keywords could be stored. */
   needsFilterMigration?: boolean;
@@ -138,6 +142,11 @@ const STATUS_LABELS: Record<KeywordStatus, string> = {
 function labelForFilter(filter: string | null | undefined): string {
   if (!filter) return "";
   return filter.replace(/([A-Z])/g, " $1").toLowerCase();
+}
+
+/** Positive-verdict codes (lib/keywordFilters.ts) are SCREAMING_SNAKE_CASE; show them as words. */
+function labelForPassCode(code: string): string {
+  return code.replace(/_/g, " ").toLowerCase();
 }
 
 /** Fetches without touching state, so effects never set state synchronously. */
@@ -532,7 +541,7 @@ export default function KeywordManager({
       source: a.source,
       rejection_reason: a.rejection_reason,
       rejected_by_filter: a.rejected_by_filter,
-      specificity: null,
+      specificity: a.specificity ?? null,
       campaigns: memberships.competitorCampaigns[a.id] ?? [],
     }));
     return [...keywordRows, ...asinRows];
@@ -813,6 +822,15 @@ export default function KeywordManager({
                     .slice(0, 4)
                     .map(([filter, count]) => `${count} ${labelForFilter(filter).trim()}`)
                     .join(", ")}`}
+              </p>
+            )}
+            {summary.filterSummary?.byPassCode && Object.keys(summary.filterSummary.byPassCode).length > 0 && (
+              <p className="mt-1">
+                Why kept:{" "}
+                {Object.entries(summary.filterSummary.byPassCode)
+                  .sort((a, b) => b[1] - a[1])
+                  .map(([code, count]) => `${count} ${labelForPassCode(code)}`)
+                  .join(", ")}
               </p>
             )}
             <p className="mt-1">{summary.contributingSources.map(labelForSource).join(", ")}</p>

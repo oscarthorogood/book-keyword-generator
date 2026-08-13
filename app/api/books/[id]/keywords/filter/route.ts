@@ -5,6 +5,7 @@ import { capAndRank } from "@/lib/keywordCapAndRank";
 import { buildFilterContext, filterKeywords, type FilterableKeyword } from "@/lib/keywordFilters";
 import { BOOK_COMP_NAME_MAX, BOOK_KEYWORD_MAX } from "@/lib/keywordMerge";
 import { genreFamilySearchTerms } from "@/lib/genre";
+import { scoreSpecificity } from "@/lib/keywordSpecificity";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import type { KeywordCandidate, KeywordCategory, KeywordSource, MatchType } from "@/lib/types";
 
@@ -29,6 +30,7 @@ interface KeywordRow {
   match_type: MatchType;
   bid: number | null;
   category: string | null;
+  specificity: number | null;
 }
 
 /**
@@ -79,7 +81,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const { data: rows, error } = await supabase
       .from("keywords")
-      .select("id, text, source, status, match_type, bid, category")
+      .select("id, text, source, status, match_type, bid, category, specificity")
       .eq("book_id", bookId)
       .eq("user_id", user.id)
       .in("status", REFILTERABLE_STATUSES);
@@ -128,17 +130,33 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       reason: string | null;
       filter: string | null;
       text: string;
+      specificity: number | null;
     }
     const outcomes: RowOutcome[] = [];
     for (const result of results) {
       const row = byId.get(result.originalText);
       if (!row) continue;
+      // Re-score specificity on every filter run, not just at generation time
+      // (lib/keywordSpecificity.ts) — a rewrite (dangling-modifier completion)
+      // changes the text scoring is based on, and the book's own anchors can
+      // change between generate runs too.
+      const candidate: KeywordCandidate = {
+        text: result.text,
+        sources: (row.source ? [row.source as KeywordSource] : []) as KeywordSource[],
+        category: (row.category ?? undefined) as KeywordCategory | undefined,
+      };
       outcomes.push({
         row,
         status: verdictToStatus[result.verdict],
-        reason: result.reason ?? null,
+        // rejection_reason/rejected_by_filter record why the pipeline dropped
+        // or paused a row (§ their column comments) — a pass now carries its
+        // own positive reason/code (lib/keywordFilters.ts#assignPassReason)
+        // for the summary breakdown below, but that isn't a rejection reason
+        // and shouldn't overwrite the column for an active keyword.
+        reason: result.verdict === "pass" ? null : (result.reason ?? null),
         filter: result.filter ?? null,
         text: result.text,
+        specificity: scoreSpecificity(candidate, context.anchors),
       });
     }
 
@@ -257,13 +275,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     const updates = outcomes
-      .filter((outcome) => outcome.status !== outcome.row.status || outcome.text !== outcome.row.text)
+      .filter(
+        (outcome) =>
+          outcome.status !== outcome.row.status ||
+          outcome.text !== outcome.row.text ||
+          outcome.specificity !== outcome.row.specificity
+      )
       .map((outcome) => ({
         id: outcome.row.id,
         status: outcome.status,
         reason: outcome.reason,
         filter: outcome.filter,
         text: outcome.text,
+        specificity: outcome.specificity,
       }));
 
     const archivedByCap = outcomes.filter((outcome) => outcome.filter === "capAndRank").length;
@@ -297,11 +321,28 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           rejection_reason: update.reason,
           rejected_by_filter: update.filter,
           text: update.text,
+          specificity: update.specificity,
         })
         .eq("id", update.id)
         .eq("user_id", user.id);
 
       if (updateError) {
+        // A database from before sql/09-keyword-specificity.sql has no
+        // specificity column — retry without it rather than failing the
+        // whole row's status/text update over a missing migration.
+        if (/specificity/i.test(updateError.message)) {
+          const { error: retryError } = await supabase
+            .from("keywords")
+            .update({
+              status: update.status,
+              rejection_reason: update.reason,
+              rejected_by_filter: update.filter,
+              text: update.text,
+            })
+            .eq("id", update.id)
+            .eq("user_id", user.id);
+          if (!retryError) return true;
+        }
         // A rewrite can collide with a keyword that already exists at the new
         // text; that's a duplicate, not a failure worth aborting the run for.
         console.error(`[filter] could not update keyword ${update.id}:`, updateError.message);

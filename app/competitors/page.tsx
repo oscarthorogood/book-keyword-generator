@@ -1,10 +1,6 @@
-import AppShell from "@/components/AppShell";
-import CompetitorsOverviewPage from "@/components/CompetitorsOverviewPage";
+import { redirect } from "next/navigation";
 
+// Competitors moved into the Databases tab switcher (Enhancements spec §2).
 export default function CompetitorsPage() {
-  return (
-    <AppShell active="competitors">
-      <CompetitorsOverviewPage />
-    </AppShell>
-  );
+  redirect("/databases?tab=competitors");
 }

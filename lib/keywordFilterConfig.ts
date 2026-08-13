@@ -345,6 +345,14 @@ export const REASON_CODES = [
   "MEDIA_COLLISION",
   "PLATFORM_NOISE",
   "AUTHOR_DISAMBIGUATION",
+  // --- positive (pass) codes — mirror the negative side's specificity for
+  // why a keyword survived the pipeline, strongest signal first. ---
+  "COMP_TITLE_MATCH",
+  "SERIES_NAME_MATCH",
+  "AUTHOR_MATCH",
+  "BOOK_SPECIFIC_MATCH",
+  "CORE_GENRE_MATCH",
+  "NO_DISQUALIFIER",
 ] as const;
 export type ReasonCode = (typeof REASON_CODES)[number];
 

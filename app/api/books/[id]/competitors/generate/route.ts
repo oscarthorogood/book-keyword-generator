@@ -1,6 +1,8 @@
 import { loadBookWithSnapshot } from "@/lib/bookStore";
+import { scoreAsinSpecificity } from "@/lib/asinSpecificity";
 import { computeCompetitorBid } from "@/lib/competitorBidding";
 import { getCompetitorAsins } from "@/lib/competitorStore";
+import { buildFilterContext } from "@/lib/keywordFilters";
 import { isApprovedAuthor } from "@/lib/manualCompetitors";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import {
@@ -87,6 +89,30 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         { status: 422 }
       );
     }
+
+    // Same anchors the keyword pipeline builds from this snapshot — reused
+    // here to score each newly discovered ASIN's specificity (how closely
+    // its captured title/author matches this book), rather than a
+    // second, divergent anchor derivation.
+    const filterContext = buildFilterContext({
+      title: snapshot.title,
+      asin: snapshot.asin,
+      author: snapshot.author,
+      seriesName: snapshot.seriesName,
+      description: snapshot.description,
+      genreTerms: snapshot.genreTerms,
+      genreFamilies: snapshot.genreFamilies,
+      categoryPath: snapshot.categoryPath,
+      categories: snapshot.categories,
+      goodreadsTags: snapshot.goodreadsTags,
+      competitors: snapshot.competitors,
+      compTitles: snapshot.compTitles,
+      reviewSnippets: snapshot.reviewSnippets,
+      marketplace: snapshot.marketplace,
+      language: snapshot.language,
+      formats: snapshot.formats ?? [],
+      isKindleUnlimited: !!snapshot.isKindleUnlimited,
+    });
 
     const existing = await getCompetitorAsins(supabase, bookId, user.id);
     const existingAsins = new Set(existing.map((row) => row.competitor_asin.toUpperCase()));
@@ -375,6 +401,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           bsr: meta?.bsr ?? null,
           competitor_count: data.positions.length,
           mean_rank: meanRank,
+          specificity: scoreAsinSpecificity({ title: meta?.title ?? null, author: meta?.author ?? null }, filterContext.anchors),
           bid: computeCompetitorBid({
             price: meta?.price ?? null,
             bsr: meta?.bsr ?? null,
@@ -384,10 +411,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         };
       });
 
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from("competitor_asins")
       .upsert(rows, { onConflict: "book_id,competitor_asin", ignoreDuplicates: true })
       .select("id");
+
+    // A database from before sql/29-competitor-asin-specificity.sql has no
+    // specificity column — retry without it rather than losing the whole run.
+    if (error && /specificity/i.test(error.message)) {
+      console.error("[competitors generate] specificity column missing — apply sql/29-competitor-asin-specificity.sql:", error.message);
+      const rowsWithoutSpecificity = rows.map(({ specificity, ...row }) => {
+        void specificity;
+        return row;
+      });
+      ({ data, error } = await supabase
+        .from("competitor_asins")
+        .upsert(rowsWithoutSpecificity, { onConflict: "book_id,competitor_asin", ignoreDuplicates: true })
+        .select("id"));
+    }
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
 

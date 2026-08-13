@@ -553,6 +553,61 @@ describe("filter 11 — anchor relevance (final gate)", () => {
   });
 });
 
+describe("positive verdicts on pass", () => {
+  it("gives a comp author/title match the strongest positive code", () => {
+    const result = verdict("books like ian rankin");
+    expect(result.verdict).toBe("pass");
+    expect(result.code).toBe("COMP_TITLE_MATCH");
+    expect(result.reason).toMatch(/comparable/);
+  });
+
+  it("gives an author-name hit AUTHOR_MATCH", () => {
+    const result = verdict("jacqueline new books");
+    expect(result.verdict).toBe("pass");
+    expect(result.code).toBe("AUTHOR_MATCH");
+  });
+
+  it("gives a series-name hit SERIES_NAME_MATCH", () => {
+    const result = verdict("dci mcneill crime thrillers series");
+    expect(result.verdict).toBe("pass");
+    expect(["SERIES_NAME_MATCH", "BOOK_SPECIFIC_MATCH"]).toContain(result.code);
+  });
+
+  it("gives a bare genre-anchor hit CORE_GENRE_MATCH", () => {
+    const result = verdict("psychological thriller books");
+    expect(result.verdict).toBe("pass");
+    expect(result.code).toBe("CORE_GENRE_MATCH");
+  });
+
+  it("falls back to NO_DISQUALIFIER when nothing distinctive matched but the keyword still passed", () => {
+    const result = verdict("page turner");
+    expect(result.verdict).toBe("pass");
+    expect(result.code).toBeDefined();
+  });
+
+  it("every pass verdict from filterKeywords carries a code and reason", () => {
+    const { results } = filterKeywords(
+      [{ text: "crime thriller books" }, { text: "books like ian rankin" }, { text: "jacqueline new books" }],
+      scarsContext()
+    );
+    for (const result of results) {
+      if (result.verdict !== "pass") continue;
+      expect(result.code).toBeDefined();
+      expect(result.reason).toBeDefined();
+    }
+  });
+
+  it("summarises pass reasons in byPassCode", () => {
+    const { summary } = filterKeywords(
+      [{ text: "crime thriller books" }, { text: "books like ian rankin" }],
+      scarsContext()
+    );
+    expect(summary.byPassCode).toBeDefined();
+    const total = Object.values(summary.byPassCode).reduce((a, b) => a + b, 0);
+    expect(total).toBe(summary.byVerdict.pass);
+  });
+});
+
 describe("batch behaviour", () => {
   it("summarises verdicts and per-filter counts", () => {
     const { results, summary } = filterKeywords(
