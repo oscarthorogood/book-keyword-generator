@@ -182,6 +182,37 @@ function hasAnyAnchor(text: string, anchors: string[]): string | undefined {
 // object is no longer referenced, so this can't leak across books.
 const ANCHORED_TERMS_CACHE = new WeakMap<FilterContext, WeakMap<string[], string[]>>();
 
+// That cache is keyed on the *identity* of the terms array, so a call site
+// deriving its list inline (`SOME_TERMS.filter(...)`) allocates a fresh key
+// per keyword and never hits it — the O(terms × anchors) scan then runs once
+// per keyword instead of once per batch, which is what the cache exists to
+// prevent. The two derived lists in the pipeline are memoised here so each
+// resolves to a single stable array: non-market languages keyed by the
+// marketplace's own language, and off-profile demonyms keyed by the
+// profile's `nationality` array (profileOf returns the anchors' own profile,
+// so that array's identity is fixed for the life of the context).
+const NON_MARKET_LANGUAGE_CACHE = new Map<string, string[]>();
+
+function nonMarketLanguages(marketLanguage: string): string[] {
+  let languages = NON_MARKET_LANGUAGE_CACHE.get(marketLanguage);
+  if (!languages) {
+    languages = NON_MARKET_LANGUAGES.filter((language) => language !== marketLanguage);
+    NON_MARKET_LANGUAGE_CACHE.set(marketLanguage, languages);
+  }
+  return languages;
+}
+
+const OFF_NATIONALITY_CACHE = new WeakMap<string[], string[]>();
+
+function offNationalityDemonyms(nationality: string[]): string[] {
+  let demonyms = OFF_NATIONALITY_CACHE.get(nationality);
+  if (!demonyms) {
+    demonyms = DEMONYM_TERMS.filter((term) => !nationality.includes(term));
+    OFF_NATIONALITY_CACHE.set(nationality, demonyms);
+  }
+  return demonyms;
+}
+
 /** Blocklist terms that are part of what this book *is* are not blocklist terms for this book. */
 function withoutAnchoredTerms(terms: string[], context: FilterContext): string[] {
   let perContext = ANCHORED_TERMS_CACHE.get(context);
@@ -245,13 +276,7 @@ export const languageMarketFilter: KeywordFilter = (keyword, context) => {
   if (listingLanguage && !listingLanguage.includes(marketLanguage)) return PASS;
   if (context.hasTranslationEdition) return PASS;
 
-  const foreign = firstMatch(
-    keyword,
-    withoutAnchoredTerms(
-      NON_MARKET_LANGUAGES.filter((language) => language !== marketLanguage),
-      context
-    )
-  );
+  const foreign = firstMatch(keyword, withoutAnchoredTerms(nonMarketLanguages(marketLanguage), context));
   if (foreign) return { verdict: "reject", reason: `non-market language: "${foreign}"` };
 
   // Naming the marketplace's own language is valid but low value — *if* the
@@ -382,8 +407,7 @@ export const toneNationalityFilter: KeywordFilter = (keyword, context) => {
   }
 
   if (nationality.length > 0) {
-    const offNationality = DEMONYM_TERMS.filter((term) => !nationality.includes(term));
-    const badDemonym = firstMatch(keyword, withoutAnchoredTerms(offNationality, context));
+    const badDemonym = firstMatch(keyword, withoutAnchoredTerms(offNationalityDemonyms(nationality), context));
     if (badDemonym) {
       return { verdict: "reject", code: "NATIONALITY_MISMATCH", reason: `demonym outside the book's nationality: "${badDemonym}"` };
     }
@@ -547,6 +571,15 @@ export const reviewFragmentFilter: KeywordFilter = (keyword, context, sources) =
 
 // --- 5. Synonym expansion quality -----------------------------------------
 
+// Both halves of the controlled genre map — its keys and every phrase they
+// map onto — as one flat list, built once at module load. The map is a
+// module constant, so rebuilding and re-flattening it for each synonym-
+// sourced keyword rebuilt the same array hundreds of times per run.
+const CONTROLLED_SYNONYM_TERMS = [
+  ...Object.keys(ALLOWED_GENRE_SYNONYMS),
+  ...Object.values(ALLOWED_GENRE_SYNONYMS).flat(),
+];
+
 /**
  * A general-purpose thesaurus answers "crime" with "law-breaking" and
  * "scottish" with "erse". Neither is a book search. Synonym-sourced
@@ -559,11 +592,7 @@ export const synonymQualityFilter: KeywordFilter = (keyword, context, sources) =
   const bad = firstMatch(keyword, withoutAnchoredTerms(BAD_SYNONYM_TERMS, context));
   if (bad) return { verdict: "reject", reason: `thesaurus artifact: "${bad}"` };
 
-  const allowed = [
-    ...Object.keys(ALLOWED_GENRE_SYNONYMS),
-    ...Object.values(ALLOWED_GENRE_SYNONYMS).flat(),
-  ];
-  const matchedSynonym = firstMatch(keyword, allowed);
+  const matchedSynonym = firstMatch(keyword, CONTROLLED_SYNONYM_TERMS);
   const matchedAnchor = hasAnyAnchor(keyword, qualifyingAnchors(context.anchors));
   if (!matchedSynonym && !matchedAnchor) {
     return { verdict: "reject", reason: "synonym outside the controlled genre map" };
@@ -761,6 +790,21 @@ export function completeDanglingModifier(keyword: string, primaryGenrePhrase: st
   return [...tokens, ...additions].join(" ");
 }
 
+// Phrases allowed to end on a bare modifier: the curated list plus this
+// book's own setting/genre vocabulary. Cached per context, and as a Set
+// rather than an array, so neither the concatenation nor the linear scan
+// over several hundred anchors repeats for every dangling keyword.
+const MODIFIER_ALLOWLIST_CACHE = new WeakMap<FilterContext, Set<string>>();
+
+function modifierAllowlist(context: FilterContext): Set<string> {
+  let allowlist = MODIFIER_ALLOWLIST_CACHE.get(context);
+  if (!allowlist) {
+    allowlist = new Set([...ALLOWLISTED_MODIFIER_PHRASES, ...context.anchors.setting, ...context.anchors.genre]);
+    MODIFIER_ALLOWLIST_CACHE.set(context, allowlist);
+  }
+  return allowlist;
+}
+
 export const phraseShapeFilter: KeywordFilter = (keyword, context) => {
   const tokens = words(keyword);
   if (tokens.length < 2) return PASS;
@@ -768,8 +812,7 @@ export const phraseShapeFilter: KeywordFilter = (keyword, context) => {
   const lastToken = tokens[tokens.length - 1];
   if (!DANGLING_ENDINGS.includes(lastToken)) return PASS;
 
-  const allowlist = [...ALLOWLISTED_MODIFIER_PHRASES, ...context.anchors.setting, ...context.anchors.genre];
-  if (allowlist.includes(keyword)) return PASS;
+  if (modifierAllowlist(context).has(keyword)) return PASS;
 
   const completed = completeDanglingModifier(keyword, context.anchors.primaryGenrePhrase);
   if (completed) {

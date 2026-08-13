@@ -105,30 +105,49 @@ export function isAuthorOrTitleVariant(text: string, author: string, title: stri
   return containsWhole(norm, normalizeKeyword(author)) || containsWhole(norm, normalizeKeyword(title));
 }
 
-/** Levenshtein edit distance, for catching near-misspellings of the author's name. */
+/**
+ * Levenshtein edit distance, for catching near-misspellings of the author's
+ * name. Two rolling rows rather than the full rows × cols matrix: only the
+ * previous row is ever read, so the matrix spent O(n·m) memory holding
+ * values nothing would look at again.
+ */
 function editDistance(a: string, b: string): number {
-  const rows = a.length + 1;
   const cols = b.length + 1;
-  const dp: number[][] = Array.from({ length: rows }, () => Array<number>(cols).fill(0));
-  for (let i = 0; i < rows; i++) dp[i][0] = i;
-  for (let j = 0; j < cols; j++) dp[0][j] = j;
-  for (let i = 1; i < rows; i++) {
+  let previous = new Array<number>(cols);
+  let current = new Array<number>(cols);
+  for (let j = 0; j < cols; j++) previous[j] = j;
+
+  for (let i = 1; i <= a.length; i++) {
+    current[0] = i;
     for (let j = 1; j < cols; j++) {
       const cost = a[i - 1] === b[j - 1] ? 0 : 1;
-      dp[i][j] = Math.min(dp[i - 1][j] + 1, dp[i][j - 1] + 1, dp[i - 1][j - 1] + cost);
+      current[j] = Math.min(previous[j] + 1, current[j - 1] + 1, previous[j - 1] + cost);
     }
+    [previous, current] = [current, previous];
   }
-  return dp[rows - 1][cols - 1];
+
+  return previous[cols - 1];
 }
 
 const MAX_TYPO_DISTANCE = 2;
 
-/** A keyword text that's a near-misspelling of the author's full name. */
+/**
+ * A keyword text that's a near-misspelling of the author's full name.
+ *
+ * Called once per bank row by Brand Guard, so it leads with the cheap length
+ * test: each edit changes the length by at most one, so two strings whose
+ * lengths differ by more than MAX_TYPO_DISTANCE cannot be within it. That
+ * skips the quadratic scan for the overwhelming majority of rows — a genre
+ * phrase is nothing like the length of an author's name. The distance itself
+ * is computed once rather than twice.
+ */
 export function isCommonTypo(text: string, author: string): boolean {
   const norm = normalizeKeyword(text);
   const normAuthor = normalizeKeyword(author);
   if (!norm || !normAuthor) return false;
-  return editDistance(norm, normAuthor) > 0 && editDistance(norm, normAuthor) <= MAX_TYPO_DISTANCE;
+  if (Math.abs(norm.length - normAuthor.length) > MAX_TYPO_DISTANCE) return false;
+  const distance = editDistance(norm, normAuthor);
+  return distance > 0 && distance <= MAX_TYPO_DISTANCE;
 }
 
 const BRAND_GUARD_MATCH_TYPES: MatchType[] = ["exact", "phrase"];
@@ -210,14 +229,20 @@ export function selectAlphaExactKeywords(
   anchors: BookAnchors,
   limit: number = MAX_CAMPAIGN_TARGETS
 ): KeywordWithRollups[] {
+  // Scored once per row rather than inside the comparator: scoreForRank
+  // normalises the text and scans every anchor list, and a comparator calls
+  // it O(n log n) times — twice per comparison — for a value that cannot
+  // change between calls.
   const ranked = bank
     .filter((k) => k.status === "active" && k.matchType !== "broad")
+    .map((keyword) => ({ keyword, rank: scoreForRank(keyword, anchors) }))
     .sort(
       (a, b) =>
-        (b.lifetimeOrders ?? 0) - (a.lifetimeOrders ?? 0) ||
-        scoreForRank(b, anchors) - scoreForRank(a, anchors) ||
-        (b.specificity ?? 0) - (a.specificity ?? 0)
-    );
+        (b.keyword.lifetimeOrders ?? 0) - (a.keyword.lifetimeOrders ?? 0) ||
+        b.rank - a.rank ||
+        (b.keyword.specificity ?? 0) - (a.keyword.specificity ?? 0)
+    )
+    .map((entry) => entry.keyword);
   return dedupeByText(preferMatchTypes(ranked, ["exact"]))
     .slice(0, limit)
     .map((k) => withMatchType(k, "exact"));

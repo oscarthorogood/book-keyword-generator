@@ -426,7 +426,15 @@ export function qualifyingAnchors(anchors: BookAnchors): string[] {
   return combined;
 }
 
+// The permissive default for hand-built anchors carrying no profile. Shared
+// rather than rebuilt per call: profileOf is read once per keyword by four
+// filters plus scoreForRank, so allocating an object and nine arrays each
+// time was pure garbage. Sharing it also gives those empty lists a stable
+// identity, which the derived-list caches in lib/keywordFilters.ts key on.
+// Frozen because it is now shared state; every call site only reads it.
+const EMPTY_BOOK_PROFILE: BookProfile = Object.freeze(defaultBookProfile(undefined));
+
 /** Reads `anchors.profile` with an empty (permissive) default filled in for hand-built anchors that omit it. */
 export function profileOf(anchors: BookAnchors): BookProfile {
-  return anchors.profile ?? defaultBookProfile(undefined);
+  return anchors.profile ?? EMPTY_BOOK_PROFILE;
 }
