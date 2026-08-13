@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { buildUpdateReviewRows, buildUpdateUploadRows } from "@/lib/campaignBulksheetExport";
 import { buildCampaignPlans } from "@/lib/campaignBulksheetPlan";
+import { describeExportFailure } from "@/lib/campaignExportError";
 import { loadCampaignContext } from "@/lib/campaignContext";
 import { toCsv } from "@/lib/bulksheetSchema";
 import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
@@ -311,7 +312,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         downloadUrl: signedUpload?.signedUrl ?? null,
       });
     } catch (uploadErr) {
-      const message = uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed";
+      const message = describeExportFailure(uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed");
       await supabase
         .from("campaigns")
         .update({ last_export_error: message, last_export_error_at: new Date().toISOString() })

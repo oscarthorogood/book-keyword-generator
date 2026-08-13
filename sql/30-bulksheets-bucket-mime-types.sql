@@ -23,6 +23,11 @@ SET allowed_mime_types = ARRAY[
 ]
 WHERE name = 'bulksheets';
 
+-- NOTE: this file was written but never actually run against the live
+-- project, so exports kept failing with "mime type text/csv is not supported"
+-- until 2026-08-13. If you stand up a new environment, run it — the bucket
+-- ships from the dashboard with the xlsx type only.
+--
 -- VERIFICATION:
 -- SELECT name, allowed_mime_types FROM storage.buckets WHERE name = 'bulksheets';
 -- Should show both mime types above (or NULL/empty, meaning unrestricted).
