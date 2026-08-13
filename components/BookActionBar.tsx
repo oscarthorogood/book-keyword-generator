@@ -116,6 +116,8 @@ interface BookActionBarProps {
   /** Bumped to force KeywordManager to refetch after a shared action. */
   onDataChanged: () => void;
   onMetadataRefreshed: () => void;
+  /** Opens the Keyword manager popup (KeywordManager is only rendered on demand). */
+  onOpenKeywordManager: () => void;
 }
 
 async function postJson(url: string, body: unknown = {}) {
@@ -132,7 +134,13 @@ async function postJson(url: string, body: unknown = {}) {
  * pipelines in one click — the user works the book as a whole, not two
  * parallel tabs.
  */
-export default function BookActionBar({ bookId, metadataReady, onDataChanged, onMetadataRefreshed }: BookActionBarProps) {
+export default function BookActionBar({
+  bookId,
+  metadataReady,
+  onDataChanged,
+  onMetadataRefreshed,
+  onOpenKeywordManager,
+}: BookActionBarProps) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [generating, setGenerating] = useState(false);
   const [filtering, setFiltering] = useState(false);
@@ -353,12 +361,6 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
     }
   }
 
-  function focusManualAdd() {
-    const el = document.getElementById("manual-keyword-input");
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
-    (el as HTMLTextAreaElement | null)?.focus();
-  }
-
   return (
     <div className="mb-6">
       {/*
@@ -402,7 +404,14 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
               disabled: generating || !metadataReady,
               title: "New keywords/ASINs always land in Archived — run Filters to promote them",
             },
-            { key: "manual", section: "Generation", label: "Manual", icon: <Edit3 size={16} />, onClick: focusManualAdd },
+            {
+              key: "manual",
+              section: "Generation",
+              label: "Manual",
+              icon: <Edit3 size={16} />,
+              onClick: onOpenKeywordManager,
+              title: "Open the keyword manager to add keywords/ASINs or edit the bank by hand",
+            },
             {
               key: "presets",
               section: "Generation",
