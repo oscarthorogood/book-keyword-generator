@@ -121,12 +121,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         { status: 400 }
       );
     }
-    if (!campaign.amazon_campaign_id) {
-      return Response.json(
-        { error: "This campaign needs its Amazon Campaign ID pasted in (after uploading the Create Campaign bulksheet) before it can be updated." },
-        { status: 400 }
-      );
-    }
 
     const campaignType = campaign.campaign_type as CampaignType;
     const adGroup = SINGLE_AD_GROUP_LABEL[campaignType];

@@ -91,7 +91,6 @@ interface Campaign {
   name: string;
   daily_budget: number;
   status: string;
-  amazon_campaign_id: string | null;
   export_batch_id: string;
   bulksheet_path?: string | null;
 }
@@ -268,11 +267,11 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
     }
   }
 
-  /** Re-scores and re-uploads every already-exported campaign that has an Amazon Campaign ID pasted in. */
+  /** Re-scores and re-uploads every already-exported campaign. */
   async function updateCampaigns() {
-    const updatable = campaigns.filter((c) => c.status === "exported" && c.amazon_campaign_id);
+    const updatable = campaigns.filter((c) => c.status === "exported");
     if (updatable.length === 0) {
-      setNotice("No exported campaigns with an Amazon Campaign ID to update yet.");
+      setNotice("No exported campaigns to update yet.");
       return;
     }
     setUpdatingCampaigns(true);
@@ -324,8 +323,6 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
     }
   }
 
-  const needsAmazonId = campaigns.filter((c) => c.status === "exported" && !c.amazon_campaign_id);
-
   function focusManualAdd() {
     const el = document.getElementById("manual-keyword-input");
     el?.scrollIntoView({ behavior: "smooth", block: "center" });
@@ -357,8 +354,8 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
               label: updatingCampaigns ? "Updating…" : "Update Campaigns",
               icon: <RefreshCw size={16} />,
               onClick: updateCampaigns,
-              disabled: updatingCampaigns || campaigns.every((c) => c.status !== "exported" || !c.amazon_campaign_id),
-              title: "Re-scores every exported campaign that has an Amazon Campaign ID against the current bank",
+              disabled: updatingCampaigns || campaigns.every((c) => c.status !== "exported"),
+              title: "Re-scores every exported campaign against the current bank",
             },
             {
               key: "export",
@@ -391,16 +388,6 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
           ]}
         />
       </div>
-
-      {needsAmazonId.length > 0 && (
-        <div className="alert alert-warning mt-3" role="alert">
-          <AlertTriangle size={18} className="mt-0.5 shrink-0" />
-          <p className="flex-1">
-            {needsAmazonId.length} campaign{needsAmazonId.length === 1 ? "" : "s"} still need{needsAmazonId.length === 1 ? "s" : ""} an Amazon
-            Campaign ID pasted in below before it can be updated — see the campaign list in the keyword manager.
-          </p>
-        </div>
-      )}
 
       {error && (
         <div className="alert alert-error mt-3" role="alert">

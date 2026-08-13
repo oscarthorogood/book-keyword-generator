@@ -13,7 +13,6 @@ interface CampaignRow {
   daily_budget: number;
   currency: string;
   status: string;
-  amazon_campaign_id: string | null;
   operation: string;
   updated_at: string;
   book_title: string | null;
@@ -147,7 +146,6 @@ export default function CampaignsOverviewPage() {
                         <th scope="col">Type</th>
                         <th scope="col">Budget</th>
                         <th scope="col">Status</th>
-                        <th scope="col">Amazon ID</th>
                         <th scope="col">
                           <span className="sr-only">Download</span>
                         </th>
@@ -178,11 +176,6 @@ export default function CampaignsOverviewPage() {
                             {row.daily_budget.toFixed(2)} {row.currency}/day
                           </td>
                           <td>{row.status}</td>
-                          <td>
-                            {row.amazon_campaign_id ?? (
-                              <span className="badge badge-warning">needs Amazon ID</span>
-                            )}
-                          </td>
                           <td>
                             {row.bulksheet_path && (
                               <a
