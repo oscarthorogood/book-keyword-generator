@@ -1,3 +1,4 @@
+import { randomUUID } from "crypto";
 import { jwtVerify, SignJWT } from "jose";
 import { AUTH_CONFIG } from "./config";
 import { supabaseAdmin } from "./supabaseAdmin";
@@ -112,7 +113,9 @@ export async function applyDecision(
     .update({
       status,
       decided_at: new Date().toISOString(),
-      decision_token: null,
+      // Column is NOT NULL, so burn the token by rotating it rather than
+      // nulling it — either way the nonce the link was signed against stops matching.
+      decision_token: randomUUID(),
     })
     .eq("email", normalizeEmail(email))
     .eq("decision_token", nonce)
@@ -155,8 +158,9 @@ export async function setAccessStatus(
     .update({
       status,
       decided_at: new Date().toISOString(),
-      // Burn any outstanding email link so it can't undo this later.
-      decision_token: null,
+      // Burn any outstanding email link so it can't undo this later. Column
+      // is NOT NULL, so rotate to a fresh token rather than nulling it.
+      decision_token: randomUUID(),
     })
     .eq("email", normalizeEmail(email))
     .select("*")
