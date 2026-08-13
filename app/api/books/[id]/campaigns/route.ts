@@ -4,15 +4,57 @@ import { buildCampaignReviewRows, buildCampaignUploadRows } from "@/lib/campaign
 import { toCsv } from "@/lib/bulksheetSchema";
 import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
 import { loadCampaignContext } from "@/lib/campaignContext";
+import type { KeywordWithRollups } from "@/lib/campaignSelection";
 import { marketplaceCurrency } from "@/lib/marketplaceCurrency";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
-import type { Marketplace } from "@/lib/types";
+import type { CompetitorAsin, Marketplace } from "@/lib/types";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 /** Decision 2 (docs/CAMPAIGNS-PROGRESS.md): typed confirmation required above this total daily spend. */
 const CONFIRMATION_THRESHOLD_PER_DAY = 50;
+
+/**
+ * Distinguishes the three ways `buildCampaignPlans` can come back empty —
+ * generation (#61) always lands new rows in `archived`, so a book can look
+ * fully populated in the Keyword Manager's default view (which shows
+ * archived rows) while the campaign-eligible bank (`active`/`paused` only,
+ * lib/campaignContext.ts) is empty. The generic message gave no clue which
+ * case applied, so this only fires the extra archived-count query on the
+ * failure path, never the common success path.
+ */
+async function noEligibleTargetsMessage(
+  supabase: Awaited<ReturnType<typeof supabaseServer>>,
+  bookId: string,
+  userId: string,
+  bank: KeywordWithRollups[],
+  asinBank: CompetitorAsin[]
+): Promise<string> {
+  const base = "No eligible targets for any of the five campaigns — nothing to create.";
+
+  if (bank.length > 0 || asinBank.length > 0) {
+    return (
+      `${base} This book has ${bank.length} active/paused keyword(s) and ${asinBank.length} ASIN(s), but none matched ` +
+      "a campaign's targeting rules (e.g. no exact-match keywords for Alpha Exact, no series siblings for Catalog " +
+      "Cross-Sell). Review the Keyword Manager for this book."
+    );
+  }
+
+  const [{ count: archivedKeywordCount }, { count: archivedAsinCount }] = await Promise.all([
+    supabase.from("keywords").select("id", { count: "exact", head: true }).eq("book_id", bookId).eq("user_id", userId).eq("status", "archived"),
+    supabase.from("competitor_asins").select("id", { count: "exact", head: true }).eq("book_id", bookId).eq("user_id", userId).eq("status", "archived"),
+  ]);
+
+  if ((archivedKeywordCount ?? 0) > 0 || (archivedAsinCount ?? 0) > 0) {
+    return (
+      `${base} This book's keywords/ASINs are still sitting in Archived — run "Keyword/ASIN Bank Actions → Run ` +
+      "Filters\" to promote them into Active, then try Create Campaigns again."
+    );
+  }
+
+  return `${base} This book has no keywords or ASINs yet — run "Keyword/ASIN Bank Actions → Generate" first, then Run Filters.`;
+}
 
 /** GET /api/books/[id]/campaigns — this book's sub-campaigns, for the Create/Update Campaign action row and the "needs Amazon ID" badge. */
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -81,10 +123,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     });
 
     if (plans.length === 0) {
-      return Response.json(
-        { error: "No eligible targets for any of the five campaigns — nothing to create." },
-        { status: 400 }
-      );
+      return Response.json({ error: await noEligibleTargetsMessage(supabase, bookId, user.id, bank, asinBank) }, { status: 400 });
     }
 
     const totalDailyBudget = Math.round(plans.reduce((sum, p) => sum + p.dailyBudget, 0) * 100) / 100;
