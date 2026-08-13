@@ -23,7 +23,7 @@
  * lib/keywordFilterConfig.ts.
  */
 
-import { buildBookAnchors, coreTitle, profileOf, qualifyingAnchors, type AnchorInput, type BookAnchors } from "./keywordAnchors";
+import { buildBookAnchors, coreTitle, escapeForRegExp, profileOf, qualifyingAnchors, type AnchorInput, type BookAnchors } from "./keywordAnchors";
 import {
   ALLOWED_GENRE_SYNONYMS,
   ALLOWLISTED_MODIFIER_PHRASES,
@@ -118,10 +118,6 @@ const PASS: FilterResult = { verdict: "pass" };
 
 // --- text helpers ---------------------------------------------------------
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /**
  * lowercase, trim, collapse whitespace, drop punctuation noise. Hyphens and
  * apostrophes survive ("law-breaking", "don't"); colons, commas and stray
@@ -149,7 +145,7 @@ const TERM_PATTERN_CACHE = new Map<string, RegExp>();
 function termPattern(term: string): RegExp {
   let pattern = TERM_PATTERN_CACHE.get(term);
   if (!pattern) {
-    pattern = new RegExp(`(^|[^a-z0-9])${escapeRegExp(term)}([^a-z0-9]|$)`, "i");
+    pattern = new RegExp(`(^|[^a-z0-9])${escapeForRegExp(term)}([^a-z0-9]|$)`, "i");
     TERM_PATTERN_CACHE.set(term, pattern);
   }
   return pattern;
@@ -160,8 +156,9 @@ export function containsTerm(text: string, term: string): boolean {
   return termPattern(term).test(text);
 }
 
-function words(text: string): string[] {
-  return text.split(/\s+/).filter(Boolean);
+/** Whitespace-separated tokens. Exported so the ranking pass counts tokens exactly the way the filters do. */
+export function words(text: string): string[] {
+  return text.trim().split(/\s+/).filter(Boolean);
 }
 
 function firstMatch(text: string, terms: string[]): string | undefined {
@@ -248,7 +245,7 @@ export const uiPollutionFilter: KeywordFilter = (keyword) => {
   // Detail-table labels: only when the keyword *leads* with one, so
   // "sign language books" and "best rating books" survive while
   // "language english" and "publisher bookouture" do not.
-  const label = METADATA_LABEL_TERMS.find((candidate) => new RegExp(`^${escapeRegExp(candidate)}\\b`).test(keyword));
+  const label = METADATA_LABEL_TERMS.find((candidate) => new RegExp(`^${escapeForRegExp(candidate)}\\b`).test(keyword));
   if (label) return { verdict: "reject", reason: `listing metadata label: "${label}"` };
 
   // A bare number, or a number followed by a unit, is a detail row rather

@@ -15,7 +15,7 @@
 
 import { profileOf, type BookAnchors } from "./keywordAnchors";
 import type { ReasonCode } from "./keywordFilterConfig";
-import { normalizeKeyword } from "./keywordFilters";
+import { normalizeKeyword, words } from "./keywordFilters";
 import type { KeywordCandidate, MatchType } from "./types";
 
 export interface CapAndRankOptions {
@@ -71,10 +71,6 @@ function performanceBoost(candidate: KeywordCandidate): number {
 }
 
 const BUYER_INTENT_TOKENS = ["book", "books", "novel", "series", "best", "new", "bestselling"];
-
-function words(text: string): string[] {
-  return text.trim().split(/\s+/).filter(Boolean);
-}
 
 function sourceTrust(sources: string[]): number {
   return Math.max(0, ...sources.map((source) => SOURCE_TIER[source] ?? 3));

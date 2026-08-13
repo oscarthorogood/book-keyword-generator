@@ -225,7 +225,8 @@ function authorAnchors(author: string | undefined): string[] {
   return out;
 }
 
-function escapeForRegExp(value: string): string {
+/** Escapes every regex metacharacter in `value` so it can be embedded in a pattern literally. Shared with lib/keywordFilters.ts, which builds its term patterns the same way. */
+export function escapeForRegExp(value: string): string {
   return value.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
 }
 
