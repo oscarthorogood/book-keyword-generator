@@ -22,10 +22,10 @@ export default async function AdminPage() {
     <AppShell active="access">
       <div className="flex min-h-screen flex-col bg-white">
         <header className="page-header">
-          <h1 className="page-title">Access</h1>
+          <h1 className="page-title">Users</h1>
           <p className="page-subtitle mt-1 max-w-2xl">
-            Who can sign in. Revoking ends any active session immediately and blocks new sign-in links;
-            reinstating emails a fresh one.
+            Everyone who has signed in, and how often. Blocking ends any active session immediately
+            and stops new sign-in links; unblocking emails a fresh one.
           </p>
         </header>
 

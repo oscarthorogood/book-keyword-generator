@@ -83,9 +83,6 @@ NEXT_PUBLIC_SUPABASE_URL=https://your-project.supabase.co
 NEXT_PUBLIC_SUPABASE_ANON_KEY=eyJhbGci...
 SUPABASE_SERVICE_ROLE_KEY=eyJhbGci...
 
-# Auth security
-AUTH_SECRET=$(openssl rand -base64 32)
-
 # Email (Resend - from step 5)
 RESEND_API_KEY=re_...
 EMAIL_FROM=noreply@yourdomain.com
@@ -164,14 +161,16 @@ DELETE FROM access_requests WHERE email = 'your-email@example.com';
 
 ### access_requests
 
+Sign-up is open — this table is a usage log plus an optional block list, not
+an approval queue.
+
 | Column | Type | Constraints | Purpose |
 |--------|------|-------------|---------|
 | `email` | text | PRIMARY KEY, lowercase | User identifier |
-| `status` | text | pending\|approved\|denied | Access control |
-| `decision_token` | text | nullable | Signed approval/denial link |
-| `requested_at` | timestamp | DEFAULT now() | When sign-up initiated |
-| `notified_at` | timestamp | nullable | When admin was emailed |
-| `decided_at` | timestamp | nullable | When decision was made |
+| `status` | text | approved\|denied | `denied` blocks sign-in; everyone else is `approved` |
+| `requested_at` | timestamp | DEFAULT now() | First time this address signed in |
+| `sign_in_count` | integer | DEFAULT 0 | Bumped on every sign-in request |
+| `last_signed_in_at` | timestamp | nullable | Most recent sign-in request |
 
 ### Next: campaigns (Phase 3)
 
@@ -236,8 +235,8 @@ CREATE INDEX idx_campaigns_created_at ON campaigns(created_at);
 
 ```bash
 # In Supabase SQL Editor:
-SELECT COUNT(*) FROM access_requests WHERE status = 'pending';
 SELECT COUNT(*) FROM access_requests WHERE status = 'approved';
+SELECT COUNT(*) FROM access_requests WHERE status = 'denied';
 ```
 
 ### Clean Up Old Storage Files
@@ -272,6 +271,7 @@ Supabase SQL Editor:
 | `08-keyword-filter-status.sql` | **Required for the relevance filter pipeline** — adds the `rejected` status and the `rejection_reason` / `rejected_by_filter` columns, and stops rejected keywords counting toward `books.total_keywords` |
 | `30-bulksheets-bucket-mime-types.sql` | **Required if campaign export fails with "mime type text/csv is not supported"** — dashboard-created buckets default `allowed_mime_types` to a single type, which blocks the review CSV upload that runs alongside the xlsx upload |
 | `31-total-keywords-after-archived-generation.sql` | **Required if a book's keyword count reads far too low (often 0) after generating** — `08` excluded archived rows from `books.total_keywords` back when archived meant "removed by hand"; generation now lands every row archived, so the count has to exclude only `rejected` |
+| `34-open-signup-usage-tracking.sql` | **Required for open sign-up** — adds `sign_in_count`/`last_signed_in_at` to `access_requests` and flips any leftover `pending` rows to `approved` now that there's no approval queue |
 
 Without `08`, generating keywords fails on the status check constraint: the
 pipeline writes rejected and paused rows alongside the active ones.

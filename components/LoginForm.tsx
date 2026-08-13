@@ -2,9 +2,9 @@
 
 import { FormEvent, useState } from "react";
 import { useSearchParams } from "next/navigation";
-import { AlertCircle, CheckCircle2, Clock, Loader2 } from "lucide-react";
+import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 
-type Outcome = { kind: "sent" | "pending"; message: string };
+type Outcome = { message: string };
 
 const LINK_ERRORS: Record<string, string> = {
   invalid_link: "That sign-in link was incomplete. Request a fresh one below.",
@@ -41,10 +41,7 @@ export function LoginForm() {
         return;
       }
 
-      setOutcome({
-        kind: data.status === "pending" ? "pending" : "sent",
-        message: data.message,
-      });
+      setOutcome({ message: data.message });
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong");
     } finally {
@@ -55,17 +52,12 @@ export function LoginForm() {
   // Once a link is on its way there's nothing more to do here — showing the
   // form again just invites people to hammer the button.
   if (outcome) {
-    const sent = outcome.kind === "sent";
     return (
       <div className="space-y-5">
-        <div className={`alert ${sent ? "alert-success" : "alert-warning"}`} aria-live="polite">
-          {sent ? (
-            <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
-          ) : (
-            <Clock size={20} className="mt-0.5 shrink-0" />
-          )}
+        <div className="alert alert-success" aria-live="polite">
+          <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
           <div>
-            <p className="alert-title">{sent ? "Sign-in link sent" : "Awaiting approval"}</p>
+            <p className="alert-title">Sign-in link sent</p>
             <p className="mt-1">{outcome.message}</p>
           </div>
         </div>

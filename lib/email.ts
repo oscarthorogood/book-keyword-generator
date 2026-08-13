@@ -2,12 +2,9 @@
  * Transactional email via the Resend REST API.
  *
  * Called directly over fetch rather than through the SDK — one endpoint, one
- * POST, no dependency worth adding for it.
- *
- * Note this is *only* for the approval workflow's own mail. Magic-link emails
- * are sent by Supabase Auth, which should be pointed at the same Resend
- * account via custom SMTP (see README) so both come from the same domain and
- * neither is subject to Supabase's built-in rate limit.
+ * POST, no dependency worth adding for it. Every sign-in link and reinstated-
+ * access notification goes through here, minted server-side via Supabase's
+ * admin API but delivered as our own Resend template (see lib/magicLink.ts).
  */
 
 const RESEND_ENDPOINT = "https://api.resend.com/emails";
@@ -24,11 +21,18 @@ export function adminEmail(): string | undefined {
   return process.env.ADMIN_EMAIL;
 }
 
+export interface EmailAttachment {
+  filename: string;
+  /** Base64-encoded file content, per Resend's attachments format. */
+  content: string;
+}
+
 interface SendArgs {
   to: string;
   subject: string;
   html: string;
   replyTo?: string;
+  attachments?: EmailAttachment[];
 }
 
 /**
@@ -41,6 +45,7 @@ export async function sendEmail({
   subject,
   html,
   replyTo,
+  attachments,
 }: SendArgs): Promise<boolean> {
   if (!isEmailConfigured()) {
     console.error("Email not configured: set RESEND_API_KEY, EMAIL_FROM, ADMIN_EMAIL.");
@@ -60,6 +65,7 @@ export async function sendEmail({
         subject,
         html,
         ...(replyTo ? { reply_to: replyTo } : {}),
+        ...(attachments && attachments.length > 0 ? { attachments } : {}),
       }),
     });
 
@@ -93,55 +99,74 @@ const WRAPPER =
 const BUTTON =
   "display:inline-block;padding:10px 22px;border-radius:999px;text-decoration:none;font-weight:600;font-size:14px";
 
-/** Approve/deny request sent to the admin when a new address tries to sign in. */
-export async function sendApprovalRequestEmail(args: {
-  requesterEmail: string;
-  approveUrl: string;
-  denyUrl: string;
+/** Sign-in link, sent on every fresh magic-link request. */
+export async function sendSignInEmail(args: {
+  to: string;
+  magicLink: string;
 }): Promise<boolean> {
-  const to = adminEmail();
-  if (!to) return false;
-
-  const requester = escapeHtml(args.requesterEmail);
   return sendEmail({
-    to,
-    subject: `Access request: ${args.requesterEmail}`,
-    replyTo: args.requesterEmail,
+    to: args.to,
+    subject: "Your sign-in link — Amazon Book Ads Builder",
     html: `
       <div style="${WRAPPER}">
-        <h2 style="font-size:18px;margin:0 0 12px">New access request</h2>
-        <p style="margin:0 0 20px">
-          <strong>${requester}</strong> tried to sign in to Amazon Book Ads Builder
-          and is not on the allowlist yet.
-        </p>
+        <h2 style="font-size:18px;margin:0 0 12px">Sign in</h2>
+        <p style="margin:0 0 24px">Use the link below to sign in to Amazon Book Ads Builder.</p>
         <p style="margin:0 0 24px">
-          <a href="${args.approveUrl}" style="${BUTTON};background:#0f7b3f;color:#ffffff">Approve</a>
-          &nbsp;&nbsp;
-          <a href="${args.denyUrl}" style="${BUTTON};background:#f1f1f1;color:#1a1a1a">Deny</a>
+          <a href="${args.magicLink}" style="${BUTTON};background:#1a1a1a;color:#ffffff">Sign in</a>
         </p>
         <p style="margin:0;color:#666;font-size:13px">
-          Approving emails them a login link straight away. These links work once
-          and expire in 14 days. If you ignore this, nothing happens — they stay
-          locked out.
+          This link works once and expires shortly. If you didn't request it, ignore this email.
         </p>
       </div>
     `,
   });
 }
 
-/** Confirmation to the requester once approved, carrying their magic link. */
-export async function sendApprovedEmail(args: {
+/**
+ * Sent to whoever created or updated a campaign — a log of what changed,
+ * plus the bulksheet/review files that went with it.
+ */
+export async function sendCampaignActivityEmail(args: {
+  to: string;
+  bookTitle: string;
+  action: "created" | "updated";
+  changeLines: string[];
+  attachments: EmailAttachment[];
+}): Promise<boolean> {
+  const rows = args.changeLines
+    .map((line) => `<li style="margin:0 0 6px">${escapeHtml(line)}</li>`)
+    .join("");
+
+  return sendEmail({
+    to: args.to,
+    subject: `Campaigns ${args.action} — ${args.bookTitle}`,
+    html: `
+      <div style="${WRAPPER}">
+        <h2 style="font-size:18px;margin:0 0 12px">Campaigns ${args.action}: ${escapeHtml(args.bookTitle)}</h2>
+        <p style="margin:0 0 12px">Here's what changed:</p>
+        <ul style="margin:0 0 20px;padding-left:20px">${rows}</ul>
+        <p style="margin:0;color:#666;font-size:13px">
+          The bulksheet and review files for this run are attached.
+        </p>
+      </div>
+    `,
+    attachments: args.attachments,
+  });
+}
+
+/** Sent when an admin reinstates a previously blocked address. */
+export async function sendReinstatedEmail(args: {
   to: string;
   magicLink: string;
 }): Promise<boolean> {
   return sendEmail({
     to: args.to,
-    subject: "You've been approved — Amazon Book Ads Builder",
+    subject: "Your access was reinstated — Amazon Book Ads Builder",
     html: `
       <div style="${WRAPPER}">
-        <h2 style="font-size:18px;margin:0 0 12px">You're in</h2>
+        <h2 style="font-size:18px;margin:0 0 12px">You're back in</h2>
         <p style="margin:0 0 20px">
-          Your access request was approved. Use the link below to sign in.
+          Your access was reinstated. Use the link below to sign in.
         </p>
         <p style="margin:0 0 24px">
           <a href="${args.magicLink}" style="${BUTTON};background:#1a1a1a;color:#ffffff">Sign in</a>

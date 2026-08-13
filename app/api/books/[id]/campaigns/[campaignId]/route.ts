@@ -5,7 +5,8 @@ import { describeExportFailure } from "@/lib/campaignExportError";
 import { loadCampaignContext } from "@/lib/campaignContext";
 import { toCsv } from "@/lib/bulksheetSchema";
 import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
-import { diffCampaignTargets, targetKey, type DiffCampaignTarget } from "@/lib/campaignDiff";
+import { diffCampaignTargets, targetKey, type DiffCampaignTarget, type DiffedCampaignTarget } from "@/lib/campaignDiff";
+import { sendCampaignActivityEmail } from "@/lib/email";
 import { isOpenRouterConfigured } from "@/lib/llmClient";
 import { rebalanceCampaignTargets, type RebalanceCandidate } from "@/lib/campaignRebalance";
 import { scoreForRank } from "@/lib/keywordCapAndRank";
@@ -131,7 +132,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const context = await loadCampaignContext(supabase, bookId, user.id);
     if (!context) return Response.json({ error: "Book not found" }, { status: 404 });
-    const { campaignBook, bank, asinBank, siblingBooks, negatives, anchors, performanceById: rawPerformanceById } = context;
+    const { book, campaignBook, bank, asinBank, siblingBooks, negatives, anchors, performanceById: rawPerformanceById } = context;
 
     const { data: bookAcosRow } = await supabase.from("books").select("target_acos").eq("id", bookId).eq("user_id", user.id).maybeSingle();
     const targetAcos = typeof bookAcosRow?.target_acos === "number" ? bookAcosRow.target_acos : 0.3;
@@ -304,6 +305,23 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         .select()
         .single();
       if (flipError) throw new Error(flipError.message);
+
+      // Best-effort: a failed notification email should never turn a
+      // successful campaign update into an error response.
+      try {
+        await sendCampaignActivityEmail({
+          to: user.email,
+          bookTitle: book.title ?? bookId,
+          action: "updated",
+          changeLines: diffed.map((t: DiffedCampaignTarget) => `${t.operation}: ${t.text}${t.bid != null ? ` (bid $${t.bid.toFixed(2)})` : ""}`),
+          attachments: [
+            { filename: "campaign-update-upload.xlsx", content: Buffer.from(xlsxBuffer).toString("base64") },
+            { filename: "campaign-update-review.csv", content: Buffer.from(reviewCsv).toString("base64") },
+          ],
+        });
+      } catch (emailErr) {
+        console.error("Campaign-updated email failed:", emailErr);
+      }
 
       return Response.json({
         campaign: updatedCampaign,
