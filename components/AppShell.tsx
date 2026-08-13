@@ -4,18 +4,14 @@ import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
-  BarChart3,
   BookOpen,
   ChevronDown,
   ChevronLeft,
   ChevronRight,
-  Database,
   LayoutDashboard,
-  ListChecks,
   LogOut,
-  Megaphone,
+  Plus,
   Shield,
-  Tags,
 } from "lucide-react";
 
 export type ShellSection =
@@ -44,39 +40,16 @@ interface SidebarBook {
 const SIDEBAR_BOOK_LIMIT = 8;
 
 /**
- * The databases, each its own route.
- *
- * Books is deliberately absent: the Books section above already owns the
- * book list and every book's page, so there is exactly one place in the
- * sidebar to reach a book rather than two links to the same route.
- */
-const DATABASE_LINKS: Array<{ section: ShellSection; label: string; href: string; Icon: typeof BookOpen }> = [
-  { section: "campaigns", label: "Campaigns", href: "/campaigns", Icon: Megaphone },
-  { section: "results", label: "Results", href: "/results", Icon: BarChart3 },
-  { section: "presets", label: "Presets", href: "/presets", Icon: ListChecks },
-  { section: "targets", label: "Keywords & ASINs", href: "/targets", Icon: Tags },
-];
-
-const DATABASE_SECTIONS: ShellSection[] = ["campaigns", "results", "presets", "targets"];
-
-/**
  * The app chrome: fixed 280px sidebar + fluid content (§3.2/§4.4).
  *
- * Every section is its own route now (Enhancements spec §2) — the sidebar
- * is plain `Link`s, and every page owns its own data fetching rather than
- * swapping views inside a single-page builder's local state.
+ * Every section is its own route (Enhancements spec §2) — the sidebar is
+ * plain `Link`s, and every page owns its own data fetching.
  *
- * The book list sits directly in the sidebar between Dashboard and the
- * rest of the nav: a live, capped (`SIDEBAR_BOOK_LIMIT`) slice of the same
- * `/api/books/list` data BooksListDashboard renders in full on /books,
- * followed by an "All" link to that full list.
- *
- * Below it, "Databases" holds the rest — Campaigns, Results, Presets, and
- * one combined Keywords & ASINs table. Books is not repeated there; the
- * Books dropdown above is the single way to reach the book list and each
- * book's page. The old /databases tab switcher is gone; each is a real
- * route, so there is one way to reach each thing rather than a route and a
- * tab.
+ * The sidebar is deliberately short: the Books dropdown (a live, capped
+ * `SIDEBAR_BOOK_LIMIT` slice of `/api/books/list`, plus "All"), an "Add New
+ * Book" button, and Dashboard. The database tables (Campaigns, Results,
+ * Presets, Keywords & ASINs) are still real routes, reached from the pages
+ * that own them rather than from a second nav group here.
  */
 export default function AppShell({ active, children }: AppShellProps) {
   const router = useRouter();
@@ -85,7 +58,6 @@ export default function AppShell({ active, children }: AppShellProps) {
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [sidebarBooks, setSidebarBooks] = useState<SidebarBook[]>([]);
   const [booksExpanded, setBooksExpanded] = useState(active === "books");
-  const [databasesExpanded, setDatabasesExpanded] = useState(DATABASE_SECTIONS.includes(active));
 
   useEffect(() => {
     fetch("/api/admin/access")
@@ -133,10 +105,6 @@ export default function AppShell({ active, children }: AppShellProps) {
   const iconColor = (section: ShellSection) =>
     active === section ? "var(--icon-active)" : "var(--icon-default)";
 
-  const databasesGroupClass = `nav-item w-full ${DATABASE_SECTIONS.includes(active) ? "nav-item-active" : ""} ${
-    sidebarOpen ? "" : "justify-center px-0"
-  }`;
-
   return (
     <div className="app-shell flex min-h-screen">
       <aside
@@ -172,17 +140,6 @@ export default function AppShell({ active, children }: AppShellProps) {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-6" aria-label="Main">
-          {/* Dashboard: no dropdown, bigger button (spec: simplified sidebar). */}
-          <Link
-            href="/dashboard"
-            className={`${itemClass("dashboard")} py-3 text-md font-semibold`}
-            aria-current={active === "dashboard" ? "page" : undefined}
-            title={sidebarOpen ? undefined : "Dashboard"}
-          >
-            <LayoutDashboard size={22} className="shrink-0" style={{ color: iconColor("dashboard") }} />
-            {sidebarOpen && <span>Dashboard</span>}
-          </Link>
-
           {/* Books: dropdown listing recent books (with cover icons) + "All". */}
           <div>
             <button
@@ -238,46 +195,26 @@ export default function AppShell({ active, children }: AppShellProps) {
             )}
           </div>
 
-          {/* Databases: dropdown for Campaigns, Presets, Keywords, ASINs, Sources. */}
-          <div>
-            <button
-              onClick={() => setDatabasesExpanded((v) => !v)}
-              className={databasesGroupClass}
-              aria-expanded={databasesExpanded}
-              title={sidebarOpen ? undefined : "Databases"}
-            >
-              <Database
-                size={20}
-                className="shrink-0"
-                style={{ color: DATABASE_SECTIONS.includes(active) ? "var(--icon-active)" : "var(--icon-default)" }}
-              />
-              {sidebarOpen && (
-                <>
-                  <span className="flex-1 text-left">Databases</span>
-                  <ChevronDown
-                    size={16}
-                    className={`shrink-0 transition-transform ${databasesExpanded ? "rotate-180" : ""}`}
-                  />
-                </>
-              )}
-            </button>
+          {/* Add New Book sits directly above Dashboard, the only action in the nav. */}
+          <Link
+            href="/books/add"
+            className={`btn btn-primary mt-2 w-full ${sidebarOpen ? "" : "btn-icon px-0"}`}
+            title={sidebarOpen ? undefined : "Add New Book"}
+          >
+            <Plus size={20} className="shrink-0" />
+            {sidebarOpen && <span>Add New Book</span>}
+          </Link>
 
-            {sidebarOpen && databasesExpanded && (
-              <div className="space-y-1 py-1 pl-2" aria-label="Databases">
-                {DATABASE_LINKS.map(({ section, label, href, Icon }) => (
-                  <Link
-                    key={label}
-                    href={href}
-                    className={`nav-item ${active === section ? "nav-item-active" : ""}`}
-                    aria-current={active === section ? "page" : undefined}
-                  >
-                    <Icon size={20} className="shrink-0" style={{ color: iconColor(section) }} />
-                    <span>{label}</span>
-                  </Link>
-                ))}
-              </div>
-            )}
-          </div>
+          {/* Dashboard: no dropdown, bigger button (spec: simplified sidebar). */}
+          <Link
+            href="/dashboard"
+            className={`${itemClass("dashboard")} py-3 text-md font-semibold`}
+            aria-current={active === "dashboard" ? "page" : undefined}
+            title={sidebarOpen ? undefined : "Dashboard"}
+          >
+            <LayoutDashboard size={22} className="shrink-0" style={{ color: iconColor("dashboard") }} />
+            {sidebarOpen && <span>Dashboard</span>}
+          </Link>
         </nav>
 
         {/* Bottom-pinned account area (§4.4). */}
