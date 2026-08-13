@@ -11,7 +11,7 @@ type DatabaseTab = "keywords" | "competitors" | "sources";
 
 const TABS: Array<{ tab: DatabaseTab; label: string }> = [
   { tab: "keywords", label: "Keywords" },
-  { tab: "competitors", label: "Competitors" },
+  { tab: "competitors", label: "ASINs" },
   { tab: "sources", label: "Sources" },
 ];
 

@@ -106,7 +106,7 @@ export default function CompetitorsOverviewPage() {
     <div className="flex min-h-screen flex-col bg-white">
       <header className="page-header flex flex-wrap items-center justify-between gap-4">
         <div>
-          <h1 className="page-title">Competitors</h1>
+          <h1 className="page-title">ASINs</h1>
           <p className="page-subtitle mt-1">
             {competitors.length} unique competitor ASIN{competitors.length === 1 ? "" : "s"} across {books.length}{" "}
             book{books.length === 1 ? "" : "s"}

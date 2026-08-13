@@ -14,7 +14,6 @@ import {
   Trash2,
   X,
 } from "lucide-react";
-import CannibalizationPanel from "./CannibalizationPanel";
 import RecommendationsPanel from "./RecommendationsPanel";
 
 type MatchType = "broad" | "phrase" | "exact";
@@ -648,7 +647,6 @@ export default function KeywordManager({
         </div>
       </div>
 
-      <CannibalizationPanel bookId={bookId} onResolved={reload} />
       <RecommendationsPanel bookId={bookId} />
 
       {/* Generation is driven from the page-level action bar (BookActionBar); this stays as
@@ -841,6 +839,7 @@ export default function KeywordManager({
       {/* Add keyword */}
       <div className="mb-5 flex flex-wrap items-start gap-3">
         <textarea
+          id="manual-keyword-input"
           value={newText}
           onChange={(e) => setNewText(e.target.value)}
           placeholder="Add a keyword, or paste a list (one per line / comma separated)"
