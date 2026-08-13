@@ -71,7 +71,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // classification the same way lib/manualCompetitors.ts does for the
     // single-ASIN path — extra beyond whatever manualCompetitors already
     // knows for the book's own ASIN.
-    const competitorAsins = await getCompetitorAsins(supabase, bookId, user.id);
+    const { data: competitorAsins } = await getCompetitorAsins(supabase, bookId, user.id);
     const extraAuthors: string[] = [];
     const extraTitles: string[] = [];
 

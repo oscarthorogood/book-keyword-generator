@@ -30,7 +30,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       : undefined;
 
     const supabase = await supabaseServer();
-    const all = await getCompetitorAsins(supabase, bookId, user.id);
+    const { data: all } = await getCompetitorAsins(supabase, bookId, user.id);
     const targets = ids ? all.filter((row) => ids.includes(row.id)) : all;
 
     if (targets.length === 0) return Response.json({ success: true, updatedCount: 0 });

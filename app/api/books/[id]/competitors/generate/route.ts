@@ -114,7 +114,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       isKindleUnlimited: !!snapshot.isKindleUnlimited,
     });
 
-    const existing = await getCompetitorAsins(supabase, bookId, user.id);
+    const { data: existing } = await getCompetitorAsins(supabase, bookId, user.id);
     const existingAsins = new Set(existing.map((row) => row.competitor_asin.toUpperCase()));
     const ownAsin = (snapshot.asin ?? book.asin ?? "").toUpperCase();
 
