@@ -1,4 +1,5 @@
 import { summarizeCampaigns } from "@/lib/dashboardStats";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
@@ -19,11 +20,24 @@ export async function GET() {
     const supabase = await supabaseServer();
 
     const [{ data: campaigns, error: campaignsError }, { data: results, error: resultsError }] = await Promise.all([
-      supabase.from("campaigns").select("id, status").eq("user_id", user.id),
-      supabase
-        .from("campaign_results")
-        .select("campaign_id, spend, sales, orders, clicks, impressions, report_start, report_end")
-        .eq("user_id", user.id),
+      fetchAllRows(
+        (from, to) =>
+          supabase.from("campaigns").select("id, status").eq("user_id", user.id).order("id").range(from, to),
+        { label: "dashboard/campaign-summary:campaigns" }
+      ),
+      // Paged: campaign_results grows by a row per keyword per report period,
+      // so it is the fastest-growing table here. Lifetime spend/sales/ACOS is
+      // summed from these rows — a truncated read would under-report money.
+      fetchAllRows(
+        (from, to) =>
+          supabase
+            .from("campaign_results")
+            .select("campaign_id, spend, sales, orders, clicks, impressions, report_start, report_end")
+            .eq("user_id", user.id)
+            .order("id")
+            .range(from, to),
+        { label: "dashboard/campaign-summary:results" }
+      ),
     ]);
 
     if (campaignsError) return Response.json({ error: campaignsError.message }, { status: 400 });

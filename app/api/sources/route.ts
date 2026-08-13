@@ -1,4 +1,5 @@
 import { SOURCE_REGISTRY } from "@/lib/sourceRegistry";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
@@ -50,8 +51,23 @@ export async function GET() {
     const supabase = await supabaseServer();
     const [{ data: keywordRows, error: keywordError }, { data: competitorRows, error: competitorError }] =
       await Promise.all([
-        supabase.from("keywords").select("source, created_at").eq("user_id", user.id),
-        supabase.from("competitor_asins").select("source, created_at").eq("user_id", user.id),
+        // Paged: per-source contribution is counted by grouping every row, so
+        // a truncated read would under-report how much each source has added.
+        fetchAllRows(
+          (from, to) =>
+            supabase.from("keywords").select("source, created_at").eq("user_id", user.id).order("id").range(from, to),
+          { label: "sources:keywords" }
+        ),
+        fetchAllRows(
+          (from, to) =>
+            supabase
+              .from("competitor_asins")
+              .select("source, created_at")
+              .eq("user_id", user.id)
+              .order("id")
+              .range(from, to),
+          { label: "sources:competitor_asins" }
+        ),
       ]);
 
     if (keywordError) return Response.json({ error: keywordError.message }, { status: 400 });

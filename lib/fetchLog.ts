@@ -82,8 +82,17 @@ const HOST_POLICIES: Array<{ pattern: RegExp; policy: HostPolicy }> = [
 ];
 
 interface HostState {
-  lastStartedAt: number;
+  /**
+   * Earliest time the next request to this host may start. Reserved
+   * synchronously when a slot is taken (see reserveStart), rather than
+   * derived from when the previous request happened to begin — two callers
+   * reading a shared "last started" stamp can both decide the gap has
+   * elapsed and start together, defeating the spacing.
+   */
+  nextAllowedStart: number;
   inFlight: number;
+  /** Resolvers for callers queued on a concurrency slot, in FIFO order. */
+  waiters: Array<() => void>;
   /** Set when a bot check was seen; no further fetches until this passes. */
   blockedUntil: number;
   consecutiveBlocks: number;
@@ -106,10 +115,55 @@ function policyFor(host: string): HostPolicy {
 function stateFor(host: string): HostState {
   let state = hostStates.get(host);
   if (!state) {
-    state = { lastStartedAt: 0, inFlight: 0, blockedUntil: 0, consecutiveBlocks: 0 };
+    state = { nextAllowedStart: 0, inFlight: 0, waiters: [], blockedUntil: 0, consecutiveBlocks: 0 };
     hostStates.set(host, state);
   }
   return state;
+}
+
+/**
+ * Takes one of the host's concurrency slots, waiting in FIFO order if they
+ * are all busy.
+ *
+ * The free-slot check and the increment happen in the same tick, with no
+ * `await` between them, so the slot is claimed the instant it is observed.
+ * The previous implementation polled — `while (inFlight >= max) await
+ * sleep(50)` — which let every queued caller wake from the same timer, all
+ * observe the one free slot, and all proceed: the Amazon policy of
+ * maxConcurrent 1 could run several page fetches at once and provoke exactly
+ * the hard block the limiter exists to avoid.
+ */
+function acquireSlot(state: HostState, policy: HostPolicy): Promise<void> | void {
+  if (state.inFlight < policy.maxConcurrent) {
+    state.inFlight += 1;
+    return;
+  }
+  return new Promise<void>((resolve) => state.waiters.push(resolve));
+}
+
+/**
+ * Releases a slot, handing it straight to the next queued caller.
+ *
+ * The hand-off deliberately does not decrement and re-increment `inFlight`:
+ * dropping it to zero first would open a window for a caller arriving in
+ * between to take the slot ahead of everyone already queued.
+ */
+function releaseSlot(state: HostState): void {
+  const next = state.waiters.shift();
+  if (next) next();
+  else state.inFlight -= 1;
+}
+
+/**
+ * Reserves this request's start time and returns how long to wait for it.
+ * Reserving synchronously means concurrent callers each get their own
+ * spaced-out slot instead of racing on a shared timestamp.
+ */
+function reserveStart(state: HostState, policy: HostPolicy): number {
+  const now = Date.now();
+  const startAt = Math.max(now, state.nextAllowedStart);
+  state.nextAllowedStart = startAt + policy.minIntervalMs;
+  return startAt - now;
 }
 
 function sleep(ms: number): Promise<void> {
@@ -176,17 +230,16 @@ export async function withRateLimit<T>(
     throw new HostBlockedError(host, retryAfterMs);
   }
 
-  // Wait for a concurrency slot, then for the minimum gap since the last start.
-  while (state.inFlight >= policy.maxConcurrent) {
-    await sleep(50);
-  }
-  const sinceLast = Date.now() - state.lastStartedAt;
-  if (sinceLast < policy.minIntervalMs) await sleep(policy.minIntervalMs - sinceLast);
-
-  state.inFlight += 1;
-  state.lastStartedAt = Date.now();
+  // Take a concurrency slot, then wait out this request's reserved start
+  // time. The spacing wait happens while holding the slot: releasing it
+  // during the wait would let another caller start inside the gap.
+  const pending = acquireSlot(state, policy);
+  if (pending) await pending;
 
   try {
+    const waitMs = reserveStart(state, policy);
+    if (waitMs > 0) await sleep(waitMs);
+
     const result = await task();
     if (result.blocked) {
       reportBotCheck(url);
@@ -223,7 +276,7 @@ export async function withRateLimit<T>(
     });
     throw err;
   } finally {
-    state.inFlight -= 1;
+    releaseSlot(state);
   }
 }
 

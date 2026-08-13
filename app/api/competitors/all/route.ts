@@ -1,4 +1,5 @@
 import { aggregateCompetitorsAcrossBooks } from "@/lib/allCompetitorsAggregate";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
@@ -26,10 +27,20 @@ export async function GET() {
 
     const bookById = new Map((books ?? []).map((b) => [b.id, b]));
 
-    const { data: competitors, error: competitorsError } = await supabase
-      .from("competitor_asins")
-      .select("book_id, competitor_asin, source, status, bid, title, author, price, bsr, competitor_count, mean_rank")
-      .eq("user_id", user.id);
+    // Paged, mirroring GET /api/keywords/all: an unranged select would stop at
+    // PostgREST's row cap and silently drop ASINs from the cross-book view.
+    const { data: competitors, error: competitorsError } = await fetchAllRows(
+      (from, to) =>
+        supabase
+          .from("competitor_asins")
+          .select(
+            "book_id, competitor_asin, source, status, bid, title, author, price, bsr, competitor_count, mean_rank"
+          )
+          .eq("user_id", user.id)
+          .order("id")
+          .range(from, to),
+      { label: "competitors/all" }
+    );
     if (competitorsError) return Response.json({ error: competitorsError.message }, { status: 400 });
 
     const rows = (competitors ?? [])

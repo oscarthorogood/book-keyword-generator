@@ -3,10 +3,60 @@
  * Replaces duplicated constants scattered across lib/auth.ts and middleware.ts
  */
 
+/**
+ * The development-only fallback for AUTH_SECRET. This value is committed to
+ * the repository, so anything signed with it is forgeable by anyone who can
+ * read the source — it must never be used to sign a real approve/deny link.
+ */
+const DEV_AUTH_SECRET = "your-secret-key-change-this-in-production";
+
+/**
+ * Length a real secret should meet. Falling short is warned about rather
+ * than refused: a short *custom* secret is weaker than it should be, but it
+ * is not public, so refusing it would take a working deployment's approve
+ * flow offline over a theoretical weakness. The published default is the
+ * actual vulnerability, and that is refused outright below.
+ */
+const RECOMMENDED_AUTH_SECRET_LENGTH = 32;
+
 export const AUTH_CONFIG = {
-  // Signs the one-click approve/deny links emailed to the admin. Session
-  // handling itself is Supabase's job — this secret no longer mints sessions.
-  SECRET_KEY: new TextEncoder().encode(process.env.AUTH_SECRET || "your-secret-key-change-this-in-production"),
+  /**
+   * Key for the one-click approve/deny links emailed to the admin. Session
+   * handling itself is Supabase's job — this secret no longer mints sessions.
+   *
+   * Resolved lazily, on use, rather than at module load: this module is
+   * imported by `proxy.ts` and by route handlers that Next evaluates while
+   * collecting page data at build time, where the runtime env is not
+   * necessarily present. Throwing at import time would break the build
+   * instead of the one request that actually needs the key.
+   *
+   * Fails closed in production. Previously this silently fell back to
+   * DEV_AUTH_SECRET, which meant a deployment missing AUTH_SECRET signed its
+   * admin approve links with a value published in this repo — letting anyone
+   * mint a valid "approved" token for their own address and grant themselves
+   * access. That case is now a hard error in production.
+   */
+  secretKey(): Uint8Array {
+    const secret = process.env.AUTH_SECRET;
+
+    if (process.env.NODE_ENV === "production") {
+      if (!secret || secret === DEV_AUTH_SECRET) {
+        throw new Error(
+          "AUTH_SECRET is not set. It signs the admin approve/deny links, so " +
+            "running without it would let anyone forge an access approval. Set " +
+            "AUTH_SECRET to a long random value and redeploy."
+        );
+      }
+      if (secret.length < RECOMMENDED_AUTH_SECRET_LENGTH) {
+        console.warn(
+          `[config] AUTH_SECRET is ${secret.length} chars; ` +
+            `${RECOMMENDED_AUTH_SECRET_LENGTH}+ of random data is recommended for HS256.`
+        );
+      }
+    }
+
+    return new TextEncoder().encode(secret || DEV_AUTH_SECRET);
+  },
   // Reachable without a session. Anything here is also matched as a prefix,
   // so "/auth" covers "/auth/confirm".
   PUBLIC_PATHS: [

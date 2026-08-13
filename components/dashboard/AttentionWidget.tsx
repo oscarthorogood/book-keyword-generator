@@ -8,13 +8,26 @@ import type { AttentionItem } from "@/lib/dashboardStats";
 const REASON_BADGE: Record<AttentionItem["reason"], string> = {
   capture_issue: "badge-error",
   no_active_keywords: "badge-warning",
+  awaiting_filters: "badge-warning",
   export_failed: "badge-error",
 };
 
 /**
+ * Short badge text per reason. A lookup rather than a ternary chain: the
+ * chain previously ended in a bare "Export" fallback, so a newly added
+ * reason silently rendered under the wrong label.
+ */
+const REASON_BADGE_TEXT: Record<AttentionItem["reason"], string> = {
+  capture_issue: "Capture",
+  no_active_keywords: "Keywords",
+  awaiting_filters: "Filters",
+  export_failed: "Export",
+};
+
+/**
  * Dashboard "Needs attention" widget: books with a flagged capture snapshot,
- * books whose keywords are all paused/rejected/archived (nothing would
- * actually target), and campaigns whose last export failed. Own fetch,
+ * books with nothing active to target (either waiting on a Run Filters pass
+ * or genuinely stuck), and campaigns whose last export failed. Own fetch,
  * fails soft.
  */
 export default function AttentionWidget() {
@@ -60,11 +73,7 @@ export default function AttentionWidget() {
           {items.slice(0, 8).map((item, i) => (
             <li key={`${item.bookId}-${item.reason}-${i}`} className="flex items-start gap-3 py-2">
               <span className={`badge ${REASON_BADGE[item.reason]} mt-0.5 shrink-0`}>
-                {item.reason === "capture_issue"
-                  ? "Capture"
-                  : item.reason === "no_active_keywords"
-                    ? "Keywords"
-                    : "Export"}
+                {REASON_BADGE_TEXT[item.reason]}
               </span>
               <div className="min-w-0 flex-1">
                 <Link href={`/books/${item.bookId}`} className="cell-primary block truncate">

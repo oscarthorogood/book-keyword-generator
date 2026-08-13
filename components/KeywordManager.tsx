@@ -181,6 +181,7 @@ export default function KeywordManager({
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [promoteNotice, setPromoteNotice] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
+  const [bulkError, setBulkError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -407,30 +408,81 @@ export default function KeywordManager({
     }
   }
 
+  /**
+   * Sends the bulk mutation requests, returning a message if any failed.
+   *
+   * Both bulk actions repaint the table optimistically before the request
+   * goes out. The responses used to be discarded entirely, so a rejected
+   * PATCH/DELETE left the UI showing a change the database never took — a
+   * "Delete" across a few hundred selected rows looked like it worked and
+   * silently hadn't, until a later reload brought every row back. A network
+   * rejection was worse still: it escaped these handlers as an unhandled
+   * promise rejection and the user saw nothing at all.
+   */
+  async function sendBulkRequests(
+    requests: Array<{ what: string; send: () => Promise<Response> }>
+  ): Promise<string | null> {
+    try {
+      const responses = await Promise.all(requests.map(({ send }) => send()));
+
+      const failures: string[] = [];
+      for (const [index, res] of responses.entries()) {
+        if (res.ok) continue;
+        const body = await res.json().catch(() => ({}));
+        failures.push(body.error || `Could not update the selected ${requests[index].what} (${res.status}).`);
+      }
+      return failures.length > 0 ? failures.join(" ") : null;
+    } catch (err) {
+      return err instanceof Error ? err.message : "The bulk change could not be sent.";
+    }
+  }
+
+  /** Re-syncs from the server after a failed bulk change, so the table stops
+   *  showing an edit the database rejected. */
+  async function revertBulk(message: string) {
+    setBulkError(message);
+    await reload();
+  }
+
   async function bulkUpdate(status: KeywordStatus) {
     const ids = Array.from(selected);
     if (ids.length === 0) return;
     const keywordIds = ids.filter((id) => rowById(id)?.kind === "keyword");
     const asinIds = ids.filter((id) => rowById(id)?.kind === "asin");
+    setBulkError(null);
     setKeywords((prev) => prev.map((k) => (selected.has(k.id) ? { ...k, status } : k)));
     setCompetitors((prev) => prev.map((a) => (selected.has(a.id) ? { ...a, status } : a)));
     setSelected(new Set());
-    await Promise.all([
-      keywordIds.length > 0
-        ? fetch(`/api/books/${bookId}/keywords`, {
+
+    const requests: Array<{ what: string; send: () => Promise<Response> }> = [];
+    if (keywordIds.length > 0) {
+      requests.push({
+        what: "keywords",
+        send: () =>
+          fetch(`/api/books/${bookId}/keywords`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ids: keywordIds, status }),
-          })
-        : Promise.resolve(),
-      asinIds.length > 0
-        ? fetch(`/api/books/${bookId}/competitors`, {
+          }),
+      });
+    }
+    if (asinIds.length > 0) {
+      requests.push({
+        what: "ASINs",
+        send: () =>
+          fetch(`/api/books/${bookId}/competitors`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ids: asinIds, status }),
-          })
-        : Promise.resolve(),
-    ]);
+          }),
+      });
+    }
+
+    const error = await sendBulkRequests(requests);
+    if (error) {
+      await revertBulk(error);
+      return;
+    }
     onKeywordsChanged?.();
   }
 
@@ -439,25 +491,42 @@ export default function KeywordManager({
     if (ids.length === 0) return;
     const keywordIds = ids.filter((id) => rowById(id)?.kind === "keyword");
     const asinIds = ids.filter((id) => rowById(id)?.kind === "asin");
+    setBulkError(null);
     setKeywords((prev) => prev.filter((k) => !selected.has(k.id)));
     setCompetitors((prev) => prev.filter((a) => !selected.has(a.id)));
     setSelected(new Set());
-    await Promise.all([
-      keywordIds.length > 0
-        ? fetch(`/api/books/${bookId}/keywords`, {
+
+    const requests: Array<{ what: string; send: () => Promise<Response> }> = [];
+    if (keywordIds.length > 0) {
+      requests.push({
+        what: "keywords",
+        send: () =>
+          fetch(`/api/books/${bookId}/keywords`, {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ids: keywordIds }),
-          })
-        : Promise.resolve(),
-      asinIds.length > 0
-        ? fetch(`/api/books/${bookId}/competitors`, {
+          }),
+      });
+    }
+    if (asinIds.length > 0) {
+      requests.push({
+        what: "ASINs",
+        send: () =>
+          fetch(`/api/books/${bookId}/competitors`, {
             method: "DELETE",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ ids: asinIds }),
-          })
-        : Promise.resolve(),
-    ]);
+          }),
+      });
+    }
+
+    const error = await sendBulkRequests(requests);
+    if (error) {
+      // The rows are already gone from the table at this point, so the
+      // reload inside revertBulk is what puts them back.
+      await revertBulk(error);
+      return;
+    }
     onKeywordsChanged?.();
   }
 
@@ -903,6 +972,13 @@ export default function KeywordManager({
             <Trash2 size={16} />
             Delete
           </button>
+        </div>
+      )}
+
+      {bulkError && (
+        <div className="alert alert-error mb-4" role="alert">
+          <AlertCircle size={20} className="mt-0.5 shrink-0" />
+          <p className="flex-1">{bulkError} The list has been reloaded to match what&apos;s saved.</p>
         </div>
       )}
 

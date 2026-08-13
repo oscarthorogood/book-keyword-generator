@@ -1,4 +1,5 @@
 import { summarizeKeywordStats } from "@/lib/dashboardStats";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
@@ -17,10 +18,18 @@ export async function GET() {
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const supabase = await supabaseServer();
-    const { data, error } = await supabase
-      .from("keywords")
-      .select("status, match_type, source, specificity, rejected_by_filter")
-      .eq("user_id", user.id);
+    // Paged: these counts are summed in JS, so a silently truncated read
+    // would render an understated distribution with no error shown.
+    const { data, error } = await fetchAllRows(
+      (from, to) =>
+        supabase
+          .from("keywords")
+          .select("status, match_type, source, specificity, rejected_by_filter")
+          .eq("user_id", user.id)
+          .order("id")
+          .range(from, to),
+      { label: "dashboard/keyword-stats" }
+    );
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
 

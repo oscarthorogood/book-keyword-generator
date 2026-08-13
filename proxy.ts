@@ -49,9 +49,24 @@ export async function proxy(request: NextRequest) {
 
   // getUser() revalidates against Supabase — unlike getSession(), which only
   // decodes whatever cookie the browser sent and is therefore spoofable.
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
+  //
+  // A network fault here throws rather than returning `{ user: null }`. Left
+  // unhandled that propagates out of the proxy, so a transient Supabase
+  // outage turns every route in the app into an opaque 500 with nothing in
+  // the logs identifying auth as the cause. Caught and treated as "not
+  // signed in": still fails closed, but the user gets the login page and the
+  // reason is recorded.
+  let user = null;
+  try {
+    ({
+      data: { user },
+    } = await supabase.auth.getUser());
+  } catch (err) {
+    console.error(
+      `[proxy] session check failed for ${pathname}:`,
+      err instanceof Error ? err.message : err
+    );
+  }
 
   if (!user) {
     const loginUrl = new URL("/login", request.url);

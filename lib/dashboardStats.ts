@@ -235,7 +235,11 @@ export interface AttentionCampaignRow {
   last_export_error: string | null;
 }
 
-export type AttentionReason = "capture_issue" | "no_active_keywords" | "export_failed";
+export type AttentionReason =
+  | "capture_issue"
+  | "no_active_keywords"
+  | "awaiting_filters"
+  | "export_failed";
 
 export interface AttentionItem {
   bookId: string;
@@ -247,6 +251,7 @@ export interface AttentionItem {
 const ATTENTION_REASON_LABEL: Record<AttentionReason, string> = {
   capture_issue: "Capture issue",
   no_active_keywords: "No active keywords",
+  awaiting_filters: "Run Filters to promote the generated keywords into the campaign pool",
   export_failed: "Campaign export failed",
 };
 
@@ -256,6 +261,16 @@ const ATTENTION_REASON_LABEL: Record<AttentionReason, string> = {
  * keywords but none are `active` (nothing would actually get targeted), and
  * campaigns whose last export failed (`campaigns.last_export_error`, sql/28).
  * One book can surface more than once if it has more than one issue.
+ *
+ * The "none active" case is split in two. Since generation started landing
+ * every row in `archived` (PR #61), a book sitting on a pile of archived
+ * rows with nothing active is the *normal* state straight after a Generate
+ * run, not a fault — reporting it as "No active keywords" fired on every
+ * freshly generated book and buried the real problems. A book with archived
+ * rows waiting on Run Filters gets that next step named instead, matching
+ * the wording the campaign-creation route already uses for the same dead
+ * end. "No active keywords" is now reserved for the genuinely stuck case:
+ * keywords exist, none are active, and none are waiting to be promoted.
  */
 export function booksNeedingAttention(
   books: AttentionBookRow[],
@@ -266,9 +281,13 @@ export function booksNeedingAttention(
   const bookById = new Map(books.map((b) => [b.id, b]));
 
   const activeCountByBook = new Map<string, number>();
+  const archivedCountByBook = new Map<string, number>();
   for (const row of keywordRows) {
-    if (row.status !== "active") continue;
-    activeCountByBook.set(row.book_id, (activeCountByBook.get(row.book_id) ?? 0) + 1);
+    if (row.status === "active") {
+      activeCountByBook.set(row.book_id, (activeCountByBook.get(row.book_id) ?? 0) + 1);
+    } else if (row.status === "archived") {
+      archivedCountByBook.set(row.book_id, (archivedCountByBook.get(row.book_id) ?? 0) + 1);
+    }
   }
 
   for (const book of books) {
@@ -282,11 +301,13 @@ export function booksNeedingAttention(
       });
     }
     if (book.total_keywords > 0 && (activeCountByBook.get(book.id) ?? 0) === 0) {
+      const awaitingFilters = (archivedCountByBook.get(book.id) ?? 0) > 0;
+      const reason: AttentionReason = awaitingFilters ? "awaiting_filters" : "no_active_keywords";
       items.push({
         bookId: book.id,
         bookTitle: book.title,
-        reason: "no_active_keywords",
-        detail: ATTENTION_REASON_LABEL.no_active_keywords,
+        reason,
+        detail: ATTENTION_REASON_LABEL[reason],
       });
     }
   }

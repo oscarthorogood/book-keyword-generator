@@ -1,3 +1,4 @@
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { currentUser } from "@/lib/supabaseServer";
 import { supabaseServer } from "@/lib/supabaseServer";
 
@@ -32,12 +33,27 @@ export async function GET(
 
     const supabase = await supabaseServer();
 
-    const { data: keywords, error } = await supabase
-      .from("keywords")
-      .select("*")
-      .eq("book_id", bookId)
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+    // Paged: this backs the whole keyword manager, and rows accumulate across
+    // generate runs (each adds up to BOOK_KEYWORD_MAX + BOOK_COMP_NAME_MAX,
+    // plus negatives and filter rejections). An unranged select would stop at
+    // PostgREST's row cap without erroring, so a well-worked book would show a
+    // silently short bank — and its tab counts would disagree with the totals.
+    const { data: keywords, error } = await fetchAllRows(
+      (from, to) =>
+        supabase
+          .from("keywords")
+          .select("*")
+          .eq("book_id", bookId)
+          .eq("user_id", user.id)
+          .order("created_at", { ascending: false })
+          // Tiebreaker, and load-bearing for paging: a generate run inserts
+          // hundreds of rows sharing one created_at, so ordering on that
+          // column alone leaves their relative order undefined between
+          // pages — the same keyword could arrive twice, or not at all.
+          .order("id", { ascending: false })
+          .range(from, to),
+      { label: `books/${bookId}/keywords` }
+    );
 
     if (error) {
       return Response.json({ error: error.message }, { status: 400 });
