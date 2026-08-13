@@ -395,7 +395,7 @@ export async function POST(
       groqPersonaCandidates,
       liveDecodoRows,
       liveZenrowsRows,
-      existingAsinRows,
+      existingAsinRowsResult,
     ] = await Promise.all([
       isAdsApiConfigured()
         ? getAdsApiKeywordRecommendations(snapshot.asin, snapshot.marketplace).catch((err: Error) => {
@@ -441,7 +441,7 @@ export async function POST(
     // a provenance segment now carries the discovery query that found the ASIN
     // (see the competitors generate route), which is not a keyword.
     const manualCompNames: KeywordCandidate[] = [];
-    for (const row of existingAsinRows) {
+    for (const row of existingAsinRowsResult.data) {
       if (!row.notes) continue;
       for (const part of row.notes.split(" — ")) {
         if (/^Discovered via /i.test(part.trim())) continue;

@@ -76,7 +76,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Dedupe against ASINs already tracked for this book, and against the
     // book's own ASIN — a preset competitor ASIN can't be the seed book
     // itself.
-    const existing = await getCompetitorAsins(supabase, bookId, user.id);
+    const { data: existing } = await getCompetitorAsins(supabase, bookId, user.id);
     const existingAsins = new Set(existing.map((row) => row.competitor_asin.toUpperCase()));
     const ownAsin = (snapshot.asin ?? book.asin ?? "").toUpperCase();
 

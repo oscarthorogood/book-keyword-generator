@@ -22,7 +22,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const supabase = await supabaseServer();
-    const competitors = await getCompetitorAsins(supabase, bookId, user.id);
+    const { data: competitors, error } = await getCompetitorAsins(supabase, bookId, user.id);
+    if (error) return Response.json({ error }, { status: 400 });
 
     return Response.json({ success: true, competitors });
   } catch (err) {

@@ -9,6 +9,7 @@
 
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CompetitorAsin, CompetitorKeyword } from "./types";
+import { withClockSkewRetry } from "./supabaseServer";
 
 const COMPETITOR_ASIN_COLUMNS =
   "id, book_id, competitor_asin, source, notes, status, bid, rejection_reason, rejected_by_filter, title, author, price, bsr, competitor_count, mean_rank, specificity, created_at, updated_at";
@@ -21,19 +22,21 @@ export async function getCompetitorAsins(
   supabase: SupabaseClient,
   bookId: string,
   userId: string
-): Promise<CompetitorAsin[]> {
-  const { data, error } = await supabase
-    .from("competitor_asins")
-    .select(COMPETITOR_ASIN_COLUMNS)
-    .eq("book_id", bookId)
-    .eq("user_id", userId)
-    .order("created_at", { ascending: false });
+): Promise<{ data: CompetitorAsin[]; error: string | null }> {
+  const { data, error } = await withClockSkewRetry(() =>
+    supabase
+      .from("competitor_asins")
+      .select(COMPETITOR_ASIN_COLUMNS)
+      .eq("book_id", bookId)
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+  );
 
   if (error) {
     console.error("Failed to load competitor ASINs:", error.message);
-    return [];
+    return { data: [], error: error.message };
   }
-  return (data ?? []) as CompetitorAsin[];
+  return { data: (data ?? []) as CompetitorAsin[], error: null };
 }
 
 export interface AddCompetitorAsinInput {
