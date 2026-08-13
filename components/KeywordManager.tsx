@@ -69,7 +69,8 @@ interface BankRow {
 async function fetchCompetitors(bookId: string): Promise<CompetitorAsinRow[]> {
   const res = await fetch(`/api/books/${bookId}/competitors`);
   const body = await res.json().catch(() => ({}));
-  return res.ok ? (body.competitors ?? []) : [];
+  if (!res.ok) throw new Error(body.error || "Could not load competitor ASINs.");
+  return body.competitors ?? [];
 }
 
 async function fetchTargetMemberships(
@@ -124,7 +125,8 @@ function labelForFilter(filter: string | null | undefined): string {
 async function fetchKeywords(bookId: string): Promise<Keyword[]> {
   const res = await fetch(`/api/books/${bookId}/keywords`);
   const body = await res.json().catch(() => ({}));
-  return res.ok ? (body.keywords ?? []) : [];
+  if (!res.ok) throw new Error(body.error || "Could not load keywords.");
+  return body.keywords ?? [];
 }
 
 function labelForSource(source: string | null): string {
@@ -194,12 +196,17 @@ export default function KeywordManager({
   }, [bookId]);
 
   async function reload() {
-    const [kw, comp, memb] = await Promise.all([fetchKeywords(bookId), fetchCompetitors(bookId), fetchTargetMemberships(bookId)]);
-    setKeywords(kw);
-    setCompetitors(comp);
-    setMemberships(memb);
-    setSelected(new Set());
-    onKeywordsChanged?.();
+    try {
+      const [kw, comp, memb] = await Promise.all([fetchKeywords(bookId), fetchCompetitors(bookId), fetchTargetMemberships(bookId)]);
+      setKeywords(kw);
+      setCompetitors(comp);
+      setMemberships(memb);
+      setLoadError(null);
+      setSelected(new Set());
+      onKeywordsChanged?.();
+    } catch (err) {
+      setLoadError(err instanceof Error ? err.message : "Could not load the keyword/ASIN bank.");
+    }
   }
 
   /** Restores an archived keyword or ASIN — gated server-side on the
