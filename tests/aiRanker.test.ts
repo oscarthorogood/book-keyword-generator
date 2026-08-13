@@ -162,3 +162,50 @@ describe("rankKeywordsWithAi", () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 });
+
+// The verdict list is untrusted model output: it can name the same candidate
+// more than once, and can answer with something other than the array the
+// schema asked for.
+describe("mergeAiRanking with repeated verdicts", () => {
+  it("keeps one entry per candidate when the model names it twice", async () => {
+    const { mergeAiRanking } = await import("../lib/aiRanker");
+    const pool: KeywordCandidate[] = [
+      { text: "scottish crime thriller", sources: ["genre-metadata"] },
+      { text: "tartan noir books", sources: ["genre-metadata"] },
+    ];
+    const merged = mergeAiRanking(
+      pool,
+      [
+        { text: "scottish crime thriller", category: "tropes", score: 90 },
+        { text: "scottish crime thriller", category: "tropes", score: 70 },
+        { text: "tartan noir books", category: "tropes", score: 80 },
+      ],
+      "tropes",
+      10
+    );
+
+    expect(merged.map((c) => c.text)).toEqual(["scottish crime thriller", "tartan noir books"]);
+    // First verdict wins, so the repeat doesn't quietly rescore it either.
+    expect(merged[0].score).toBe(90);
+  });
+
+  it("does not let a repeated verdict eat another candidate's capped slot", async () => {
+    const { mergeAiRanking } = await import("../lib/aiRanker");
+    const pool: KeywordCandidate[] = [
+      { text: "a", sources: ["genre-metadata"] },
+      { text: "b", sources: ["genre-metadata"] },
+    ];
+    const merged = mergeAiRanking(
+      pool,
+      [
+        { text: "a", category: "tropes", score: 90 },
+        { text: "a", category: "tropes", score: 89 },
+        { text: "b", category: "tropes", score: 88 },
+      ],
+      "tropes",
+      2
+    );
+
+    expect(merged.map((c) => c.text)).toEqual(["a", "b"]);
+  });
+});
