@@ -120,11 +120,6 @@ function labelForFilter(filter: string | null | undefined): string {
   return filter.replace(/([A-Z])/g, " $1").toLowerCase();
 }
 
-/** Positive-verdict codes (lib/keywordFilters.ts) are SCREAMING_SNAKE_CASE; show them as words. */
-function labelForPassCode(code: string): string {
-  return code.replace(/_/g, " ").toLowerCase();
-}
-
 /** Fetches without touching state, so effects never set state synchronously. */
 async function fetchKeywords(bookId: string): Promise<Keyword[]> {
   const res = await fetch(`/api/books/${bookId}/keywords`);
@@ -865,9 +860,16 @@ export default function KeywordManager({
             </p>
           </div>
           {bank.length === 0 ? (
-            <button onClick={() => setShowGenerateForm(true)} className="btn btn-primary">
+            <button
+              onClick={() => {
+                const el = document.getElementById("manual-keyword-input");
+                el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                (el as HTMLTextAreaElement | null)?.focus();
+              }}
+              className="btn btn-primary"
+            >
               <Sparkles size={20} />
-              Generate keywords
+              Add keywords
             </button>
           ) : (
             <button
