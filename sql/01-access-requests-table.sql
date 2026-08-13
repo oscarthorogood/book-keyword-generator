@@ -9,7 +9,7 @@
 CREATE TABLE IF NOT EXISTS access_requests (
   email TEXT PRIMARY KEY,
   status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'approved', 'denied')),
-  decision_token TEXT,
+  decision_token UUID NOT NULL DEFAULT gen_random_uuid(),
   nonce TEXT, -- For HMAC-signed approval/denial links
   requested_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
   notified_at TIMESTAMP WITH TIME ZONE,
