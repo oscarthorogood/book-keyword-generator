@@ -44,8 +44,6 @@ function ActionMenu({ label, icon, items, primary }: { label: string; icon: Reac
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [open]);
 
-  let lastSection: string | undefined;
-
   return (
     <div className="relative" ref={ref}>
       <button
@@ -68,9 +66,8 @@ function ActionMenu({ label, icon, items, primary }: { label: string; icon: Reac
           style={{ borderColor: "var(--line)" }}
         >
           {items.map((item, index) => {
-            const showHeading = !!item.section && item.section !== lastSection;
             const isFirst = index === 0;
-            lastSection = item.section;
+            const showHeading = !!item.section && item.section !== items[index - 1]?.section;
             return (
               <div key={item.key}>
                 {showHeading && (
