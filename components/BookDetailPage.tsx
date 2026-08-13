@@ -344,18 +344,7 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
           onMetadataRefreshed={onDataChanged}
         />
 
-        {/*
-         * Regression fix: this was dropped from the page during the
-         * "Simplify book page" refactor (#46), which left BookActionBar's
-         * "Update campaigns" bulk button gated on
-         * campaign.amazon_campaign_id with no surviving UI anywhere that
-         * could ever set it — "needs Amazon ID" would show forever and
-         * Update Campaign could never run. CampaignActions is the only
-         * place that pastes the Amazon Campaign ID back in per campaign
-         * (spec §4 step 8) and exposes the matching per-campaign "Filter &
-         * update campaign" action; CampaignDetailPage's own comment still
-         * assumed this was rendered here.
-         */}
+        {/* Per-campaign list + "Filter & update campaign" (Create Campaigns itself lives in BookActionBar's Campaigns dropdown). */}
         <CampaignActions bookId={bookId} />
 
         <KeywordManager

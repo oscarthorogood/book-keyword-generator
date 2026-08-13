@@ -13,7 +13,6 @@ interface Campaign {
   daily_budget: number;
   currency: string;
   status: string;
-  amazon_campaign_id: string | null;
   operation: string;
   export_batch_id: string;
   bulksheet_download_url: string | null;
@@ -162,12 +161,6 @@ export default function CampaignDetailPage({ campaignId }: { campaignId: string 
                 <div>
                   <dt className="meta-line text-xs">Status</dt>
                   <dd className="cell-primary">{campaign.status}</dd>
-                </div>
-                <div>
-                  <dt className="meta-line text-xs">Amazon Campaign ID</dt>
-                  <dd className="cell-primary">
-                    {campaign.amazon_campaign_id ?? <span className="badge badge-warning">needs Amazon ID</span>}
-                  </dd>
                 </div>
                 <div>
                   <dt className="meta-line text-xs">Last export</dt>
