@@ -25,7 +25,7 @@
  * until it runs out of ASINs.
  */
 
-import { parsePriceText } from "./priceText";
+import { parsePriceText } from "./numberText";
 import type { Marketplace } from "./types";
 
 const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY;

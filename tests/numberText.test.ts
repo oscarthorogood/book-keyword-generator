@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { parsePriceText } from "../lib/priceText";
+import { parseCountText, parsePriceText } from "../lib/numberText";
 
 describe("parsePriceText", () => {
   it("reads anglophone prices (US, UK, CA)", () => {
@@ -57,5 +57,39 @@ describe("parsePriceText", () => {
   // rivals under £2.99, and could never fire on a EUR marketplace before.
   it("puts a near-free continental price below the race-to-bottom floor", () => {
     expect(parsePriceText("0,99 €")).toBeLessThan(2.99);
+  });
+});
+
+describe("parseCountText", () => {
+  it("reads anglophone counts", () => {
+    expect(parseCountText("1,234 ratings")).toBe(1234);
+    expect(parseCountText("87 customer reviews")).toBe(87);
+    expect(parseCountText("1,234,567")).toBe(1234567);
+  });
+
+  // The regression: /([\d,]+)/ stopped at the first dot, so a German listing
+  // with "1.234 Bewertungen" was read as having one review.
+  it("reads continental counts instead of stopping at the first dot", () => {
+    expect(parseCountText("1.234 Bewertungen")).toBe(1234);
+    expect(parseCountText("12.345 valoraciones")).toBe(12345);
+    expect(parseCountText("1 234 évaluations")).toBe(1234);
+  });
+
+  it("does not read a grouped count as a fraction", () => {
+    // 1.234 is one-thousand-two-hundred-and-thirty-four reviews, never 1.234.
+    expect(parseCountText("1.234")).toBe(1234);
+    expect(Number.isInteger(parseCountText("1.234"))).toBe(true);
+  });
+
+  it("returns undefined when there is no count", () => {
+    expect(parseCountText("")).toBeUndefined();
+    expect(parseCountText("no reviews yet")).toBeUndefined();
+    expect(parseCountText(null)).toBeUndefined();
+  });
+
+  it("truncates a numeric input and rejects non-finite ones", () => {
+    expect(parseCountText(1234)).toBe(1234);
+    expect(parseCountText(12.9)).toBe(12);
+    expect(parseCountText(NaN)).toBeUndefined();
   });
 });

@@ -1,6 +1,6 @@
 /**
- * Locale-aware price parsing, shared by every source that reads a price off a
- * page or an API response (lib/scrape.ts, lib/serpApi.ts).
+ * Locale-aware number parsing, shared by every source that reads a price or a
+ * count off a page or an API response (lib/scrape.ts, lib/serpApi.ts).
  *
  * This app buys ads in seven marketplaces (lib/marketplaceCurrency.ts) and
  * four of them — DE, FR, IT, ES — write money the continental way: "12,50 €"
@@ -63,5 +63,34 @@ export function parsePriceText(raw: unknown): number | undefined {
 
   // A trailing separator belongs to the sentence, not the number ("£12.").
   const value = toNumber(match[0].replace(/[.,]+$/, ""));
+  return Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Reads a whole-number count — review counts, rating counts, Q&A counts — out
+ * of text like "1,234 ratings" or "1.234 Bewertungen".
+ *
+ * Counts have no fractional part, so unlike a price there is nothing to
+ * disambiguate: every "." and "," in the number is a grouping separator and
+ * all of them come out. That is what the previous `[\d,]+` match plus
+ * comma-strip got wrong on the continental marketplaces — the match stopped
+ * dead at the first dot, so a book with "1.234 Bewertungen" was read as
+ * having **1** review, and then scored by boostScoresByCompetitorQuality
+ * (lib/keywordMerge.ts) as the near-unreviewed book it appeared to be.
+ *
+ * Continental thin spaces and non-breaking spaces group digits too ("1 234"),
+ * so they are stripped as separators as well.
+ */
+export function parseCountText(raw: unknown): number | undefined {
+  if (typeof raw === "number") return Number.isFinite(raw) ? Math.trunc(raw) : undefined;
+  if (typeof raw !== "string") return undefined;
+
+  const match = raw.match(/\d[\d.,\s ]*/);
+  if (!match) return undefined;
+
+  const digits = match[0].replace(/[.,\s ]/g, "");
+  if (!digits) return undefined;
+
+  const value = Number(digits);
   return Number.isFinite(value) ? value : undefined;
 }
