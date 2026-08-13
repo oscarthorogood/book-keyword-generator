@@ -25,6 +25,7 @@
  * until it runs out of ASINs.
  */
 
+import { parsePriceText } from "./priceText";
 import type { Marketplace } from "./types";
 
 const SERPAPI_API_KEY = process.env.SERPAPI_API_KEY;
@@ -197,14 +198,7 @@ function domainFor(marketplace: Marketplace): string {
 }
 
 /** Pulls a numeric field out of "$12.99"-style strings. */
-function parsePrice(raw: unknown): number | undefined {
-  if (typeof raw === "number") return raw;
-  if (typeof raw === "string") {
-    const match = raw.match(/[\d,]+\.?\d*/);
-    if (match) return parseFloat(match[0].replace(/,/g, ""));
-  }
-  return undefined;
-}
+
 
 /** Amazon book titles carry a subtitle and series furniture; the part before the colon is the searchable title. */
 export function cleanBookTitle(raw: string | undefined): string | undefined {
@@ -324,7 +318,7 @@ export async function searchAmazonViaSerpApi(
           // metadata for a competitor row, not a keyword candidate.
           title: str(result.title),
           author: author?.replace(/\s+/g, " ").trim(),
-          price: parsePrice(price?.value ?? price?.raw ?? result.price ?? result.extracted_price),
+          price: parsePriceText(price?.value ?? price?.raw ?? result.price ?? result.extracted_price),
           position: num(result.position) ?? index + 1,
         });
       }
@@ -408,7 +402,7 @@ export async function fetchAmazonProductViaSerpApi(
   return {
     title: str(product.title),
     author: extractAuthor(product),
-    price: parsePrice(price?.value ?? price?.raw ?? product.price),
+    price: parsePriceText(price?.value ?? price?.raw ?? product.price),
     rating: num(product.rating),
     reviewCount: num(product.ratings_total) ?? num(product.reviews),
     description: str(product.description),
