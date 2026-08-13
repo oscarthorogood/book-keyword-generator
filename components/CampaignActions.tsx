@@ -127,7 +127,7 @@ export default function CampaignActions({ bookId }: { bookId: string }) {
                 </a>
               )}
               {c.last_export_error && (
-                <span className="badge badge-error" title={c.last_export_error}>
+                <span className="badge badge-error" title={`${c.last_export_error}\n\nRun "Create Campaigns" again to retry this export.`}>
                   export failed
                 </span>
               )}

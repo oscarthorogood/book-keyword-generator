@@ -2,6 +2,7 @@ import { randomUUID } from "node:crypto";
 import { buildCampaignPlans, DEFAULT_DAILY_BUDGET_PER_CAMPAIGN, type CampaignPlan } from "@/lib/campaignBulksheetPlan";
 import { buildCampaignReviewRows, buildCampaignUploadRows } from "@/lib/campaignBulksheetExport";
 import { toCsv } from "@/lib/bulksheetSchema";
+import { describeExportFailure } from "@/lib/campaignExportError";
 import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
 import { loadCampaignContext } from "@/lib/campaignContext";
 import type { KeywordWithRollups } from "@/lib/campaignSelection";
@@ -142,26 +143,95 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const exportBatchId = randomUUID();
     const currency = marketplaceCurrency(book.marketplace as Marketplace);
 
-    const { data: insertedCampaigns, error: insertCampaignsError } = await supabase
+    // Retry path. When the bulksheet upload below fails, the campaigns rows
+    // stay `draft` (spec §4 step 7) — but `campaigns_unique_name_per_user`
+    // (sql/21) means a plain re-insert on the next attempt dies on a duplicate
+    // name, and "Filter & update campaign" only accepts `exported` campaigns.
+    // That left a failed export with no way forward from either button. Reuse
+    // the leftover drafts instead, so Create Campaigns is the retry.
+    const { data: sameNameCampaigns, error: sameNameError } = await supabase
       .from("campaigns")
-      .insert(
-        plans.map((plan) => ({
-          user_id: user.id,
-          book_id: bookId,
+      .select("id, name, status, book_id")
+      .eq("user_id", user.id)
+      .in(
+        "name",
+        plans.map((plan) => plan.name)
+      );
+    if (sameNameError) return Response.json({ error: sameNameError.message }, { status: 400 });
+
+    const reusableIdByName = new Map<string, string>();
+    for (const row of sameNameCampaigns ?? []) {
+      if (row.book_id !== bookId) {
+        return Response.json(
+          { error: `A campaign named "${row.name}" already exists on another book — rename it before creating campaigns here.` },
+          { status: 409 }
+        );
+      }
+      if (row.status !== "draft") {
+        return Response.json(
+          {
+            error: `This book's campaigns already exist ("${row.name}" is ${row.status}) — use "Filter & update campaign" to refresh them instead of creating them again.`,
+          },
+          { status: 409 }
+        );
+      }
+      reusableIdByName.set(row.name as string, row.id as string);
+    }
+
+    const campaignIdByType = new Map<string, string>();
+
+    for (const plan of plans.filter((p) => reusableIdByName.has(p.name))) {
+      const id = reusableIdByName.get(plan.name)!;
+      const { error: refreshError } = await supabase
+        .from("campaigns")
+        .update({
           export_batch_id: exportBatchId,
           campaign_type: plan.campaignType,
-          name: plan.name,
           daily_budget: plan.dailyBudget,
           currency,
           status: "draft",
-        }))
-      )
-      .select("id, campaign_type");
-    if (insertCampaignsError || !insertedCampaigns) {
-      return Response.json({ error: insertCampaignsError?.message ?? "Failed to create campaigns" }, { status: 400 });
+        })
+        .eq("id", id)
+        .eq("user_id", user.id);
+      if (refreshError) return Response.json({ error: refreshError.message }, { status: 400 });
+      campaignIdByType.set(plan.campaignType, id);
     }
 
-    const campaignIdByType = new Map(insertedCampaigns.map((c) => [c.campaign_type, c.id as string]));
+    // The failed run already wrote this campaign's targets; without clearing
+    // them the retry's insert would double every row.
+    if (reusableIdByName.size > 0) {
+      const { error: clearTargetsError } = await supabase
+        .from("campaign_targets")
+        .delete()
+        .in("campaign_id", [...reusableIdByName.values()])
+        .eq("user_id", user.id);
+      if (clearTargetsError) return Response.json({ error: clearTargetsError.message }, { status: 400 });
+    }
+
+    const plansToInsert = plans.filter((p) => !reusableIdByName.has(p.name));
+    if (plansToInsert.length > 0) {
+      const { data: insertedCampaigns, error: insertCampaignsError } = await supabase
+        .from("campaigns")
+        .insert(
+          plansToInsert.map((plan) => ({
+            user_id: user.id,
+            book_id: bookId,
+            export_batch_id: exportBatchId,
+            campaign_type: plan.campaignType,
+            name: plan.name,
+            daily_budget: plan.dailyBudget,
+            currency,
+            status: "draft",
+          }))
+        )
+        .select("id, campaign_type");
+      if (insertCampaignsError || !insertedCampaigns) {
+        return Response.json({ error: insertCampaignsError?.message ?? "Failed to create campaigns" }, { status: 400 });
+      }
+      for (const c of insertedCampaigns) campaignIdByType.set(c.campaign_type as string, c.id as string);
+    }
+
+    const campaignIds = [...campaignIdByType.values()];
 
     const targetRows = plans.flatMap((plan) => {
       const campaignId = campaignIdByType.get(plan.campaignType);
@@ -233,10 +303,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           last_export_error: null,
           last_export_error_at: null,
         })
-        .in(
-          "id",
-          insertedCampaigns.map((c) => c.id)
-        )
+        .in("id", campaignIds)
         .select();
       if (flipError) throw new Error(flipError.message);
 
@@ -249,19 +316,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } catch (uploadErr) {
       // Campaigns stay `draft` (spec §4 step 7) — no row points at a file
       // that doesn't exist. The insert already succeeded, so this is
-      // recoverable: a retry re-runs Create Campaign for the same book.
-      const message = uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed";
+      // recoverable: a retry re-runs Create Campaigns for the same book and
+      // picks these drafts back up.
+      const message = describeExportFailure(uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed");
       await supabase
         .from("campaigns")
         .update({ last_export_error: message, last_export_error_at: new Date().toISOString() })
-        .in(
-          "id",
-          insertedCampaigns.map((c) => c.id)
-        );
-      return Response.json(
-        { error: `Campaigns created as draft, but the bulksheet upload failed: ${message}`, campaignIds: insertedCampaigns.map((c) => c.id) },
-        { status: 500 }
-      );
+        .in("id", campaignIds);
+      return Response.json({ error: `Campaigns created as draft, but the bulksheet upload failed: ${message}`, campaignIds }, { status: 500 });
     }
   } catch (err) {
     console.error("Error creating campaigns:", err);

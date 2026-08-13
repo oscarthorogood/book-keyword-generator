@@ -178,6 +178,7 @@ export default function CampaignDetailPage({ campaignId }: { campaignId: string 
                   <div>
                     <p className="alert-title">Last export failed</p>
                     <p className="mt-1">{campaign.last_export_error}</p>
+                    <p className="mt-1">Run &ldquo;Create Campaigns&rdquo; on the book page to retry the export.</p>
                   </div>
                 </div>
               )}
