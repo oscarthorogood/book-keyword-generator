@@ -60,12 +60,17 @@ export interface CrossSellTarget {
   relationship: "own";
 }
 
-export const CAMPAIGN_CAPS = {
-  brandGuard: 15,
-  alphaExact: 10,
-  bmmDiscovery: 10,
-  rivalAsin: 40,
-} as const;
+/**
+ * Every campaign's target count is kept in [MIN_CAMPAIGN_TARGETS,
+ * MAX_CAMPAIGN_TARGETS] (user request on top of spec §3) — Update Campaign
+ * already enforced this range when swapping in "ready" replacements
+ * (lib/campaignRebalance.ts); Create Campaign now enforces the same range
+ * when a campaign is first built, instead of each selector's smaller
+ * fixed cap under-filling the campaign while the book's "ready" bank sits
+ * unused.
+ */
+export const MIN_CAMPAIGN_TARGETS = 15;
+export const MAX_CAMPAIGN_TARGETS = 25;
 
 /** Amazon has no real BMM match type — ordinary Broad match with '+' prefixed on every mandatory word. */
 export function toModifiedBroadSyntax(text: string): string {
@@ -140,7 +145,11 @@ const BRAND_GUARD_MATCH_TYPES: MatchType[] = ["exact", "phrase"];
  * lib/keywordCapAndRank.ts's `adGroupOf()` already keys off it the same way
  * this does (`sources.includes("comp-name")`). The code wins.
  */
-export function selectBrandGuardKeywords(bank: CampaignKeyword[], book: CampaignBook): CampaignKeyword[] {
+export function selectBrandGuardKeywords(
+  bank: CampaignKeyword[],
+  book: CampaignBook,
+  limit: number = MAX_CAMPAIGN_TARGETS
+): CampaignKeyword[] {
   const filtered = bank.filter(
     (k) =>
       k.matchType !== undefined &&
@@ -149,11 +158,15 @@ export function selectBrandGuardKeywords(bank: CampaignKeyword[], book: Campaign
         isAuthorOrTitleVariant(k.text, book.author, book.title) ||
         isCommonTypo(k.text, book.author))
   );
-  return dedupeByText(filtered).slice(0, CAMPAIGN_CAPS.brandGuard);
+  return dedupeByText(filtered).slice(0, limit);
 }
 
 /** 2. Alpha Exact — result history wins; scoreForRank breaks pre-launch ties. */
-export function selectAlphaExactKeywords(bank: KeywordWithRollups[], anchors: BookAnchors): KeywordWithRollups[] {
+export function selectAlphaExactKeywords(
+  bank: KeywordWithRollups[],
+  anchors: BookAnchors,
+  limit: number = MAX_CAMPAIGN_TARGETS
+): KeywordWithRollups[] {
   return [...bank]
     .filter((k) => k.matchType === "exact" && k.status === "active")
     .sort(
@@ -162,7 +175,7 @@ export function selectAlphaExactKeywords(bank: KeywordWithRollups[], anchors: Bo
         scoreForRank(b, anchors) - scoreForRank(a, anchors) ||
         (b.specificity ?? 0) - (a.specificity ?? 0)
     )
-    .slice(0, CAMPAIGN_CAPS.alphaExact);
+    .slice(0, limit);
 }
 
 export interface BmmDiscoveryTarget {
@@ -176,7 +189,8 @@ const BMM_MAX_SPECIFICITY = 2;
 export function selectBmmDiscoveryKeywords(
   bank: CampaignKeyword[],
   alphaExact: CampaignKeyword[],
-  brandGuard: CampaignKeyword[]
+  brandGuard: CampaignKeyword[],
+  limit: number = MAX_CAMPAIGN_TARGETS
 ): BmmDiscoveryTarget[] {
   const excluded = new Set([...alphaExact, ...brandGuard].map((k) => normalizeKeyword(k.text)));
   return bank
@@ -187,7 +201,7 @@ export function selectBmmDiscoveryKeywords(
         (k.specificity ?? 3) <= BMM_MAX_SPECIFICITY &&
         !excluded.has(normalizeKeyword(k.text))
     )
-    .slice(0, CAMPAIGN_CAPS.bmmDiscovery)
+    .slice(0, limit)
     .map((k) => ({ text: toModifiedBroadSyntax(k.text), rootKeywordId: k.id }));
 }
 
@@ -215,7 +229,8 @@ export function isRaceToBottom(asin: CompetitorAsin, rules: RivalExclusionRules 
 /** 4. Rival ASIN Offensive. */
 export function selectRivalAsinTargets(
   bank: CompetitorAsin[],
-  rules: RivalExclusionRules = DEFAULT_EXCLUSION
+  rules: RivalExclusionRules = DEFAULT_EXCLUSION,
+  limit: number = MAX_CAMPAIGN_TARGETS
 ): CompetitorAsin[] {
   return bank
     .filter(
@@ -226,7 +241,7 @@ export function selectRivalAsinTargets(
         !isRaceToBottom(a, rules)
     )
     .sort((a, b) => (a.mean_rank ?? 999) - (b.mean_rank ?? 999))
-    .slice(0, CAMPAIGN_CAPS.rivalAsin);
+    .slice(0, limit);
 }
 
 /** 5. Catalog Cross-Sell — siblings only, no cap. Empty when series_key is unset (never backfilled from author — spec §2.5). */
