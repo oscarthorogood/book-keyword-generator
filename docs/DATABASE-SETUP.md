@@ -271,6 +271,7 @@ Supabase SQL Editor:
 | `07-remove-campaigns.sql` | Drops the superseded campaigns table |
 | `08-keyword-filter-status.sql` | **Required for the relevance filter pipeline** — adds the `rejected` status and the `rejection_reason` / `rejected_by_filter` columns, and stops rejected keywords counting toward `books.total_keywords` |
 | `30-bulksheets-bucket-mime-types.sql` | **Required if campaign export fails with "mime type text/csv is not supported"** — dashboard-created buckets default `allowed_mime_types` to a single type, which blocks the review CSV upload that runs alongside the xlsx upload |
+| `31-total-keywords-after-archived-generation.sql` | **Required if a book's keyword count reads far too low (often 0) after generating** — `08` excluded archived rows from `books.total_keywords` back when archived meant "removed by hand"; generation now lands every row archived, so the count has to exclude only `rejected` |
 
 Without `08`, generating keywords fails on the status check constraint: the
 pipeline writes rejected and paused rows alongside the active ones.

@@ -191,4 +191,44 @@ describe("booksNeedingAttention", () => {
     );
     expect(items).toEqual([]);
   });
+
+  // Since generation lands every row in "archived" (PR #61), a book straight
+  // out of a Generate run has keywords and nothing active. That is the normal
+  // pending state, so it must not be reported as the same fault as a book
+  // whose keywords are all paused/negative with nothing left to promote.
+  it("names Run Filters as the next step when archived rows are waiting", () => {
+    const items = booksNeedingAttention(
+      [{ id: "b1", title: "Just Generated", total_keywords: 473, metadata_json: { capture: { ok: true } } }],
+      [
+        { book_id: "b1", status: "archived" },
+        { book_id: "b1", status: "archived" },
+        { book_id: "b1", status: "negative" },
+      ],
+      []
+    );
+
+    expect(items).toEqual([
+      {
+        bookId: "b1",
+        bookTitle: "Just Generated",
+        reason: "awaiting_filters",
+        detail: "Run Filters to promote the generated keywords into the campaign pool",
+      },
+    ]);
+  });
+
+  it("still reports no_active_keywords when nothing is left to promote", () => {
+    const items = booksNeedingAttention(
+      [{ id: "b1", title: "Stuck", total_keywords: 2, metadata_json: { capture: { ok: true } } }],
+      [
+        { book_id: "b1", status: "paused" },
+        { book_id: "b1", status: "negative" },
+      ],
+      []
+    );
+
+    expect(items).toEqual([
+      { bookId: "b1", bookTitle: "Stuck", reason: "no_active_keywords", detail: "No active keywords" },
+    ]);
+  });
 });
