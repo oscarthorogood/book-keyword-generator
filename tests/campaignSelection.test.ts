@@ -91,7 +91,7 @@ describe("isCommonTypo", () => {
 });
 
 describe("selectBrandGuardKeywords", () => {
-  it("filters match_type before slicing, so filtering doesn't return fewer than the cap allows", () => {
+  it("fills to the cap, leading with rows that already suggest Exact/Phrase", () => {
     // Regression for the spec's named bug: v1 sliced brand terms before
     // filtering by match_type, which could under-fill the campaign even
     // when enough eligible candidates existed.
@@ -102,6 +102,19 @@ describe("selectBrandGuardKeywords", () => {
     const result = selectBrandGuardKeywords(bank, BOOK);
     expect(result.length).toBe(MAX_CAMPAIGN_TARGETS);
     expect(result.every((k) => k.matchType === "exact" || k.matchType === "phrase")).toBe(true);
+    expect(result.every((k) => k.id.startsWith("exact-"))).toBe(true);
+  });
+
+  it("keeps brand terms whose suggested match type is Broad, stamped Phrase", () => {
+    // A source with no opinion on match type used to disqualify a brand
+    // term outright, leaving Brand Guard far below its cap.
+    const bank: CampaignKeyword[] = [
+      keyword({ id: "broad", text: "jane doe thrillers", matchType: "broad", sources: ["comp-name"] }),
+      keyword({ id: "untyped", text: "jane doe new book", matchType: undefined, sources: ["comp-name"] }),
+    ];
+    const result = selectBrandGuardKeywords(bank, BOOK);
+    expect(result.map((k) => k.id).sort()).toEqual(["broad", "untyped"]);
+    expect(result.every((k) => k.matchType === "phrase")).toBe(true);
   });
 
   it("includes author/title variants and excludes unrelated terms", () => {
@@ -133,14 +146,29 @@ describe("selectAlphaExactKeywords", () => {
     expect(result[0].id).toBe("high-orders");
   });
 
-  it("excludes non-exact and non-active rows", () => {
+  it("excludes non-active rows, and leaves Broad-suggested roots for BMM Discovery", () => {
     const bank: KeywordWithRollups[] = [
-      keyword({ id: "broad", matchType: "broad" }),
-      keyword({ id: "paused", matchType: "exact", status: "paused" }),
-      keyword({ id: "ok", matchType: "exact", status: "active" }),
+      keyword({ id: "broad", text: "cozy mystery broad", matchType: "broad" }),
+      keyword({ id: "paused", text: "cozy mystery paused", matchType: "exact", status: "paused" }),
+      keyword({ id: "ok", text: "cozy mystery ok", matchType: "exact", status: "active" }),
     ];
     const result = selectAlphaExactKeywords(bank, ANCHORS);
     expect(result.map((k) => k.id)).toEqual(["ok"]);
+  });
+
+  it("backfills from the rest of the active bank and stamps every target Exact", () => {
+    // The under-filled-campaign bug: a bank of 30 usable terms with only one
+    // row suggesting Exact used to ship a 1-keyword Alpha Exact campaign.
+    const bank: KeywordWithRollups[] = [
+      keyword({ id: "exact-0", text: "cozy mystery exact", matchType: "exact" }),
+      ...Array.from({ length: 30 }, (_, i) =>
+        keyword({ id: `kw-${i}`, text: `cozy mystery term ${i}`, matchType: "phrase" })
+      ),
+    ];
+    const result = selectAlphaExactKeywords(bank, ANCHORS);
+    expect(result).toHaveLength(MAX_CAMPAIGN_TARGETS);
+    expect(result[0].id).toBe("exact-0");
+    expect(result.every((k) => k.matchType === "exact")).toBe(true);
   });
 
   it("caps at MAX_CAMPAIGN_TARGETS", () => {
@@ -163,15 +191,20 @@ describe("selectBmmDiscoveryKeywords", () => {
     expect(result.map((k) => k.rootKeywordId)).toEqual(["root-2"]);
   });
 
-  it("only takes broad, active, low-specificity (<=2) root terms, and applies '+' BMM syntax", () => {
+  it("takes active, low-specificity (<=2) root terms of any suggested match type, and applies '+' BMM syntax", () => {
     const bank: CampaignKeyword[] = [
       keyword({ id: "ok", text: "cat mystery", matchType: "broad", specificity: 2, status: "active" }),
       keyword({ id: "too-specific", text: "very specific term", matchType: "broad", specificity: 4, status: "active" }),
-      keyword({ id: "wrong-type", text: "exact term", matchType: "exact", specificity: 1, status: "active" }),
+      keyword({ id: "other-type", text: "exact term", matchType: "exact", specificity: 1, status: "active" }),
       keyword({ id: "paused", text: "paused term", matchType: "broad", specificity: 1, status: "paused" }),
     ];
     const result = selectBmmDiscoveryKeywords(bank, [], []);
-    expect(result).toEqual([{ text: "+cat +mystery", rootKeywordId: "ok" }]);
+    // Broad-suggested roots lead; a differently-typed root still backs them
+    // up rather than being dropped, but a long-tail term is never a root.
+    expect(result).toEqual([
+      { text: "+cat +mystery", rootKeywordId: "ok" },
+      { text: "+exact +term", rootKeywordId: "other-type" },
+    ]);
   });
 });
 
