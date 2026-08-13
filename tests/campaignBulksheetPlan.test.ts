@@ -44,6 +44,7 @@ function asin(overrides: Partial<CompetitorAsin> = {}): CompetitorAsin {
     bsr: 50000,
     competitor_count: null,
     mean_rank: 5,
+    specificity: null,
     created_at: "2026-01-01",
     updated_at: "2026-01-01",
     relationship: "rival",

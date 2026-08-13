@@ -1,6 +1,8 @@
 import { isAiRankingConfigured, rankKeywordsWithAi } from "@/lib/aiRanker";
+import { scoreAsinSpecificity } from "@/lib/asinSpecificity";
 import { loadBookWithSnapshot } from "@/lib/bookStore";
 import { mapWithConcurrency } from "@/lib/concurrency";
+import { buildFilterContext } from "@/lib/keywordFilters";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import { genreFamilySearchTerms } from "@/lib/genre";
 
@@ -25,6 +27,9 @@ interface CompetitorAsinRow {
   competitor_asin: string;
   status: string;
   notes: string | null;
+  title: string | null;
+  author: string | null;
+  specificity: number | null;
 }
 
 /**
@@ -55,7 +60,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const { data: rows, error } = await supabase
       .from("competitor_asins")
-      .select("id, competitor_asin, status, notes")
+      .select("id, competitor_asin, status, notes, title, author, specificity")
       .eq("book_id", bookId)
       .eq("user_id", user.id)
       .in("status", REFILTERABLE_STATUSES);
@@ -67,11 +72,36 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return Response.json({ success: true, examined: 0, changed: 0 });
     }
 
+    // Same anchors the keywords filter route builds from this snapshot —
+    // reused to re-score each ASIN's specificity on every "Run filter" pass
+    // (lib/asinSpecificity.ts), mirroring the keyword pipeline's part of
+    // this task.
+    const filterContext = buildFilterContext({
+      title: snapshot.title,
+      asin: snapshot.asin,
+      author: snapshot.author,
+      seriesName: snapshot.seriesName,
+      description: snapshot.description,
+      genreTerms: snapshot.genreTerms,
+      genreFamilies: snapshot.genreFamilies,
+      categoryPath: snapshot.categoryPath,
+      categories: snapshot.categories,
+      goodreadsTags: snapshot.goodreadsTags,
+      competitors: snapshot.competitors,
+      compTitles: snapshot.compTitles,
+      reviewSnippets: snapshot.reviewSnippets,
+      marketplace: snapshot.marketplace,
+      language: snapshot.language,
+      formats: snapshot.formats ?? [],
+      isKindleUnlimited: !!snapshot.isKindleUnlimited,
+    });
+
     interface AsinOutcome {
       row: CompetitorAsinRow;
       status: string;
       reason: string | null;
       filter: string | null;
+      specificity: number | null;
     }
 
     const outcomes: AsinOutcome[] = asins.map((row) => ({
@@ -79,6 +109,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       status: "active",
       reason: null,
       filter: null,
+      specificity: scoreAsinSpecificity({ title: row.title, author: row.author }, filterContext.anchors),
     }));
 
     // --- Heuristic filter pass ---
@@ -149,7 +180,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     const updates = outcomes.filter(
-      (outcome) => outcome.status !== outcome.row.status
+      (outcome) => outcome.status !== outcome.row.status || outcome.specificity !== outcome.row.specificity
     );
 
     // Independent per-row updates: run with bounded concurrency rather than
@@ -159,11 +190,27 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const updateOutcomes = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (outcome) => {
       const { error: updateError } = await supabase
         .from("competitor_asins")
-        .update({ status: outcome.status, rejection_reason: outcome.reason, rejected_by_filter: outcome.filter })
+        .update({
+          status: outcome.status,
+          rejection_reason: outcome.reason,
+          rejected_by_filter: outcome.filter,
+          specificity: outcome.specificity,
+        })
         .eq("id", outcome.row.id)
         .eq("user_id", user.id);
 
       if (updateError) {
+        // A database from before sql/29-competitor-asin-specificity.sql has
+        // no specificity column — retry without it rather than losing the
+        // status/reason update over a missing migration.
+        if (/specificity/i.test(updateError.message)) {
+          const { error: retryError } = await supabase
+            .from("competitor_asins")
+            .update({ status: outcome.status, rejection_reason: outcome.reason, rejected_by_filter: outcome.filter })
+            .eq("id", outcome.row.id)
+            .eq("user_id", user.id);
+          if (!retryError) return true;
+        }
         console.error(`[competitors filter] could not update ${outcome.row.id}:`, updateError.message);
         return false;
       }

@@ -605,9 +605,13 @@ export async function POST(
         reject: tropesFiltered.summary.byVerdict.reject + compFiltered.summary.byVerdict.reject,
       },
       byFilter: { ...tropesFiltered.summary.byFilter } as Record<string, number>,
+      byPassCode: { ...tropesFiltered.summary.byPassCode } as Record<string, number>,
     };
     for (const [filter, count] of Object.entries(compFiltered.summary.byFilter)) {
       filterSummary.byFilter[filter] = (filterSummary.byFilter[filter] ?? 0) + count;
+    }
+    for (const [code, count] of Object.entries(compFiltered.summary.byPassCode)) {
+      filterSummary.byPassCode[code] = (filterSummary.byPassCode[code] ?? 0) + count;
     }
 
     const pausedCandidates = [...tropesFiltered.paused, ...compFiltered.paused];

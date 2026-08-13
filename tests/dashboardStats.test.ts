@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
+  booksNeedingAttention,
   recentBooksSummary,
+  summarizeCampaigns,
   summarizeKeywordStats,
   topKeywordsByGenre,
 } from "../lib/dashboardStats";
@@ -86,5 +88,107 @@ describe("recentBooksSummary", () => {
       { id: "b1", title: "Legacy", author: "A", created_at: "2026-01-01T00:00:00Z", metadata_json: null },
     ]);
     expect(summary[0]).toMatchObject({ captureOk: null, completeness: null });
+  });
+});
+
+describe("summarizeCampaigns", () => {
+  it("sums totals, computes blended ACOS, and groups spend by report period", () => {
+    const summary = summarizeCampaigns(
+      [
+        { id: "c1", status: "live" },
+        { id: "c2", status: "paused" },
+      ],
+      [
+        {
+          campaign_id: "c1",
+          spend: 10,
+          sales: 50,
+          orders: 2,
+          clicks: 5,
+          impressions: 100,
+          report_start: "2026-01-01",
+          report_end: "2026-01-07",
+        },
+        {
+          campaign_id: "c2",
+          spend: "5.50",
+          sales: "20",
+          orders: 1,
+          clicks: 2,
+          impressions: 40,
+          report_start: "2026-01-01",
+          report_end: "2026-01-07",
+        },
+        {
+          campaign_id: "c1",
+          spend: 20,
+          sales: 0,
+          orders: 0,
+          clicks: 8,
+          impressions: 150,
+          report_start: "2026-01-08",
+          report_end: "2026-01-14",
+        },
+      ]
+    );
+
+    expect(summary.totalCampaigns).toBe(2);
+    expect(summary.byStatus).toEqual({ live: 1, paused: 1 });
+    expect(summary.totals).toEqual({ spend: 35.5, sales: 70, orders: 3, clicks: 15, impressions: 290 });
+    expect(summary.acos).toBeCloseTo(35.5 / 70);
+    expect(summary.spendByPeriod).toEqual([
+      { reportStart: "2026-01-01", reportEnd: "2026-01-07", spend: 15.5, sales: 70 },
+      { reportStart: "2026-01-08", reportEnd: "2026-01-14", spend: 20, sales: 0 },
+    ]);
+  });
+
+  it("returns a null ACOS with no sales", () => {
+    const summary = summarizeCampaigns([{ id: "c1", status: "draft" }], []);
+    expect(summary.acos).toBeNull();
+    expect(summary.spendByPeriod).toEqual([]);
+  });
+});
+
+describe("booksNeedingAttention", () => {
+  it("flags capture issues, books with keywords but none active, and failed exports", () => {
+    const items = booksNeedingAttention(
+      [
+        { id: "b1", title: "Flagged Capture", total_keywords: 3, metadata_json: { capture: { ok: false } } },
+        { id: "b2", title: "All Paused", total_keywords: 2, metadata_json: { capture: { ok: true } } },
+        { id: "b3", title: "Healthy", total_keywords: 4, metadata_json: { capture: { ok: true } } },
+        { id: "b4", title: "No Keywords Yet", total_keywords: 0, metadata_json: {} },
+      ],
+      [
+        { book_id: "b1", status: "active" },
+        { book_id: "b2", status: "paused" },
+        { book_id: "b2", status: "paused" },
+        { book_id: "b3", status: "active" },
+        { book_id: "b3", status: "active" },
+      ],
+      [{ book_id: "b3", name: "Alpha Exact", last_export_error: "Amazon rejected the bulksheet" }]
+    );
+
+    expect(items).toEqual(
+      expect.arrayContaining([
+        { bookId: "b1", bookTitle: "Flagged Capture", reason: "capture_issue", detail: "Capture issue" },
+        { bookId: "b2", bookTitle: "All Paused", reason: "no_active_keywords", detail: "No active keywords" },
+        {
+          bookId: "b3",
+          bookTitle: "Healthy",
+          reason: "export_failed",
+          detail: "Alpha Exact: Amazon rejected the bulksheet",
+        },
+      ])
+    );
+    expect(items).toHaveLength(3);
+  });
+
+  it("returns nothing for a clean book", () => {
+    const items = booksNeedingAttention(
+      [{ id: "b1", title: "Fine", total_keywords: 1, metadata_json: { capture: { ok: true } } }],
+      [{ book_id: "b1", status: "active" }],
+      []
+    );
+    expect(items).toEqual([]);
   });
 });

@@ -212,6 +212,7 @@ export async function loadCampaignContext(
     bsr: row.bsr,
     competitor_count: null,
     mean_rank: row.mean_rank,
+    specificity: null,
     created_at: "",
     updated_at: "",
     relationship: (row.relationship ?? "rival") as CompetitorAsin["relationship"],

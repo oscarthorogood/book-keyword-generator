@@ -3,23 +3,32 @@
 import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { BookOpen, ChevronLeft, ChevronRight, Database, KeyRound, LayoutDashboard, ListChecks, LogOut, Megaphone, Shield, Swords } from "lucide-react";
+import { BookOpen, ChevronLeft, ChevronRight, Database, LayoutDashboard, ListChecks, LogOut, Megaphone, Shield } from "lucide-react";
 
-export type ShellSection = "dashboard" | "books" | "keywords" | "competitors" | "campaigns" | "presets" | "sources" | "access";
+export type ShellSection = "dashboard" | "books" | "databases" | "campaigns" | "presets" | "access";
 
 interface AppShellProps {
   active: ShellSection;
   children: ReactNode;
 }
 
-const NAV_ITEMS: Array<{ section: Exclude<ShellSection, "access">; label: string; href: string; Icon: typeof BookOpen }> = [
+interface SidebarBook {
+  id: string;
+  title: string;
+  author: string;
+}
+
+/** Sidebar shows only the most-recent books — it's a fixed 280px rail, not the full list (see /books "All"). */
+const SIDEBAR_BOOK_LIMIT = 8;
+
+const NAV_ITEMS_TOP: Array<{ section: Extract<ShellSection, "dashboard">; label: string; href: string; Icon: typeof BookOpen }> = [
   { section: "dashboard", label: "Dashboard", href: "/dashboard", Icon: LayoutDashboard },
-  { section: "books", label: "Books", href: "/books", Icon: BookOpen },
-  { section: "keywords", label: "Keywords", href: "/keywords", Icon: KeyRound },
-  { section: "competitors", label: "Competitors", href: "/competitors", Icon: Swords },
+];
+
+const NAV_ITEMS_BOTTOM: Array<{ section: Extract<ShellSection, "databases" | "campaigns" | "presets">; label: string; href: string; Icon: typeof BookOpen }> = [
+  { section: "databases", label: "Databases", href: "/databases", Icon: Database },
   { section: "campaigns", label: "Campaigns", href: "/campaigns", Icon: Megaphone },
   { section: "presets", label: "Presets", href: "/presets", Icon: ListChecks },
-  { section: "sources", label: "Sources", href: "/sources", Icon: Database },
 ];
 
 /**
@@ -28,17 +37,41 @@ const NAV_ITEMS: Array<{ section: Exclude<ShellSection, "access">; label: string
  * Every section is its own route now (Enhancements spec §2) — the sidebar
  * is plain `Link`s, and every page owns its own data fetching rather than
  * swapping views inside a single-page builder's local state.
+ *
+ * The book list sits directly in the sidebar between Dashboard and the
+ * rest of the nav (Enhancements spec §2 restructure): a live, capped
+ * (`SIDEBAR_BOOK_LIMIT`) slice of the same `/api/books/list` data
+ * BooksListDashboard renders in full on /books, followed by an "All"
+ * link to that full list. Keywords/Competitors/Sources moved off the
+ * top level into the single /databases page (see app/databases/page.tsx).
  */
 export default function AppShell({ active, children }: AppShellProps) {
   const router = useRouter();
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [sidebarBooks, setSidebarBooks] = useState<SidebarBook[]>([]);
 
   useEffect(() => {
     fetch("/api/admin/access")
       .then((res) => setIsAdmin(res.ok))
       .catch(() => setIsAdmin(false));
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/books/list")
+      .then((res) => (res.ok ? res.json() : { books: [] }))
+      .then((body) => {
+        if (!active) return;
+        setSidebarBooks((body.books ?? []).slice(0, SIDEBAR_BOOK_LIMIT));
+      })
+      .catch(() => {
+        if (active) setSidebarBooks([]);
+      });
+    return () => {
+      active = false;
+    };
   }, []);
 
   async function handleLogout() {
@@ -92,7 +125,47 @@ export default function AppShell({ active, children }: AppShellProps) {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-6" aria-label="Main">
-          {NAV_ITEMS.map(({ section, label, href, Icon }) => (
+          {NAV_ITEMS_TOP.map(({ section, label, href, Icon }) => (
+            <Link
+              key={section}
+              href={href}
+              className={itemClass(section)}
+              aria-current={active === section ? "page" : undefined}
+              title={sidebarOpen ? undefined : label}
+            >
+              <Icon size={20} className="shrink-0" style={{ color: iconColor(section) }} />
+              {sidebarOpen && <span>{label}</span>}
+            </Link>
+          ))}
+
+          {/* Live book list (Enhancements spec §2) — hidden while collapsed, same as every other label. */}
+          {sidebarOpen && sidebarBooks.length > 0 && (
+            <div className="space-y-1 py-1" aria-label="Your books">
+              {sidebarBooks.map((book) => (
+                <Link
+                  key={book.id}
+                  href={`/books/${book.id}`}
+                  className="nav-item"
+                  title={book.author ? `${book.title} — ${book.author}` : book.title}
+                >
+                  <BookOpen size={20} className="shrink-0" style={{ color: "var(--icon-default)" }} />
+                  <span className="truncate">{book.title}</span>
+                </Link>
+              ))}
+            </div>
+          )}
+
+          <Link
+            href="/books"
+            className={itemClass("books")}
+            aria-current={active === "books" ? "page" : undefined}
+            title={sidebarOpen ? undefined : "All books"}
+          >
+            <BookOpen size={20} className="shrink-0" style={{ color: iconColor("books") }} />
+            {sidebarOpen && <span>All</span>}
+          </Link>
+
+          {NAV_ITEMS_BOTTOM.map(({ section, label, href, Icon }) => (
             <Link
               key={section}
               href={href}

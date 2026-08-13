@@ -1,7 +1,10 @@
 import AppShell from "@/components/AppShell";
-import KeywordStatsWidget from "@/components/dashboard/KeywordStatsWidget";
+import OverviewStatsWidget from "@/components/dashboard/OverviewStatsWidget";
+import AttentionWidget from "@/components/dashboard/AttentionWidget";
+import CampaignSummaryWidget from "@/components/dashboard/CampaignSummaryWidget";
 import RecentBooksWidget from "@/components/dashboard/RecentBooksWidget";
 import TopKeywordsByGenreWidget from "@/components/dashboard/TopKeywordsByGenreWidget";
+import KeywordStatsWidget from "@/components/dashboard/KeywordStatsWidget";
 
 export default function DashboardPage() {
   return (
@@ -12,7 +15,14 @@ export default function DashboardPage() {
           <p className="page-subtitle mt-1">An overview across every book you&apos;re running keywords for.</p>
         </header>
 
-        <div className="page-body flex-1">
+        <div className="page-body flex-1 space-y-5">
+          <OverviewStatsWidget />
+
+          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+            <CampaignSummaryWidget />
+            <AttentionWidget />
+          </div>
+
           <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <RecentBooksWidget />
             <TopKeywordsByGenreWidget />

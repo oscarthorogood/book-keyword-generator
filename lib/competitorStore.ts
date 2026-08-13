@@ -11,7 +11,7 @@ import type { SupabaseClient } from "@supabase/supabase-js";
 import type { CompetitorAsin, CompetitorKeyword } from "./types";
 
 const COMPETITOR_ASIN_COLUMNS =
-  "id, book_id, competitor_asin, source, notes, status, bid, rejection_reason, rejected_by_filter, title, author, price, bsr, competitor_count, mean_rank, created_at, updated_at";
+  "id, book_id, competitor_asin, source, notes, status, bid, rejection_reason, rejected_by_filter, title, author, price, bsr, competitor_count, mean_rank, specificity, created_at, updated_at";
 const COMPETITOR_KEYWORD_COLUMNS =
   "id, book_id, competitor_asin, text, volume, rank, competitor_count, mean_rank, category, intent_segment, match_type, specificity, status, created_at, updated_at";
 
@@ -40,6 +40,9 @@ export interface AddCompetitorAsinInput {
   competitorAsin: string;
   source?: CompetitorAsin["source"];
   notes?: string | null;
+  title?: string | null;
+  author?: string | null;
+  specificity?: number | null;
 }
 
 export async function addCompetitorAsin(
@@ -57,6 +60,9 @@ export async function addCompetitorAsin(
         competitor_asin: input.competitorAsin.trim().toUpperCase(),
         source: input.source ?? "manual",
         notes: input.notes ?? null,
+        title: input.title ?? null,
+        author: input.author ?? null,
+        specificity: input.specificity ?? null,
       },
       { onConflict: "book_id,competitor_asin", ignoreDuplicates: false }
     )
@@ -155,6 +161,7 @@ export interface UpdateCompetitorAsinInput {
   bsr?: number | null;
   competitorCount?: number | null;
   meanRank?: number | null;
+  specificity?: number | null;
   /** Cleared (set null) by a manual notes edit — see app/api/competitors/[id]/route.ts. */
   presetCompetitorAsinId?: string | null;
 }
@@ -176,6 +183,7 @@ export async function updateCompetitorAsin(
   if (updates.bsr !== undefined) payload.bsr = updates.bsr;
   if (updates.competitorCount !== undefined) payload.competitor_count = updates.competitorCount;
   if (updates.meanRank !== undefined) payload.mean_rank = updates.meanRank;
+  if (updates.specificity !== undefined) payload.specificity = updates.specificity;
   if (updates.presetCompetitorAsinId !== undefined) payload.preset_competitor_asin_id = updates.presetCompetitorAsinId;
 
   const { data, error } = await supabase

@@ -23,7 +23,7 @@
  * lib/keywordFilterConfig.ts.
  */
 
-import { buildBookAnchors, profileOf, qualifyingAnchors, type AnchorInput, type BookAnchors } from "./keywordAnchors";
+import { buildBookAnchors, coreTitle, profileOf, qualifyingAnchors, type AnchorInput, type BookAnchors } from "./keywordAnchors";
 import {
   ALLOWED_GENRE_SYNONYMS,
   ALLOWLISTED_MODIFIER_PHRASES,
@@ -106,6 +106,10 @@ export interface FilterContext {
   actualAuthor?: string;
   /** The book's own ASIN, for the manual-competitors approved-comp-author lookup. */
   asin?: string;
+  /** The book's raw title, for assignPassReason's BOOK_SPECIFIC_MATCH check. */
+  title?: string;
+  /** The book's series name, for assignPassReason's SERIES_NAME_MATCH check. */
+  seriesName?: string;
 }
 
 export type KeywordFilter = (keyword: string, context: FilterContext, sources: string[]) => FilterResult;
@@ -803,6 +807,50 @@ export const anchorRelevanceFilter: KeywordFilter = (keyword, context, sources) 
   };
 };
 
+// --- 12. Positive verdict (why it passed) ----------------------------------
+
+/**
+ * A "pass" used to carry no explanation at all — every reject/pause has a
+ * `code`/`reason`, but a keyword that cleared every filter was a bare
+ * `{ verdict: "pass" }`. This mirrors the negative side: on a pass, inspect
+ * the same anchor-hit signals the pipeline already computed (comps,
+ * author/series/title, genre) and record the strongest reason the keyword
+ * survived, falling back to a generic code when nothing distinctive matched.
+ * Checked strongest-first: a named comparable is a stronger signal than a
+ * bare genre word, matching how anchorRelevanceFilter itself is the last and
+ * weakest gate.
+ */
+function assignPassReason(keyword: string, context: FilterContext, sources: string[]): { code: ReasonCode; reason: string } {
+  const comp = hasAnyAnchor(keyword, context.anchors.comps);
+  if (comp) return { code: "COMP_TITLE_MATCH", reason: `names a comparable author/title: "${comp}"` };
+
+  const series = context.seriesName ? normalizeKeyword(context.seriesName) : "";
+  if (series && containsTerm(keyword, series)) {
+    return { code: "SERIES_NAME_MATCH", reason: `names this book's series: "${context.seriesName}"` };
+  }
+
+  const author = context.actualAuthor ? normalizeKeyword(context.actualAuthor) : "";
+  const authorSurname = author.split(" ").pop() ?? "";
+  if (author && (containsTerm(keyword, author) || (authorSurname.length > 3 && containsTerm(keyword, authorSurname)))) {
+    return { code: "AUTHOR_MATCH", reason: `names this book's author: "${context.actualAuthor}"` };
+  }
+
+  const title = context.title ? coreTitle(context.title) : undefined;
+  const bookSpecific = (title && containsTerm(keyword, title)) ? title : hasAnyAnchor(keyword, context.anchors.bookSpecific);
+  if (bookSpecific) {
+    return { code: "BOOK_SPECIFIC_MATCH", reason: `matches a book-specific anchor (title/series/character): "${bookSpecific}"` };
+  }
+
+  const genre = hasAnyAnchor(keyword, context.anchors.genre);
+  if (genre) return { code: "CORE_GENRE_MATCH", reason: `matches this book's core genre: "${genre}"` };
+
+  if (sources.some((source) => SELF_ANCHORED_SOURCES.includes(source))) {
+    return { code: "NO_DISQUALIFIER", reason: "lifted from this book's own metadata, no disqualifying signal" };
+  }
+
+  return { code: "NO_DISQUALIFIER", reason: "cleared every filter, no disqualifying signal found" };
+}
+
 /** The pipeline, in order. Each filter's name is stored on the keyword it stops. */
 export const KEYWORD_FILTER_PIPELINE: Array<{ name: string; filter: KeywordFilter }> = [
   { name: "uiPollution", filter: uiPollutionFilter },
@@ -881,7 +929,8 @@ export function runKeywordFilters(keyword: FilterableKeyword, context: FilterCon
     }
   }
 
-  return { text, originalText, verdict: "pass", rewritten, matchTypeCeiling };
+  const { code, reason } = assignPassReason(text, context, sources);
+  return { text, originalText, verdict: "pass", rewritten, matchTypeCeiling, code, reason };
 }
 
 export interface FilterRunSummary {
@@ -889,6 +938,8 @@ export interface FilterRunSummary {
   byVerdict: Record<FilterVerdict, number>;
   /** Rejections/pauses per filter, for tuning the blocklists. */
   byFilter: Record<string, number>;
+  /** Passes per positive code (COMP_TITLE_MATCH, CORE_GENRE_MATCH, …) — the pass-side mirror of byFilter. */
+  byPassCode: Record<string, number>;
 }
 
 export interface FilterRunOutput {
@@ -906,6 +957,7 @@ export function filterKeywords(keywords: FilterableKeyword[], context: FilterCon
   const summary: FilterRunSummary = {
     byVerdict: { pass: 0, pause: 0, reject: 0 },
     byFilter: {},
+    byPassCode: {},
   };
 
   const rank: Record<FilterVerdict, number> = { pass: 2, pause: 1, reject: 0 };
@@ -923,6 +975,9 @@ export function filterKeywords(keywords: FilterableKeyword[], context: FilterCon
     summary.byVerdict[result.verdict] += 1;
     if (result.filter) {
       summary.byFilter[result.filter] = (summary.byFilter[result.filter] ?? 0) + 1;
+    }
+    if (result.verdict === "pass" && result.code) {
+      summary.byPassCode[result.code] = (summary.byPassCode[result.code] ?? 0) + 1;
     }
   }
 
@@ -951,6 +1006,8 @@ export function buildFilterContext(input: FilterContextInput): FilterContext {
     now: input.now ?? new Date(),
     actualAuthor: input.author,
     asin: input.asin,
+    title: input.title,
+    seriesName: input.seriesName,
   };
 }
 
@@ -964,7 +1021,7 @@ export function applyFiltersToCandidates(
   candidates: KeywordCandidate[],
   context: FilterContext
 ): {
-  passed: Array<KeywordCandidate & { matchTypeCeiling?: MatchType }>;
+  passed: Array<KeywordCandidate & { matchTypeCeiling?: MatchType; reason?: string; code?: ReasonCode }>;
   paused: Array<KeywordCandidate & { filter?: string; reason?: string; code?: ReasonCode }>;
   rejected: Array<KeywordCandidate & { filter?: string; reason?: string; code?: ReasonCode }>;
   /** The raw per-keyword verdicts, for callers that need them (negative keyword building). */
@@ -976,7 +1033,7 @@ export function applyFiltersToCandidates(
 
   const { results, summary } = filterKeywords(candidates, context);
 
-  const passed: Array<KeywordCandidate & { matchTypeCeiling?: MatchType }> = [];
+  const passed: Array<KeywordCandidate & { matchTypeCeiling?: MatchType; reason?: string; code?: ReasonCode }> = [];
   const paused: Array<KeywordCandidate & { filter?: string; reason?: string; code?: ReasonCode }> = [];
   const rejected: Array<KeywordCandidate & { filter?: string; reason?: string; code?: ReasonCode }> = [];
 
@@ -987,7 +1044,7 @@ export function applyFiltersToCandidates(
     };
     const candidate: KeywordCandidate = { ...source, text: result.text };
 
-    if (result.verdict === "pass") passed.push({ ...candidate, matchTypeCeiling: result.matchTypeCeiling });
+    if (result.verdict === "pass") passed.push({ ...candidate, matchTypeCeiling: result.matchTypeCeiling, reason: result.reason, code: result.code });
     else if (result.verdict === "pause") paused.push({ ...candidate, filter: result.filter, reason: result.reason, code: result.code });
     else rejected.push({ ...candidate, filter: result.filter, reason: result.reason, code: result.code });
   }
