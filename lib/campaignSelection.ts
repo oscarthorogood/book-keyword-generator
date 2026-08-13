@@ -134,10 +134,42 @@ export function isCommonTypo(text: string, author: string): boolean {
 const BRAND_GUARD_MATCH_TYPES: MatchType[] = ["exact", "phrase"];
 
 /**
+ * A bank row's `match_type` is only a *suggestion* from whichever source
+ * produced it ("when the source has an opinion" — lib/types.ts), and most
+ * sources have none. Treating it as a hard eligibility filter was what
+ * under-filled the keyword campaigns: a book whose bank held 300 usable
+ * terms but only two rows suggesting `exact` shipped an Alpha Exact
+ * campaign with two keywords in it.
+ *
+ * Match type belongs to the *campaign*, not to the keyword — Alpha Exact is
+ * exact because it is Alpha Exact. So the selectors below rank rows that
+ * already suggest the campaign's match type first, then fall back to the
+ * rest of the eligible bank, and stamp the campaign's match type onto
+ * whatever they return.
+ */
+function withMatchType<T extends CampaignKeyword>(keyword: T, matchType: MatchType): T {
+  return keyword.matchType === matchType ? keyword : { ...keyword, matchType };
+}
+
+/** Rows whose suggested match type is one of `preferred`, first; everything else after, each group's relative order kept. */
+function preferMatchTypes<T extends CampaignKeyword>(rows: T[], preferred: MatchType[]): T[] {
+  const suggested = rows.filter((k) => k.matchType !== undefined && preferred.includes(k.matchType));
+  const rest = rows.filter((k) => k.matchType === undefined || !preferred.includes(k.matchType));
+  return [...suggested, ...rest];
+}
+
+/**
  * 1. Brand Guard — author/title/series/typos, Exact + Phrase. Filters by
- * match_type *before* slicing (the spec's named bug: filtering after
+ * brand-ness *before* slicing (the spec's named bug: filtering after
  * slicing can return fewer than the cap even when enough eligible
  * candidates exist).
+ *
+ * Every brand term the book has is eligible regardless of its suggested
+ * match type; ones already suggesting Exact/Phrase lead, and the rest are
+ * stamped Phrase (the safer of the two for a term the source had no
+ * opinion about). Brand Guard is still only as big as the book's stock of
+ * brand terms — it is never padded with generic keywords, which would
+ * defeat the campaign's purpose.
  *
  * Deviates from the spec's pseudocode in one place: it checks
  * `k.category === "comp-name"`, but `"comp-name"` isn't a `KeywordCategory`
@@ -152,30 +184,43 @@ export function selectBrandGuardKeywords(
 ): CampaignKeyword[] {
   const filtered = bank.filter(
     (k) =>
-      k.matchType !== undefined &&
-      BRAND_GUARD_MATCH_TYPES.includes(k.matchType) &&
-      ((k.sources ?? []).includes("comp-name") ||
-        isAuthorOrTitleVariant(k.text, book.author, book.title) ||
-        isCommonTypo(k.text, book.author))
+      (k.sources ?? []).includes("comp-name") ||
+      isAuthorOrTitleVariant(k.text, book.author, book.title) ||
+      isCommonTypo(k.text, book.author)
   );
-  return dedupeByText(filtered).slice(0, limit);
+  return dedupeByText(preferMatchTypes(filtered, BRAND_GUARD_MATCH_TYPES))
+    .slice(0, limit)
+    .map((k) => (k.matchType && BRAND_GUARD_MATCH_TYPES.includes(k.matchType) ? k : withMatchType(k, "phrase")));
 }
 
-/** 2. Alpha Exact — result history wins; scoreForRank breaks pre-launch ties. */
+/**
+ * 2. Alpha Exact — result history wins; scoreForRank breaks pre-launch ties.
+ * Rows already suggesting Exact lead; the rest of the active bank backs
+ * them up so the campaign fills to its cap whenever the book has the terms
+ * to fill it.
+ *
+ * The backfill deliberately stops short of rows suggesting Broad. A source
+ * that says "broad" is saying this is a wide root term — poor exact-match
+ * material, and exactly what BMM Discovery is built from. Since BMM
+ * excludes everything Alpha Exact takes (spec §3), letting the backfill
+ * claim them would fill this campaign by emptying that one.
+ */
 export function selectAlphaExactKeywords(
   bank: KeywordWithRollups[],
   anchors: BookAnchors,
   limit: number = MAX_CAMPAIGN_TARGETS
 ): KeywordWithRollups[] {
-  return [...bank]
-    .filter((k) => k.matchType === "exact" && k.status === "active")
+  const ranked = bank
+    .filter((k) => k.status === "active" && k.matchType !== "broad")
     .sort(
       (a, b) =>
         (b.lifetimeOrders ?? 0) - (a.lifetimeOrders ?? 0) ||
         scoreForRank(b, anchors) - scoreForRank(a, anchors) ||
         (b.specificity ?? 0) - (a.specificity ?? 0)
-    )
-    .slice(0, limit);
+    );
+  return dedupeByText(preferMatchTypes(ranked, ["exact"]))
+    .slice(0, limit)
+    .map((k) => withMatchType(k, "exact"));
 }
 
 export interface BmmDiscoveryTarget {
@@ -185,7 +230,12 @@ export interface BmmDiscoveryTarget {
 
 const BMM_MAX_SPECIFICITY = 2;
 
-/** 3. BMM Discovery — root terms, excluding anything in Alpha Exact or Brand Guard. */
+/**
+ * 3. BMM Discovery — root terms, excluding anything in Alpha Exact or Brand
+ * Guard. The low-specificity guard is real (a 5-word long-tail is not a
+ * discovery root) and stays; the suggested match type is not, so rows
+ * suggesting Broad merely lead the ordering.
+ */
 export function selectBmmDiscoveryKeywords(
   bank: CampaignKeyword[],
   alphaExact: CampaignKeyword[],
@@ -193,14 +243,13 @@ export function selectBmmDiscoveryKeywords(
   limit: number = MAX_CAMPAIGN_TARGETS
 ): BmmDiscoveryTarget[] {
   const excluded = new Set([...alphaExact, ...brandGuard].map((k) => normalizeKeyword(k.text)));
-  return bank
-    .filter(
-      (k) =>
-        k.matchType === "broad" &&
-        k.status === "active" &&
-        (k.specificity ?? 3) <= BMM_MAX_SPECIFICITY &&
-        !excluded.has(normalizeKeyword(k.text))
-    )
+  const roots = bank.filter(
+    (k) =>
+      k.status === "active" &&
+      (k.specificity ?? 3) <= BMM_MAX_SPECIFICITY &&
+      !excluded.has(normalizeKeyword(k.text))
+  );
+  return dedupeByText(preferMatchTypes(roots, ["broad"]))
     .slice(0, limit)
     .map((k) => ({ text: toModifiedBroadSyntax(k.text), rootKeywordId: k.id }));
 }
