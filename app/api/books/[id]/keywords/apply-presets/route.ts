@@ -129,12 +129,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const userId = user.id;
 
+    // Generation of any kind — including applying a preset list — always
+    // lands in "archived". The filter verdict (and preset tier) is still
+    // recorded in rejection_reason/rejected_by_filter for the bank UI;
+    // "Run Filters" (or a manual promotion) is what moves a row into
+    // active/paused/rejected.
     function rowFor(
       candidate: (typeof newCandidates)[number] & { filter?: string; reason?: string },
-      status: "active" | "paused" | "rejected"
+      verdict: "active" | "paused" | "rejected"
     ) {
       const tier = tierById.get(candidate.presetKeywordId) ?? "a";
-      const finalStatus = tier === "b" && status === "active" ? "paused" : status;
       return {
         book_id: bookId,
         user_id: userId,
@@ -143,8 +147,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         category: null,
         source: "genre-preset" as KeywordSource,
         bid: candidate.suggestedBid ?? 0.5,
-        status: finalStatus,
-        rejection_reason: candidate.reason ?? (tier === "b" && status === "active" ? "Tier B preset — review before activating." : null),
+        status: "archived" as const,
+        rejection_reason: candidate.reason ?? (tier === "b" && verdict === "active" ? "Tier B preset — review before activating." : null),
         rejected_by_filter: candidate.filter ?? null,
         specificity: scoreSpecificity(candidate, filterContext.anchors),
         preset_keyword_id: candidate.presetKeywordId,

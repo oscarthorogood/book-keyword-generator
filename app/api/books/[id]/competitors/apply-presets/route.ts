@@ -63,7 +63,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
     const matchedGenreIds = new Set(matchedGenres.map((g) => g.id));
 
-    const { candidates, tierById } = presetCompetitorAsinsForGenres(presetCompetitorAsins, matchedGenreIds);
+    const { candidates } = presetCompetitorAsinsForGenres(presetCompetitorAsins, matchedGenreIds);
     if (candidates.length === 0) {
       return Response.json({
         success: true,
@@ -93,15 +93,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       });
     }
 
+    // Generation of any kind — including applying a preset list — always
+    // lands in "archived"; "Run Filters" (or a manual promotion) is what
+    // moves a row into active/paused/rejected.
     const rows = newCandidates.map((candidate) => {
-      const tier = tierById.get(candidate.presetCompetitorAsinId) ?? "a";
       return {
         book_id: bookId,
         user_id: user.id,
         competitor_asin: candidate.competitorAsin,
         source: "genre-preset" as const,
         notes: candidate.notes,
-        status: tier === "b" ? "paused" : "active",
+        status: "archived" as const,
         bid: computeCompetitorBid({}),
         preset_competitor_asin_id: candidate.presetCompetitorAsinId,
       };

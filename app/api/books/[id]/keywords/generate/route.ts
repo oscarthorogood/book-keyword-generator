@@ -657,7 +657,14 @@ export async function POST(
 
     const matchTypeProfile = loaded.book.match_type_profile ?? "mixed";
 
-    const activeRows = finalCandidates.map((candidate) => ({
+    // Generation always lands in "archived" — the filter pipeline's verdict
+    // is still recorded (rejection_reason/rejected_by_filter) so the bank UI
+    // can show it, but the row itself only moves to active/paused/rejected
+    // once a human (or "Run Filters") explicitly promotes it out of the
+    // archive. The one exception is an allowlist override: a term a human
+    // already vetted onto the allowlist goes straight to active, same as a
+    // manually-added keyword.
+    const passedRows = finalCandidates.map((candidate) => ({
       book_id: bookId,
       user_id: user.id,
       text: candidate.text,
@@ -668,16 +675,16 @@ export async function POST(
       category: candidate.category ?? null,
       source: primaryKeywordSource(candidate),
       bid: candidate.suggestedBid ?? defaultBid,
-      status: "active",
+      status: "archived",
       rejection_reason: null as string | null,
       rejected_by_filter: null as string | null,
       specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
 
-    const reviewRowsRaw = [
-      ...pausedCandidates.map((candidate) => ({ candidate, status: "paused" as const })),
-      ...rejectedCandidates.map((candidate) => ({ candidate, status: "rejected" as const })),
-    ].map(({ candidate, status }) => ({
+    // Both buckets land in "archived" the same way now — rejection_reason/
+    // rejected_by_filter still distinguish "paused" from "rejected" verdicts
+    // for display, and for the allowlist-override check below.
+    const reviewRowsRaw = [...pausedCandidates, ...rejectedCandidates].map((candidate) => ({
       book_id: bookId,
       user_id: user.id,
       text: candidate.text,
@@ -685,7 +692,7 @@ export async function POST(
       category: candidate.category ?? null,
       source: primaryKeywordSource(candidate),
       bid: candidate.suggestedBid ?? defaultBid,
-      status,
+      status: "archived" as const,
       rejection_reason: candidate.reason ?? null,
       rejected_by_filter: candidate.filter ?? null,
       specificity: scoreSpecificity(candidate, filterContext.anchors),
@@ -717,7 +724,7 @@ export async function POST(
 
     const negativeKeys = new Set(negativeRows.map((row) => `${row.text}|${row.match_type}`));
     const rows = [
-      ...activeRows,
+      ...passedRows,
       ...reviewRows.filter((row) => !negativeKeys.has(`${row.text}|${row.match_type}`)),
       ...negativeRows,
     ];
@@ -732,7 +739,7 @@ export async function POST(
 
     if (needsFilterMigration) {
       console.error("[generate] filter columns missing — apply sql/08-keyword-filter-status.sql:", insertError!.message);
-      const legacyRows = activeRows.map(({ rejection_reason, rejected_by_filter, ...row }) => {
+      const legacyRows = passedRows.map(({ rejection_reason, rejected_by_filter, ...row }) => {
         void rejection_reason;
         void rejected_by_filter;
         return row;
@@ -748,7 +755,7 @@ export async function POST(
     if (needsSpecificityMigration) {
       console.error("[generate] specificity column missing — apply sql/09-keyword-specificity.sql:", insertError!.message);
       const sourceRows = needsFilterMigration
-        ? activeRows.map(({ rejection_reason, rejected_by_filter, ...row }) => {
+        ? passedRows.map(({ rejection_reason, rejected_by_filter, ...row }) => {
             void rejection_reason;
             void rejected_by_filter;
             return row;
@@ -786,11 +793,11 @@ export async function POST(
       negativeSuggestions,
       filterSummary,
       contributingSources,
-      bySource: countBy(activeRows.map((r) => r.source)),
+      bySource: countBy(passedRows.map((r) => r.source)),
       byCategory: countBy(
-        activeRows.map((r) => r.category).filter((c): c is KeywordCategory => !!c)
+        passedRows.map((r) => r.category).filter((c): c is KeywordCategory => !!c)
       ),
-      byMatchType: countBy(activeRows.map((r) => r.match_type)),
+      byMatchType: countBy(passedRows.map((r) => r.match_type)),
       matchTypeProfile,
       allowlistOverrideCount: allowlistOverrides.size,
       genreTerms: snapshot.genreTerms.slice(0, 10),

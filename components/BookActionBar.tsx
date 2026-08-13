@@ -26,6 +26,8 @@ interface MenuItem {
   onClick: () => void;
   disabled?: boolean;
   title?: string;
+  /** Groups items under a small uppercase heading, in the order sections first appear. */
+  section?: string;
 }
 
 /** A single button that fans out into a small menu of related actions (spec: group book-page buttons by function). */
@@ -41,6 +43,8 @@ function ActionMenu({ label, icon, items, primary }: { label: string; icon: Reac
     document.addEventListener("mousedown", onClickOutside);
     return () => document.removeEventListener("mousedown", onClickOutside);
   }, [open]);
+
+  let lastSection: string | undefined;
 
   return (
     <div className="relative" ref={ref}>
@@ -63,22 +67,36 @@ function ActionMenu({ label, icon, items, primary }: { label: string; icon: Reac
           className="absolute left-0 z-20 mt-2 w-64 overflow-hidden rounded-md border bg-white shadow-lg"
           style={{ borderColor: "var(--line)" }}
         >
-          {items.map((item) => (
-            <button
-              key={item.key}
-              role="menuitem"
-              disabled={item.disabled}
-              title={item.title}
-              onClick={() => {
-                setOpen(false);
-                item.onClick();
-              }}
-              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              {item.icon}
-              <span>{item.label}</span>
-            </button>
-          ))}
+          {items.map((item, index) => {
+            const showHeading = !!item.section && item.section !== lastSection;
+            const isFirst = index === 0;
+            lastSection = item.section;
+            return (
+              <div key={item.key}>
+                {showHeading && (
+                  <div
+                    className="px-3 pt-2 pb-1 text-xs font-semibold uppercase tracking-wide"
+                    style={{ color: "var(--text-secondary)", borderTop: isFirst ? undefined : "1px solid var(--line)" }}
+                  >
+                    {item.section}
+                  </div>
+                )}
+                <button
+                  role="menuitem"
+                  disabled={item.disabled}
+                  title={item.title}
+                  onClick={() => {
+                    setOpen(false);
+                    item.onClick();
+                  }}
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  {item.icon}
+                  <span>{item.label}</span>
+                </button>
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
@@ -346,31 +364,78 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
 
   return (
     <div className="mb-6">
-      {/* Buttons grouped by function into dropdown menus (spec: simplify book page). */}
-      <div className="mb-2 grid gap-3 sm:grid-cols-3">
+      {/*
+        Two groups, one per side of the bank/campaign split (§ status-flow
+        refresh): "Keyword/ASIN Bank Actions" owns everything that fills or
+        curates the archived/paused/negative/rejected bank — Organise (which
+        promotes archived rows into active/ready or back down) listed first,
+        then Generation (which always lands new rows in Archived, never
+        straight into Active). "Campaign Actions" owns everything that reads
+        from the active/ready pool to build or refresh campaigns.
+      */}
+      <div className="mb-2 grid gap-3 sm:grid-cols-2">
         <ActionMenu
-          label="Add Keywords/ASINs"
-          icon={generating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+          label="Keyword/ASIN Bank Actions"
+          icon={generating || filtering || applyingPresets || refreshingMeta ? <Loader2 size={20} className="animate-spin" /> : <ListPlus size={20} />}
           primary
           items={[
-            { key: "generate", label: generating ? "Generating…" : "Generate", icon: <Sparkles size={16} />, onClick: generateAll, disabled: generating || !metadataReady },
-            { key: "manual", label: "Manual", icon: <Edit3 size={16} />, onClick: focusManualAdd },
-            { key: "presets", label: applyingPresets ? "Applying…" : "Genre Presets", icon: <ListChecks size={16} />, onClick: addPresetsAll, disabled: applyingPresets },
+            {
+              key: "filters",
+              section: "Organise",
+              label: filtering ? "Filtering…" : "Run Filters",
+              icon: <Filter size={16} />,
+              onClick: rerunFiltersAll,
+              disabled: filtering,
+              title: "Re-checks every archived/paused/rejected row and promotes what now passes into Active",
+            },
+            {
+              key: "refresh",
+              section: "Organise",
+              label: refreshingMeta ? "Re-fetching…" : "Refresh Metadata",
+              icon: <RefreshCw size={16} />,
+              onClick: refreshMetadata,
+              disabled: refreshingMeta,
+            },
+            {
+              key: "generate",
+              section: "Generation",
+              label: generating ? "Generating…" : "Generate",
+              icon: <Sparkles size={16} />,
+              onClick: generateAll,
+              disabled: generating || !metadataReady,
+              title: "New keywords/ASINs always land in Archived — run Filters to promote them",
+            },
+            { key: "manual", section: "Generation", label: "Manual", icon: <Edit3 size={16} />, onClick: focusManualAdd },
+            {
+              key: "presets",
+              section: "Generation",
+              label: applyingPresets ? "Applying…" : "Genre Presets",
+              icon: <ListChecks size={16} />,
+              onClick: addPresetsAll,
+              disabled: applyingPresets,
+            },
           ]}
         />
 
         <ActionMenu
-          label="Campaigns"
+          label="Campaign Actions"
           icon={<Megaphone size={20} style={{ color: "var(--icon-active)" }} />}
           items={[
-            { key: "create", label: creatingCampaigns ? "Creating…" : "Create Campaigns", icon: <Rocket size={16} />, onClick: () => createCampaigns(false), disabled: creatingCampaigns },
+            {
+              key: "create",
+              label: creatingCampaigns ? "Creating…" : "Create Campaigns",
+              icon: <Rocket size={16} />,
+              onClick: () => createCampaigns(false),
+              disabled: creatingCampaigns,
+              title: "Builds campaigns from the Active/Ready pool",
+            },
             {
               key: "update",
               label: updatingCampaigns ? "Updating…" : "Update Campaigns",
               icon: <RefreshCw size={16} />,
               onClick: updateCampaigns,
               disabled: updatingCampaigns || campaigns.every((c) => c.status !== "exported"),
-              title: "Re-scores every exported campaign against the current bank",
+              title: "Re-scores every exported campaign against the current Active/Ready pool",
             },
             {
               key: "export",
@@ -391,15 +456,6 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
               },
               title: "Upload an Amazon Search Term Report to feed Update Campaigns real performance data",
             },
-          ]}
-        />
-
-        <ActionMenu
-          label="Organise"
-          icon={<ListPlus size={20} style={{ color: "var(--icon-active)" }} />}
-          items={[
-            { key: "filters", label: filtering ? "Filtering…" : "Run Filters", icon: <Filter size={16} />, onClick: rerunFiltersAll, disabled: filtering },
-            { key: "refresh", label: refreshingMeta ? "Re-fetching…" : "Refresh Metadata", icon: <RefreshCw size={16} />, onClick: refreshMetadata, disabled: refreshingMeta },
           ]}
         />
       </div>

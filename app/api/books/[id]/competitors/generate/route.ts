@@ -401,6 +401,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           bsr: meta?.bsr ?? null,
           competitor_count: data.positions.length,
           mean_rank: meanRank,
+          // Generation always lands in "archived" — "Run Filters" (or a
+          // manual promotion) is what moves a row into active/paused/rejected.
+          status: "archived" as const,
           specificity: scoreAsinSpecificity({ title: meta?.title ?? null, author: meta?.author ?? null }, filterContext.anchors),
           bid: computeCompetitorBid({
             price: meta?.price ?? null,
