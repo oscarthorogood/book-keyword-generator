@@ -60,6 +60,26 @@ export async function currentUserEmail(): Promise<string | null> {
   return (await currentUser())?.email ?? null;
 }
 
+/**
+ * Retry a Supabase query once if PostgREST rejects the JWT with "JWT issued
+ * at future" — its own clock check, distinct from (and stricter than) the
+ * one GoTrue already passed to authenticate the request via `currentUser()`.
+ * A token minted a moment ago can still have an `iat` that's technically
+ * ahead of a database server whose clock trails by even a second or two;
+ * waiting a beat and re-running clears it without surfacing a raw
+ * clock-skew error to the user.
+ */
+export async function withClockSkewRetry<T>(
+  run: () => PromiseLike<{ data: T; error: { message: string } | null }>
+): Promise<{ data: T; error: { message: string } | null }> {
+  const first = await run();
+  if (first.error?.message.toLowerCase().includes("issued at future")) {
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    return run();
+  }
+  return first;
+}
+
 function requiredEnv(name: string): string {
   const value = process.env[name];
   if (!value) {
