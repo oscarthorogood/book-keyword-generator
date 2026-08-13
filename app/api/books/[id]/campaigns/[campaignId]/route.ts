@@ -135,7 +135,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const { data: bookAcosRow } = await supabase.from("books").select("target_acos").eq("id", bookId).eq("user_id", user.id).maybeSingle();
     const targetAcos = typeof bookAcosRow?.target_acos === "number" ? bookAcosRow.target_acos : 0.3;
 
-    const plans = buildCampaignPlans({
+    const plans = await buildCampaignPlans({
       book: campaignBook,
       bank,
       anchors,

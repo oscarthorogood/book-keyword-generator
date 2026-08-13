@@ -14,9 +14,9 @@
 import { callOpenRouterJson } from "./llmClient";
 import { recommendForKeyword, recommendForCompetitorAsin, type KeywordPerformance } from "./recommendations";
 import type { CampaignPlanTarget } from "./campaignBulksheetPlan";
+import { MIN_CAMPAIGN_TARGETS, MAX_CAMPAIGN_TARGETS } from "./campaignSelection";
 
-export const MIN_CAMPAIGN_TARGETS = 15;
-export const MAX_CAMPAIGN_TARGETS = 25;
+export { MIN_CAMPAIGN_TARGETS, MAX_CAMPAIGN_TARGETS };
 
 export interface RebalanceCandidate {
   keywordId?: string;

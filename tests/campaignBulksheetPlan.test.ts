@@ -55,8 +55,8 @@ function asin(overrides: Partial<CompetitorAsin> = {}): CompetitorAsin {
 const STARTER_NEGATIVE: NegativeKeyword = { text: "textbook", matchType: "phrase", reason: "offTopicEntity" };
 
 describe("buildCampaignPlans (campaigns spec §3/§4)", () => {
-  it("skips campaigns with zero eligible targets rather than creating an empty one", () => {
-    const plans = buildCampaignPlans({
+  it("skips campaigns with zero eligible targets rather than creating an empty one", async () => {
+    const plans = await buildCampaignPlans({
       book: BOOK,
       bank: [],
       anchors: ANCHORS,
@@ -67,13 +67,13 @@ describe("buildCampaignPlans (campaigns spec §3/§4)", () => {
     expect(plans).toEqual([]);
   });
 
-  it("builds Brand Guard, Alpha Exact, BMM Discovery, Rival ASIN Offensive when each has eligible targets", () => {
+  it("builds Brand Guard, Alpha Exact, BMM Discovery, Rival ASIN Offensive when each has eligible targets", async () => {
     const bank: KeywordWithRollups[] = [
       keyword({ id: "bg-1", text: "jane doe mysteries", matchType: "exact", sources: ["comp-name"] }),
       keyword({ id: "ae-1", text: "cozy cat detective exact", matchType: "exact", lifetimeOrders: 4 }),
       keyword({ id: "bmm-1", text: "cat mystery", matchType: "broad", specificity: 1 }),
     ];
-    const plans = buildCampaignPlans({
+    const plans = await buildCampaignPlans({
       book: BOOK,
       bank,
       anchors: ANCHORS,
@@ -90,28 +90,28 @@ describe("buildCampaignPlans (campaigns spec §3/§4)", () => {
     expect(types).not.toContain("auto_discovery");
   });
 
-  it("Alpha Exact keywords become a campaign-level negative-exact in BMM Discovery", () => {
+  it("Alpha Exact keywords become a campaign-level negative-exact in BMM Discovery", async () => {
     const bank: KeywordWithRollups[] = [
       keyword({ id: "ae-1", text: "alpha exact term", matchType: "exact", lifetimeOrders: 4 }),
       keyword({ id: "bmm-1", text: "cat mystery", matchType: "broad", specificity: 1 }),
     ];
-    const plans = buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
+    const plans = await buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
     const bmm = plans.find((p) => p.campaignType === "bmm_discovery")!;
     expect(bmm.negatives).toContainEqual(
       expect.objectContaining({ text: "alpha exact term", matchType: "exact", scope: "campaign" })
     );
   });
 
-  it("BMM Discovery keywords export with '+' BMM syntax as the target text", () => {
+  it("BMM Discovery keywords export with '+' BMM syntax as the target text", async () => {
     const bank: KeywordWithRollups[] = [keyword({ id: "bmm-1", text: "cat mystery", matchType: "broad", specificity: 1 })];
-    const plans = buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
+    const plans = await buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
     const bmm = plans.find((p) => p.campaignType === "bmm_discovery")!;
     expect(bmm.targets[0]).toMatchObject({ text: "+cat +mystery", matchType: "broad", keywordId: "bmm-1" });
   });
 
-  it("starter/library negatives attach to every campaign at ad_group scope", () => {
+  it("starter/library negatives attach to every campaign at ad_group scope", async () => {
     const bank: KeywordWithRollups[] = [keyword({ id: "bg-1", text: "jane doe mysteries", matchType: "exact", sources: ["comp-name"] })];
-    const plans = buildCampaignPlans({
+    const plans = await buildCampaignPlans({
       book: BOOK,
       bank,
       anchors: ANCHORS,
@@ -123,36 +123,36 @@ describe("buildCampaignPlans (campaigns spec §3/§4)", () => {
     expect(brandGuard.negatives).toContainEqual(expect.objectContaining({ text: "textbook", scope: "ad_group" }));
   });
 
-  it("Catalog Cross-Sell only appears when the book has a series_key and eligible siblings", () => {
+  it("Catalog Cross-Sell only appears when the book has a series_key and eligible siblings", async () => {
     const seriesBook: CampaignBook = { ...BOOK, series_key: "jane-doe-mysteries" };
     const sibling: CampaignBook = { id: "book-2", author: "Jane Doe", title: "Book Two", series_key: "jane-doe-mysteries", asin: "B0SIBLING1" };
 
-    const withoutSeries = buildCampaignPlans({ book: BOOK, bank: [], anchors: ANCHORS, asinBank: [], siblingBooks: [sibling], negatives: [] });
+    const withoutSeries = await buildCampaignPlans({ book: BOOK, bank: [], anchors: ANCHORS, asinBank: [], siblingBooks: [sibling], negatives: [] });
     expect(withoutSeries.some((p) => p.campaignType === "catalog_cross_sell")).toBe(false);
 
-    const withSeries = buildCampaignPlans({ book: seriesBook, bank: [], anchors: ANCHORS, asinBank: [], siblingBooks: [sibling], negatives: [] });
+    const withSeries = await buildCampaignPlans({ book: seriesBook, bank: [], anchors: ANCHORS, asinBank: [], siblingBooks: [sibling], negatives: [] });
     const crossSell = withSeries.find((p) => p.campaignType === "catalog_cross_sell");
     expect(crossSell).toBeDefined();
     expect(crossSell?.targets[0]).toMatchObject({ targetingExpression: 'asin="B0SIBLING1"' });
   });
 
-  it("Rival ASIN Offensive excludes mega-bestsellers and race-to-the-bottom titles", () => {
+  it("Rival ASIN Offensive excludes mega-bestsellers and race-to-the-bottom titles", async () => {
     const asinBank: CompetitorAsin[] = [
       asin({ id: "bestseller", bsr: 10, price: 14.99 }),
       asin({ id: "cheap", bsr: 50000, price: 0.99 }),
       asin({ id: "ok", bsr: 50000, price: 8 }),
     ];
-    const plans = buildCampaignPlans({ book: BOOK, bank: [], anchors: ANCHORS, asinBank, siblingBooks: [], negatives: [] });
+    const plans = await buildCampaignPlans({ book: BOOK, bank: [], anchors: ANCHORS, asinBank, siblingBooks: [], negatives: [] });
     const rival = plans.find((p) => p.campaignType === "rival_asin_offensive")!;
     expect(rival.targets.map((t) => t.competitorAsinId)).toEqual(["ok"]);
   });
 
-  it("includes Auto Discovery only when includeAutoDiscovery is true and there's something to discover from", () => {
+  it("includes Auto Discovery only when includeAutoDiscovery is true and there's something to discover from", async () => {
     const bank: KeywordWithRollups[] = [keyword({ id: "bg-1", text: "jane doe mysteries", matchType: "exact", sources: ["comp-name"] })];
-    const withoutAuto = buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
+    const withoutAuto = await buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
     expect(withoutAuto.some((p) => p.campaignType === "auto_discovery")).toBe(false);
 
-    const withAuto = buildCampaignPlans({
+    const withAuto = await buildCampaignPlans({
       book: BOOK,
       bank,
       anchors: ANCHORS,
@@ -164,9 +164,9 @@ describe("buildCampaignPlans (campaigns spec §3/§4)", () => {
     expect(withAuto.some((p) => p.campaignType === "auto_discovery")).toBe(true);
   });
 
-  it("gives Auto Discovery one ad group per targeting group, and every other campaign one ad group named after itself", () => {
+  it("gives Auto Discovery one ad group per targeting group, and every other campaign one ad group named after itself", async () => {
     const bank: KeywordWithRollups[] = [keyword({ id: "bg-1", text: "jane doe mysteries", matchType: "exact", sources: ["comp-name"] })];
-    const plans = buildCampaignPlans({
+    const plans = await buildCampaignPlans({
       book: BOOK,
       bank,
       anchors: ANCHORS,
@@ -183,16 +183,16 @@ describe("buildCampaignPlans (campaigns spec §3/§4)", () => {
     expect(adGroups.size).toBe(4);
   });
 
-  it("defaults every campaign's daily budget to $25 and names campaigns from the book title", () => {
+  it("defaults every campaign's daily budget to $25 and names campaigns from the book title", async () => {
     const bank: KeywordWithRollups[] = [keyword({ id: "bg-1", text: "jane doe mysteries", matchType: "exact", sources: ["comp-name"] })];
-    const plans = buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
+    const plans = await buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
     expect(plans[0].dailyBudget).toBe(DEFAULT_DAILY_BUDGET_PER_CAMPAIGN);
     expect(plans[0].name).toContain("The Cozy Mystery");
   });
 
-  it("respects a custom per-campaign daily budget", () => {
+  it("respects a custom per-campaign daily budget", async () => {
     const bank: KeywordWithRollups[] = [keyword({ id: "bg-1", text: "jane doe mysteries", matchType: "exact", sources: ["comp-name"] })];
-    const plans = buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [], dailyBudgetPerCampaign: 10 });
+    const plans = await buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [], dailyBudgetPerCampaign: 10 });
     expect(plans[0].dailyBudget).toBe(10);
   });
 });

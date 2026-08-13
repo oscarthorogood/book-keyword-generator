@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  CAMPAIGN_CAPS,
   DEFAULT_EXCLUSION,
+  MAX_CAMPAIGN_TARGETS,
   isCommonTypo,
   isMegaBestseller,
   isRaceToBottom,
@@ -64,9 +64,9 @@ function competitor(overrides: Partial<CompetitorAsin> = {}): CompetitorAsin {
   };
 }
 
-describe("CAMPAIGN_CAPS", () => {
-  it("matches the spec's per-campaign caps", () => {
-    expect(CAMPAIGN_CAPS).toEqual({ brandGuard: 15, alphaExact: 10, bmmDiscovery: 10, rivalAsin: 40 });
+describe("MAX_CAMPAIGN_TARGETS", () => {
+  it("caps every campaign's target count at 25 (user request)", () => {
+    expect(MAX_CAMPAIGN_TARGETS).toBe(25);
   });
 });
 
@@ -97,10 +97,10 @@ describe("selectBrandGuardKeywords", () => {
     // when enough eligible candidates existed.
     const bank: CampaignKeyword[] = [
       ...Array.from({ length: 20 }, (_, i) => keyword({ id: `broad-${i}`, text: `jane doe book ${i}`, matchType: "broad", sources: ["comp-name"] })),
-      ...Array.from({ length: 20 }, (_, i) => keyword({ id: `exact-${i}`, text: `jane doe mysteries ${i}`, matchType: "exact", sources: ["comp-name"] })),
+      ...Array.from({ length: 30 }, (_, i) => keyword({ id: `exact-${i}`, text: `jane doe mysteries ${i}`, matchType: "exact", sources: ["comp-name"] })),
     ];
     const result = selectBrandGuardKeywords(bank, BOOK);
-    expect(result.length).toBe(CAMPAIGN_CAPS.brandGuard);
+    expect(result.length).toBe(MAX_CAMPAIGN_TARGETS);
     expect(result.every((k) => k.matchType === "exact" || k.matchType === "phrase")).toBe(true);
   });
 
@@ -143,11 +143,11 @@ describe("selectAlphaExactKeywords", () => {
     expect(result.map((k) => k.id)).toEqual(["ok"]);
   });
 
-  it("caps at CAMPAIGN_CAPS.alphaExact", () => {
-    const bank: KeywordWithRollups[] = Array.from({ length: 20 }, (_, i) =>
+  it("caps at MAX_CAMPAIGN_TARGETS", () => {
+    const bank: KeywordWithRollups[] = Array.from({ length: 30 }, (_, i) =>
       keyword({ id: `kw-${i}`, text: `cozy mystery term ${i}`, matchType: "exact" })
     );
-    expect(selectAlphaExactKeywords(bank, ANCHORS)).toHaveLength(CAMPAIGN_CAPS.alphaExact);
+    expect(selectAlphaExactKeywords(bank, ANCHORS)).toHaveLength(MAX_CAMPAIGN_TARGETS);
   });
 });
 
@@ -202,7 +202,7 @@ describe("selectRivalAsinTargets", () => {
     expect(selectRivalAsinTargets(bank).map((a) => a.id)).toEqual(["ok"]);
   });
 
-  it("excludes non-rival and non-active rows, sorts by mean_rank ascending, caps at CAMPAIGN_CAPS.rivalAsin", () => {
+  it("excludes non-rival and non-active rows, sorts by mean_rank ascending, caps at MAX_CAMPAIGN_TARGETS", () => {
     const bank: CompetitorAsin[] = [
       competitor({ id: "own-book", relationship: "own", mean_rank: 1 }),
       competitor({ id: "rejected", status: "rejected", mean_rank: 1 }),

@@ -17,6 +17,7 @@ import {
 } from "./bulksheet";
 import {
   DEFAULT_EXCLUSION,
+  MAX_CAMPAIGN_TARGETS,
   selectAlphaExactKeywords,
   selectBmmDiscoveryKeywords,
   selectBrandGuardKeywords,
@@ -28,9 +29,83 @@ import {
   type KeywordWithRollups,
   type RivalExclusionRules,
 } from "./campaignSelection";
+import { callOpenRouterJson, isOpenRouterConfigured } from "./llmClient";
 import type { BookAnchors } from "./keywordAnchors";
 import type { NegativeKeyword } from "./negativeKeywords";
 import type { CompetitorAsin, MatchType } from "./types";
+
+/**
+ * When a selector's eligible pool exceeds MAX_CAMPAIGN_TARGETS, ask
+ * OpenRouter to pick the best `max` out of a wider candidate pool rather
+ * than mechanically keeping the selector's own sort order — mirrors
+ * lib/campaignRebalance.ts's `llmRankReplacements` fail-soft pattern.
+ * Falls back to the candidates' existing (already best-first) order when
+ * OpenRouter isn't configured or the call fails.
+ */
+async function refineToBest<T extends { text: string }>(
+  campaignLabel: string,
+  book: CampaignBook,
+  candidates: T[],
+  max: number
+): Promise<T[]> {
+  if (candidates.length <= max || !isOpenRouterConfigured()) return candidates.slice(0, max);
+
+  const pool = candidates.slice(0, max * 2);
+  const result = await callOpenRouterJson<{ order: string[] }>(
+    [
+      {
+        role: "system",
+        content:
+          "You pick the best Amazon Ads targeting candidates (keywords or competitor ASINs) for a new book " +
+          "advertising campaign. Return the best `pick` candidate texts, best first, as JSON only.",
+      },
+      {
+        role: "user",
+        content: JSON.stringify({
+          campaign: campaignLabel,
+          book: { title: book.title, author: book.author },
+          candidates: pool.map((c) => c.text),
+          pick: max,
+        }),
+      },
+    ],
+    {
+      label: "campaignBulksheetPlan",
+      schema: {
+        name: "ranked_targets",
+        schema: {
+          type: "object",
+          properties: { order: { type: "array", items: { type: "string" } } },
+          required: ["order"],
+        },
+      },
+    }
+  ).catch(() => null);
+
+  if (!result || !Array.isArray(result.order) || result.order.length === 0) return candidates.slice(0, max);
+
+  const byText = new Map(pool.map((c) => [c.text, c]));
+  const picked: T[] = [];
+  const used = new Set<string>();
+  for (const text of result.order) {
+    const c = byText.get(text);
+    if (c && !used.has(text)) {
+      picked.push(c);
+      used.add(text);
+      if (picked.length >= max) break;
+    }
+  }
+  if (picked.length < max) {
+    for (const c of candidates) {
+      if (picked.length >= max) break;
+      if (!used.has(c.text)) {
+        picked.push(c);
+        used.add(c.text);
+      }
+    }
+  }
+  return picked;
+}
 
 /** Decision 2 (docs/CAMPAIGNS-PROGRESS.md): $25/campaign default. */
 export const DEFAULT_DAILY_BUDGET_PER_CAMPAIGN = 25;
@@ -87,15 +162,24 @@ function toBaseNegatives(negatives: NegativeKeyword[]): CampaignPlanNegative[] {
   }));
 }
 
-export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan[] {
+/** Headroom passed to each selector so refineToBest has a real pool to choose the best MAX_CAMPAIGN_TARGETS from. */
+const CANDIDATE_POOL_MULTIPLIER = 4;
+
+export async function buildCampaignPlans(input: BuildCampaignPlansInput): Promise<CampaignPlan[]> {
   const dailyBudget = input.dailyBudgetPerCampaign ?? DEFAULT_DAILY_BUDGET_PER_CAMPAIGN;
   const defaultBid = input.defaultBid ?? 0.5;
   const rivalRules = input.rivalExclusionRules ?? DEFAULT_EXCLUSION;
   const baseNegatives = toBaseNegatives(input.negatives);
+  const poolLimit = MAX_CAMPAIGN_TARGETS * CANDIDATE_POOL_MULTIPLIER;
 
   const plans: CampaignPlan[] = [];
 
-  const brandGuard = selectBrandGuardKeywords(input.bank, input.book);
+  const brandGuard = await refineToBest(
+    SINGLE_AD_GROUP_LABEL.brand_guard!,
+    input.book,
+    selectBrandGuardKeywords(input.bank, input.book, poolLimit),
+    MAX_CAMPAIGN_TARGETS
+  );
   if (brandGuard.length > 0) {
     plans.push({
       campaignType: "brand_guard",
@@ -112,7 +196,12 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
     });
   }
 
-  const alphaExact = selectAlphaExactKeywords(input.bank, input.anchors);
+  const alphaExact = await refineToBest(
+    SINGLE_AD_GROUP_LABEL.alpha_exact!,
+    input.book,
+    selectAlphaExactKeywords(input.bank, input.anchors, poolLimit),
+    MAX_CAMPAIGN_TARGETS
+  );
   if (alphaExact.length > 0) {
     plans.push({
       campaignType: "alpha_exact",
@@ -129,7 +218,13 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
     });
   }
 
-  const bmmDiscovery = selectBmmDiscoveryKeywords(input.bank, alphaExact, brandGuard);
+  const bmmDiscoveryTargets = selectBmmDiscoveryKeywords(input.bank, alphaExact, brandGuard, poolLimit);
+  const bmmDiscovery = await refineToBest(
+    SINGLE_AD_GROUP_LABEL.bmm_discovery!,
+    input.book,
+    bmmDiscoveryTargets,
+    MAX_CAMPAIGN_TARGETS
+  );
   if (bmmDiscovery.length > 0) {
     const bidByKeywordId = new Map(input.bank.map((k) => [k.id, k.bid]));
     // Safeguard (spec §3): every Alpha Exact keyword becomes a
@@ -156,7 +251,13 @@ export function buildCampaignPlans(input: BuildCampaignPlansInput): CampaignPlan
     });
   }
 
-  const rivalAsins = selectRivalAsinTargets(input.asinBank, rivalRules);
+  const rivalAsinCandidates = selectRivalAsinTargets(input.asinBank, rivalRules, poolLimit).map((a) => ({
+    asin: a,
+    text: `asin="${a.competitor_asin}"`,
+  }));
+  const rivalAsins = (
+    await refineToBest(SINGLE_AD_GROUP_LABEL.rival_asin_offensive!, input.book, rivalAsinCandidates, MAX_CAMPAIGN_TARGETS)
+  ).map((c) => c.asin);
   if (rivalAsins.length > 0) {
     plans.push({
       campaignType: "rival_asin_offensive",

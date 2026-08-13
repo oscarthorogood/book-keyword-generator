@@ -69,7 +69,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!context) return Response.json({ error: "Book not found" }, { status: 404 });
     const { book, campaignBook, bank, asinBank, siblingBooks, negatives, anchors } = context;
 
-    const plans: CampaignPlan[] = buildCampaignPlans({
+    const plans: CampaignPlan[] = await buildCampaignPlans({
       book: campaignBook,
       bank,
       anchors,
