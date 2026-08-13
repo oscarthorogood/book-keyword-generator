@@ -46,9 +46,10 @@ export interface NegativeKeyword {
    * This module stays campaign-unaware and never sets it; it defaults to
    * `ad_group` at the bulksheet layer (lib/bulksheet.ts,
    * lib/bulksheetUpload.ts), which is where starter-list junk terms like the
-   * ones this file produces belong. Campaign-scoped negatives (e.g. the
-   * future Alpha Exact → BMM Discovery safeguard) are set explicitly by
-   * whatever assembles that specific negative, not by this file.
+   * ones this file produces belong. Campaign-scoped negatives — the Alpha
+   * Exact promotion safeguard, which negates every promoted term in both
+   * discovery campaigns (lib/campaignBulksheetPlan.ts) — are set explicitly
+   * by whatever assembles that specific negative, not by this file.
    */
   scope?: "campaign" | "ad_group";
 }

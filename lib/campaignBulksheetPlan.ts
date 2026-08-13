@@ -31,7 +31,7 @@ import {
 } from "./campaignSelection";
 import { callOpenRouterJson, isOpenRouterConfigured } from "./llmClient";
 import type { BookAnchors } from "./keywordAnchors";
-import type { NegativeKeyword } from "./negativeKeywords";
+import { fitNegativeMatchType, type NegativeKeyword } from "./negativeKeywords";
 import type { CompetitorAsin, MatchType } from "./types";
 
 /**
@@ -218,6 +218,26 @@ export async function buildCampaignPlans(input: BuildCampaignPlansInput): Promis
     });
   }
 
+  // Safeguard (spec §3): every Alpha Exact keyword becomes a campaign-level
+  // negative-exact in *both* discovery campaigns, so a term that has been
+  // promoted to its own Exact slot is never bid on twice.
+  //
+  // Built once here rather than inside the BMM block, because Auto Discovery
+  // needs it at least as badly: BMM only matches the roots in its target
+  // list, whereas Auto's four targeting groups (close, loose, substitutes,
+  // complements) match semantically with no keyword list at all — so a
+  // promoted term stays reachable there however the bank is filtered, and
+  // Alpha Exact ends up bidding against Auto Discovery on the one query
+  // that has actually proven it converts.
+  //
+  // Held to the negative-exact word limit for the same reason every other
+  // negative is: an over-length row is rejected at upload.
+  const alphaExactNegatives: CampaignPlanNegative[] = alphaExact.flatMap((k) =>
+    fitNegativeMatchType(k.text, "exact") === "exact"
+      ? [{ text: k.text, matchType: "exact" as const, reason: "Alpha Exact promotion safeguard", scope: "campaign" as const }]
+      : []
+  );
+
   const bmmDiscoveryTargets = selectBmmDiscoveryKeywords(input.bank, alphaExact, brandGuard, poolLimit);
   const bmmDiscovery = await refineToBest(
     SINGLE_AD_GROUP_LABEL.bmm_discovery!,
@@ -227,15 +247,6 @@ export async function buildCampaignPlans(input: BuildCampaignPlansInput): Promis
   );
   if (bmmDiscovery.length > 0) {
     const bidByKeywordId = new Map(input.bank.map((k) => [k.id, k.bid]));
-    // Safeguard (spec §3): every Alpha Exact keyword becomes a
-    // campaign-level negative-exact in BMM Discovery, so the two campaigns
-    // never bid against each other on the same term.
-    const alphaExactNegatives: CampaignPlanNegative[] = alphaExact.map((k) => ({
-      text: k.text,
-      matchType: "exact",
-      reason: "Alpha Exact promotion safeguard",
-      scope: "campaign",
-    }));
     plans.push({
       campaignType: "bmm_discovery",
       name: campaignName(input.book.title, SINGLE_AD_GROUP_LABEL.bmm_discovery!),
@@ -301,7 +312,7 @@ export async function buildCampaignPlans(input: BuildCampaignPlansInput): Promis
         const expr = `targetingExpression="${group.expression}"`;
         return { text: expr, targetingExpression: expr, bid: defaultBid * group.bidMultiplier, adGroup: group.label };
       }),
-      negatives: baseNegatives,
+      negatives: [...baseNegatives, ...alphaExactNegatives],
     });
   }
 

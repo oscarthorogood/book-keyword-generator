@@ -102,6 +102,51 @@ describe("buildCampaignPlans (campaigns spec §3/§4)", () => {
     );
   });
 
+  // Auto Discovery needs the safeguard at least as badly as BMM: its four
+  // targeting groups match semantically with no keyword list, so a promoted
+  // term stays reachable there and the two campaigns bid against each other
+  // on the one query that has proven it converts.
+  it("Alpha Exact keywords become a campaign-level negative-exact in Auto Discovery too", async () => {
+    const bank: KeywordWithRollups[] = [
+      keyword({ id: "ae-1", text: "alpha exact term", matchType: "exact", lifetimeOrders: 4 }),
+      keyword({ id: "bmm-1", text: "cat mystery", matchType: "broad", specificity: 1 }),
+    ];
+    const plans = await buildCampaignPlans({
+      book: BOOK,
+      bank,
+      anchors: ANCHORS,
+      asinBank: [],
+      siblingBooks: [],
+      negatives: [],
+      includeAutoDiscovery: true,
+    });
+    const auto = plans.find((p) => p.campaignType === "auto_discovery")!;
+    expect(auto.negatives).toContainEqual(
+      expect.objectContaining({ text: "alpha exact term", matchType: "exact", scope: "campaign" })
+    );
+  });
+
+  it("drops a promoted term too long to be a valid negative exact rather than emitting an invalid row", async () => {
+    const tooLong = "one two three four five six seven eight nine ten eleven";
+    const bank: KeywordWithRollups[] = [
+      keyword({ id: "ae-1", text: tooLong, matchType: "exact", lifetimeOrders: 4 }),
+      keyword({ id: "bmm-1", text: "cat mystery", matchType: "broad", specificity: 1 }),
+    ];
+    const plans = await buildCampaignPlans({
+      book: BOOK,
+      bank,
+      anchors: ANCHORS,
+      asinBank: [],
+      siblingBooks: [],
+      negatives: [],
+      includeAutoDiscovery: true,
+    });
+    for (const type of ["bmm_discovery", "auto_discovery"] as const) {
+      const plan = plans.find((p) => p.campaignType === type);
+      expect(plan?.negatives.some((n) => n.text === tooLong)).toBe(false);
+    }
+  });
+
   it("BMM Discovery keywords export with '+' BMM syntax as the target text", async () => {
     const bank: KeywordWithRollups[] = [keyword({ id: "bmm-1", text: "cat mystery", matchType: "broad", specificity: 1 })];
     const plans = await buildCampaignPlans({ book: BOOK, bank, anchors: ANCHORS, asinBank: [], siblingBooks: [], negatives: [] });
