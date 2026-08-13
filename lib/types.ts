@@ -178,32 +178,6 @@ export interface CompetitorAsin {
   relationship?: "rival" | "own";
 }
 
-/**
- * A competitor-derived keyword candidate persisted to competitor_keywords —
- * mirrors the fields on KeywordCandidate so the same filter pipeline and
- * cap-and-rank logic can treat it like an ordinary keyword.
- */
-export interface CompetitorKeyword {
-  id: string;
-  book_id: string;
-  /** Which competitor ASIN this row's rank/volume was read from (or the strongest of several — see mean_rank/competitor_count). */
-  competitor_asin: string;
-  text: string;
-  volume: number;
-  rank: number | null;
-  /** Number of distinct competitor ASINs this term was seen ranking for. */
-  competitor_count: number;
-  /** Average rank across those ASINs; null for single-ASIN rows. */
-  mean_rank: number | null;
-  category: KeywordCategory | null;
-  intent_segment: IntentSegment | null;
-  match_type: MatchType;
-  specificity: number | null;
-  status: "active" | "paused" | "archived";
-  created_at: string;
-  updated_at: string;
-}
-
 /** A rejected/paused keyword rolled up for Amazon Ads negative-keyword setup. */
 export interface NegativeSuggestion {
   text: string;

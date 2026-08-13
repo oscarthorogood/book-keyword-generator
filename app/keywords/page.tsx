@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// Keywords moved into the Databases tab switcher (Enhancements spec §2).
+// Keywords and ASINs are one database now — see app/targets/page.tsx.
 export default function KeywordsPage() {
-  redirect("/databases?tab=keywords");
+  redirect("/targets");
 }

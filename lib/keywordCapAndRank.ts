@@ -16,7 +16,7 @@
 import { profileOf, type BookAnchors } from "./keywordAnchors";
 import type { ReasonCode } from "./keywordFilterConfig";
 import { normalizeKeyword } from "./keywordFilters";
-import type { CompetitorKeyword, KeywordCandidate, MatchType } from "./types";
+import type { KeywordCandidate, MatchType } from "./types";
 
 export interface CapAndRankOptions {
   maxKeywordsTotal?: number;
@@ -216,58 +216,3 @@ export function capAndRank(
 }
 
 // --- Competitor-keyword slot reservation (docs/CLAUDE-CODE-COMPETITORS.md §4.2) --
-
-/**
- * Competitor keywords live in their own table (competitor_keywords) and are
- * never mixed into a book's active `keywords` list automatically — a human
- * promotes the ones worth bidding on. This function is the budget a
- * promotion pass (or a future "promote top competitor terms" action) should
- * respect: a small number of guaranteed Exact slots for terms proven across
- * multiple competitor ASINs, a slightly larger Phrase/Broad allowance for
- * single-ASIN terms, and nothing beyond that — competitor-derived terms are
- * a supplementary signal, not the bulk of the keyword list, so they must
- * never crowd out the book's own generated candidates.
- */
-export interface CompetitorSlotOptions {
-  /** Exact-match slots reserved for terms seen across >=2 competitor ASINs. Default 15. */
-  maxMultiAsinExactSlots?: number;
-  /** Phrase/Broad slots reserved for single-ASIN terms. Default 25. */
-  maxSingleAsinSlots?: number;
-}
-
-export interface CompetitorSlotResult {
-  /** Multi-ASIN terms selected for Exact slots, highest volume first. */
-  exactSlots: CompetitorKeyword[];
-  /** Single-ASIN terms selected for Phrase/Broad slots, highest volume first. */
-  broadSlots: CompetitorKeyword[];
-  /** Everything else — over budget, left in competitor_keywords for manual review. */
-  overflow: CompetitorKeyword[];
-}
-
-const DEFAULT_MAX_MULTI_ASIN_EXACT_SLOTS = 15;
-const DEFAULT_MAX_SINGLE_ASIN_SLOTS = 25;
-
-/**
- * Splits a book's competitor_keywords rows into the multi-ASIN "proven core
- * term" bucket (reserved Exact slots — competitor_count >= 2) and the
- * single-ASIN "worth a look" bucket (Phrase/Broad slots), each capped
- * independently, ranked by volume within its bucket.
- */
-export function reserveCompetitorSlots(
-  competitorKeywords: CompetitorKeyword[],
-  options: CompetitorSlotOptions = {}
-): CompetitorSlotResult {
-  const maxMultiAsinExactSlots = options.maxMultiAsinExactSlots ?? DEFAULT_MAX_MULTI_ASIN_EXACT_SLOTS;
-  const maxSingleAsinSlots = options.maxSingleAsinSlots ?? DEFAULT_MAX_SINGLE_ASIN_SLOTS;
-
-  const byVolumeDesc = (a: CompetitorKeyword, b: CompetitorKeyword) => b.volume - a.volume;
-
-  const multiAsin = competitorKeywords.filter((k) => k.competitor_count >= 2).sort(byVolumeDesc);
-  const singleAsin = competitorKeywords.filter((k) => k.competitor_count < 2).sort(byVolumeDesc);
-
-  const exactSlots = multiAsin.slice(0, maxMultiAsinExactSlots);
-  const broadSlots = singleAsin.slice(0, maxSingleAsinSlots);
-  const overflow = [...multiAsin.slice(maxMultiAsinExactSlots), ...singleAsin.slice(maxSingleAsinSlots)];
-
-  return { exactSlots, broadSlots, overflow };
-}

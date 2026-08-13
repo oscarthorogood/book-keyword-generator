@@ -5,27 +5,6 @@
  * unit-testable without a database.
  */
 
-import type { Specificity } from "./keywordSpecificity";
-
-export interface KeywordStatsRow {
-  status: string;
-  match_type: string;
-  source: string | null;
-  specificity: number | null;
-  rejected_by_filter?: string | null;
-}
-
-export interface KeywordStatsSummary {
-  total: number;
-  byStatus: Record<string, number>;
-  byMatchType: Record<string, number>;
-  bySource: Record<string, number>;
-  /** Counts for specificity 1..5, plus "unscored" for rows generated before sql/09. */
-  specificityDistribution: Record<Specificity | "unscored", number>;
-  /** §16: which filters are rejecting the most — the tuning signal for the allowlist flow. */
-  byRejectingFilter: Record<string, number>;
-}
-
 function countBy<T>(items: T[], key: (item: T) => string): Record<string, number> {
   const counts: Record<string, number> = {};
   for (const item of items) {
@@ -33,112 +12,6 @@ function countBy<T>(items: T[], key: (item: T) => string): Record<string, number
     counts[k] = (counts[k] ?? 0) + 1;
   }
   return counts;
-}
-
-/**
- * Keyword totals by status/match-type/source, and the specificity (§1)
- * distribution — the dashboard's "Keyword stats" and "Specificity
- * distribution" widgets. Rejected keywords are counted (they're research
- * exhaust, not hidden) since the point of this widget is generate-run
- * visibility, not just the working list.
- */
-export function summarizeKeywordStats(rows: KeywordStatsRow[]): KeywordStatsSummary {
-  const specificityDistribution: KeywordStatsSummary["specificityDistribution"] = {
-    1: 0,
-    2: 0,
-    3: 0,
-    4: 0,
-    5: 0,
-    unscored: 0,
-  };
-  for (const row of rows) {
-    if (row.specificity && row.specificity >= 1 && row.specificity <= 5) {
-      specificityDistribution[row.specificity as Specificity] += 1;
-    } else {
-      specificityDistribution.unscored += 1;
-    }
-  }
-
-  return {
-    total: rows.length,
-    byStatus: countBy(rows, (r) => r.status),
-    byMatchType: countBy(rows, (r) => r.match_type),
-    bySource: countBy(rows, (r) => r.source ?? "unknown"),
-    specificityDistribution,
-    byRejectingFilter: countBy(
-      rows.filter((r) => r.rejected_by_filter),
-      (r) => r.rejected_by_filter!
-    ),
-  };
-}
-
-export interface GenreKeywordSourceRow {
-  book_id: string;
-  text: string;
-  status: string;
-  specificity: number | null;
-}
-
-export interface BookGenreRow {
-  id: string;
-  title: string;
-  /** books.metadata_json.genreTerms — the same resolved vocabulary lib/genre.ts produces. */
-  genreTerms: string[];
-}
-
-export interface TopKeywordEntry {
-  text: string;
-  bookId: string;
-  bookTitle: string;
-  specificity: number | null;
-}
-
-export interface GenreKeywordGroup {
-  genre: string;
-  keywords: TopKeywordEntry[];
-}
-
-/**
- * Top active keywords grouped by each book's resolved genre (its first
- * `genreTerms` entry — the same primary genre lib/genre.ts resolves).
- * "Top" ranks by specificity, the closest persisted proxy to confidence —
- * the pipeline's per-candidate `score` isn't written to the keywords table,
- * only bid/specificity/category survive to storage.
- */
-export function topKeywordsByGenre(
-  books: BookGenreRow[],
-  keywordRows: GenreKeywordSourceRow[],
-  perGenre = 5
-): GenreKeywordGroup[] {
-  const genreByBook = new Map<string, { genre: string; title: string }>();
-  for (const book of books) {
-    const genre = book.genreTerms[0];
-    if (genre) genreByBook.set(book.id, { genre, title: book.title });
-  }
-
-  const byGenre = new Map<string, TopKeywordEntry[]>();
-  for (const row of keywordRows) {
-    if (row.status !== "active") continue;
-    const info = genreByBook.get(row.book_id);
-    if (!info) continue;
-    const entry: TopKeywordEntry = {
-      text: row.text,
-      bookId: row.book_id,
-      bookTitle: info.title,
-      specificity: row.specificity,
-    };
-    if (!byGenre.has(info.genre)) byGenre.set(info.genre, []);
-    byGenre.get(info.genre)!.push(entry);
-  }
-
-  return Array.from(byGenre.entries())
-    .map(([genre, keywords]) => ({
-      genre,
-      keywords: keywords
-        .sort((a, b) => (b.specificity ?? 0) - (a.specificity ?? 0))
-        .slice(0, perGenre),
-    }))
-    .sort((a, b) => b.keywords.length - a.keywords.length);
 }
 
 export interface CampaignSummaryCampaignRow {
@@ -220,13 +93,7 @@ export function summarizeCampaigns(
 export interface AttentionBookRow {
   id: string;
   title: string;
-  total_keywords: number;
   metadata_json: unknown;
-}
-
-export interface AttentionKeywordCountRow {
-  book_id: string;
-  status: string;
 }
 
 export interface AttentionCampaignRow {
@@ -235,11 +102,7 @@ export interface AttentionCampaignRow {
   last_export_error: string | null;
 }
 
-export type AttentionReason =
-  | "capture_issue"
-  | "no_active_keywords"
-  | "awaiting_filters"
-  | "export_failed";
+export type AttentionReason = "capture_issue" | "no_campaigns" | "export_failed";
 
 export interface AttentionItem {
   bookId: string;
@@ -250,45 +113,32 @@ export interface AttentionItem {
 
 const ATTENTION_REASON_LABEL: Record<AttentionReason, string> = {
   capture_issue: "Capture issue",
-  no_active_keywords: "No active keywords",
-  awaiting_filters: "Run Filters to promote the generated keywords into the campaign pool",
+  no_campaigns: "No campaigns yet",
   export_failed: "Campaign export failed",
 };
 
 /**
  * "Books needing attention" widget: flags books whose capture snapshot
- * reported a problem (lib/bookSnapshot.ts's `capture.ok`), books that have
- * keywords but none are `active` (nothing would actually get targeted), and
- * campaigns whose last export failed (`campaigns.last_export_error`, sql/28).
- * One book can surface more than once if it has more than one issue.
+ * reported a problem (lib/bookSnapshot.ts's `capture.ok`), books with no
+ * campaigns yet, and campaigns whose last export failed
+ * (`campaigns.last_export_error`, sql/28). One book can surface more than
+ * once if it has more than one issue.
  *
- * The "none active" case is split in two. Since generation started landing
- * every row in `archived` (PR #61), a book sitting on a pile of archived
- * rows with nothing active is the *normal* state straight after a Generate
- * run, not a fault — reporting it as "No active keywords" fired on every
- * freshly generated book and buried the real problems. A book with archived
- * rows waiting on Run Filters gets that next step named instead, matching
- * the wording the campaign-creation route already uses for the same dead
- * end. "No active keywords" is now reserved for the genuinely stuck case:
- * keywords exist, none are active, and none are waiting to be promoted.
+ * This used to flag books by keyword status — "No active keywords", or
+ * "Run Filters to promote the generated keywords into the campaign pool".
+ * Neither is something the user can act on any more: the bank is filled and
+ * filtered server-side inside Create Campaigns (lib/campaignPrepare.ts), so
+ * a book with nothing active is either brand new or already handled. What
+ * is worth surfacing is the campaign-level fact — this book has no
+ * campaigns — which is one press away from fixed.
  */
 export function booksNeedingAttention(
   books: AttentionBookRow[],
-  keywordRows: AttentionKeywordCountRow[],
   campaigns: AttentionCampaignRow[]
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
   const bookById = new Map(books.map((b) => [b.id, b]));
-
-  const activeCountByBook = new Map<string, number>();
-  const archivedCountByBook = new Map<string, number>();
-  for (const row of keywordRows) {
-    if (row.status === "active") {
-      activeCountByBook.set(row.book_id, (activeCountByBook.get(row.book_id) ?? 0) + 1);
-    } else if (row.status === "archived") {
-      archivedCountByBook.set(row.book_id, (archivedCountByBook.get(row.book_id) ?? 0) + 1);
-    }
-  }
+  const booksWithCampaigns = new Set(campaigns.map((c) => c.book_id));
 
   for (const book of books) {
     const snapshot = (book.metadata_json ?? {}) as { capture?: { ok?: boolean } };
@@ -300,14 +150,12 @@ export function booksNeedingAttention(
         detail: ATTENTION_REASON_LABEL.capture_issue,
       });
     }
-    if (book.total_keywords > 0 && (activeCountByBook.get(book.id) ?? 0) === 0) {
-      const awaitingFilters = (archivedCountByBook.get(book.id) ?? 0) > 0;
-      const reason: AttentionReason = awaitingFilters ? "awaiting_filters" : "no_active_keywords";
+    if (!booksWithCampaigns.has(book.id)) {
       items.push({
         bookId: book.id,
         bookTitle: book.title,
-        reason,
-        detail: ATTENTION_REASON_LABEL[reason],
+        reason: "no_campaigns",
+        detail: ATTENTION_REASON_LABEL.no_campaigns,
       });
     }
   }

@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
+  BarChart3,
   BookOpen,
   ChevronDown,
   ChevronLeft,
@@ -17,7 +18,15 @@ import {
   Tags,
 } from "lucide-react";
 
-export type ShellSection = "dashboard" | "books" | "databases" | "campaigns" | "presets" | "access";
+export type ShellSection =
+  | "dashboard"
+  | "books"
+  | "campaigns"
+  | "results"
+  | "presets"
+  | "targets"
+  | "sources"
+  | "access";
 
 interface AppShellProps {
   active: ShellSection;
@@ -34,16 +43,23 @@ interface SidebarBook {
 /** Sidebar shows only the most-recent books — it's a fixed 280px rail, not the full list (see /books "All"). */
 const SIDEBAR_BOOK_LIMIT = 8;
 
-/** Sub-links shown under the "Databases" dropdown. */
-const DATABASE_LINKS: Array<{ section: Extract<ShellSection, "campaigns" | "presets" | "databases">; label: string; href: string; Icon: typeof BookOpen }> = [
+/**
+ * The five databases, each its own route.
+ *
+ * Books and Campaigns are listed here as well as being reachable from the
+ * Books section above — they are databases in their own right, and the
+ * sidebar naming the same five things the app is built around is worth more
+ * than avoiding one duplicated link.
+ */
+const DATABASE_LINKS: Array<{ section: ShellSection; label: string; href: string; Icon: typeof BookOpen }> = [
+  { section: "books", label: "Books", href: "/books", Icon: BookOpen },
   { section: "campaigns", label: "Campaigns", href: "/campaigns", Icon: Megaphone },
+  { section: "results", label: "Results", href: "/results", Icon: BarChart3 },
   { section: "presets", label: "Presets", href: "/presets", Icon: ListChecks },
-  { section: "databases", label: "Keywords", href: "/databases?tab=keywords", Icon: Database },
-  { section: "databases", label: "ASINs", href: "/databases?tab=competitors", Icon: Tags },
-  { section: "databases", label: "Sources", href: "/databases?tab=sources", Icon: Database },
+  { section: "targets", label: "Keywords & ASINs", href: "/targets", Icon: Tags },
 ];
 
-const DATABASE_SECTIONS: ShellSection[] = ["databases", "campaigns", "presets"];
+const DATABASE_SECTIONS: ShellSection[] = ["books", "campaigns", "results", "presets", "targets"];
 
 /**
  * The app chrome: fixed 280px sidebar + fluid content (§3.2/§4.4).
@@ -53,11 +69,14 @@ const DATABASE_SECTIONS: ShellSection[] = ["databases", "campaigns", "presets"];
  * swapping views inside a single-page builder's local state.
  *
  * The book list sits directly in the sidebar between Dashboard and the
- * rest of the nav (Enhancements spec §2 restructure): a live, capped
- * (`SIDEBAR_BOOK_LIMIT`) slice of the same `/api/books/list` data
- * BooksListDashboard renders in full on /books, followed by an "All"
- * link to that full list. Keywords/Competitors/Sources moved off the
- * top level into the single /databases page (see app/databases/page.tsx).
+ * rest of the nav: a live, capped (`SIDEBAR_BOOK_LIMIT`) slice of the same
+ * `/api/books/list` data BooksListDashboard renders in full on /books,
+ * followed by an "All" link to that full list.
+ *
+ * Below it, "Databases" names the five things the app is built around —
+ * Books, Campaigns, Results, Presets, and one combined Keywords & ASINs
+ * table. The old /databases tab switcher is gone; each is a real route, so
+ * there is one way to reach each thing rather than a route and a tab.
  */
 export default function AppShell({ active, children }: AppShellProps) {
   const router = useRouter();
@@ -246,7 +265,12 @@ export default function AppShell({ active, children }: AppShellProps) {
             {sidebarOpen && databasesExpanded && (
               <div className="space-y-1 py-1 pl-2" aria-label="Databases">
                 {DATABASE_LINKS.map(({ section, label, href, Icon }) => (
-                  <Link key={label} href={href} className="nav-item">
+                  <Link
+                    key={label}
+                    href={href}
+                    className={`nav-item ${active === section ? "nav-item-active" : ""}`}
+                    aria-current={active === section ? "page" : undefined}
+                  >
                     <Icon size={20} className="shrink-0" style={{ color: iconColor(section) }} />
                     <span>{label}</span>
                   </Link>

@@ -9,7 +9,7 @@ interface Book {
   title: string;
   author: string;
   marketplace: string;
-  total_keywords: number;
+  campaign_count: number;
   created_at: string;
   metadata_json?: {
     coverImageUrl?: string;
@@ -62,8 +62,8 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
     );
   }, [books, searchTerm]);
 
-  const totalKeywords = useMemo(
-    () => books.reduce((sum, book) => sum + (book.total_keywords ?? 0), 0),
+  const totalCampaigns = useMemo(
+    () => books.reduce((sum, book) => sum + (book.campaign_count ?? 0), 0),
     [books]
   );
 
@@ -73,8 +73,8 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
         <div>
           <h1 className="page-title">Books</h1>
           <p className="page-subtitle mt-1">
-            {books.length} book{books.length === 1 ? "" : "s"} · {totalKeywords} keyword
-            {totalKeywords === 1 ? "" : "s"} researched
+            {books.length} book{books.length === 1 ? "" : "s"} · {totalCampaigns} campaign
+            {totalCampaigns === 1 ? "" : "s"}
           </p>
         </div>
         <button onClick={onAddBook} className="btn btn-primary">
@@ -114,8 +114,8 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
             <div className="space-y-1">
               <p className="empty-state-title">No books yet</p>
               <p className="empty-state-body">
-                Paste an Amazon product link to capture a book&apos;s metadata. Every keyword you generate
-                later is built from that one capture.
+                Paste an Amazon product link to capture a book&apos;s listing. Every campaign you build later
+                comes from that one capture.
               </p>
             </div>
             <button onClick={onAddBook} className="btn btn-primary">
@@ -172,7 +172,7 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
                       <th scope="col" className="hidden lg:table-cell">
                         Genre vocabulary
                       </th>
-                      <th scope="col">Keywords</th>
+                      <th scope="col">Campaigns</th>
                       <th scope="col">
                         <span className="sr-only">Status</span>
                       </th>
@@ -235,7 +235,11 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
                             )}
                           </td>
                           <td>
-                            <span className="cell-primary">{book.total_keywords}</span>
+                            {book.campaign_count > 0 ? (
+                              <span className="cell-primary">{book.campaign_count}</span>
+                            ) : (
+                              <span style={{ color: "var(--text-placeholder)" }}>None yet</span>
+                            )}
                           </td>
                           <td>
                             {captureFailed && (

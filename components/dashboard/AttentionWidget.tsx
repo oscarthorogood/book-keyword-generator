@@ -7,8 +7,7 @@ import type { AttentionItem } from "@/lib/dashboardStats";
 
 const REASON_BADGE: Record<AttentionItem["reason"], string> = {
   capture_issue: "badge-error",
-  no_active_keywords: "badge-warning",
-  awaiting_filters: "badge-warning",
+  no_campaigns: "badge-warning",
   export_failed: "badge-error",
 };
 
@@ -19,16 +18,14 @@ const REASON_BADGE: Record<AttentionItem["reason"], string> = {
  */
 const REASON_BADGE_TEXT: Record<AttentionItem["reason"], string> = {
   capture_issue: "Capture",
-  no_active_keywords: "Keywords",
-  awaiting_filters: "Filters",
+  no_campaigns: "Campaigns",
   export_failed: "Export",
 };
 
 /**
- * Dashboard "Needs attention" widget: books with a flagged capture snapshot,
- * books with nothing active to target (either waiting on a Run Filters pass
- * or genuinely stuck), and campaigns whose last export failed. Own fetch,
- * fails soft.
+ * Dashboard "Needs attention" widget: books with a flagged capture
+ * snapshot, books with no campaigns yet, and campaigns whose last export
+ * failed. Own fetch, fails soft.
  */
 export default function AttentionWidget() {
   const [items, setItems] = useState<AttentionItem[] | null>(null);
