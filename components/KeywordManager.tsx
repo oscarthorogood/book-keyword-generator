@@ -181,6 +181,7 @@ export default function KeywordManager({
 
   const [newAsinText, setNewAsinText] = useState("");
   const [addingAsin, setAddingAsin] = useState(false);
+  const [asinError, setAsinError] = useState<string | null>(null);
   const [recalculatingBids, setRecalculatingBids] = useState(false);
 
   // "ready" is a UI-only pseudo-status: status === "active" but not yet a
@@ -292,19 +293,34 @@ export default function KeywordManager({
     const text = newAsinText.trim();
     if (!text) return;
     setAddingAsin(true);
+    setAsinError(null);
     try {
       const values = text
         .split(/[\n,]/)
         .map((t) => t.trim())
         .filter(Boolean);
+      const failed: string[] = [];
+      let lastError: string | null = null;
       for (const value of values) {
-        await fetch(`/api/books/${bookId}/competitors`, {
+        const res = await fetch(`/api/books/${bookId}/competitors`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ competitor_asin: value, source: "manual" }),
         });
+        if (!res.ok) {
+          failed.push(value);
+          const data = await res.json().catch(() => null);
+          lastError = data?.error || lastError;
+        }
       }
-      setNewAsinText("");
+      if (failed.length > 0) {
+        setNewAsinText(failed.join("\n"));
+        setAsinError(
+          lastError || `Could not add ${failed.length} of ${values.length} ASIN(s). Please try again.`
+        );
+      } else {
+        setNewAsinText("");
+      }
       await reload();
     } finally {
       setAddingAsin(false);
@@ -890,6 +906,16 @@ export default function KeywordManager({
           Add ASIN
         </button>
       </div>
+
+      {asinError && (
+        <div className="alert alert-error mb-6" role="alert">
+          <AlertCircle size={20} className="mt-0.5 shrink-0" />
+          <p className="flex-1">{asinError}</p>
+          <button className="btn btn-tertiary btn-icon btn-sm" onClick={() => setAsinError(null)} aria-label="Dismiss error">
+            <X size={16} />
+          </button>
+        </div>
+      )}
 
       {/* Status tabs — the primary cut through the list (§4.4). Ordered so
           Active/Ready (the working set) sit together, then the rest of the
