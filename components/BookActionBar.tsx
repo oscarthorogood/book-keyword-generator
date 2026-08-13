@@ -116,8 +116,8 @@ interface BookActionBarProps {
   /** Bumped to force KeywordManager to refetch after a shared action. */
   onDataChanged: () => void;
   onMetadataRefreshed: () => void;
-  /** Opens the Keyword manager popup (KeywordManager is only rendered on demand). */
-  onOpenKeywordManager: () => void;
+  /** Opens the manual add-keyword/add-ASIN popup inside KeywordManager. */
+  onOpenManualAdd: () => void;
 }
 
 async function postJson(url: string, body: unknown = {}) {
@@ -139,7 +139,7 @@ export default function BookActionBar({
   metadataReady,
   onDataChanged,
   onMetadataRefreshed,
-  onOpenKeywordManager,
+  onOpenManualAdd,
 }: BookActionBarProps) {
   const [campaigns, setCampaigns] = useState<Campaign[]>([]);
   const [generating, setGenerating] = useState(false);
@@ -409,8 +409,8 @@ export default function BookActionBar({
               section: "Generation",
               label: "Manual",
               icon: <Edit3 size={16} />,
-              onClick: onOpenKeywordManager,
-              title: "Open the keyword manager to add keywords/ASINs or edit the bank by hand",
+              onClick: onOpenManualAdd,
+              title: "Add keywords or competitor ASINs by hand",
             },
             {
               key: "presets",

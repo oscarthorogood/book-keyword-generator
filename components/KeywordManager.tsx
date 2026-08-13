@@ -94,8 +94,10 @@ interface KeywordManagerProps {
   bookId: string;
   metadataCapturedAt?: string;
   onKeywordsChanged?: () => void;
-  /** Rendered as a popup (BookDetailPage) — closes it. */
-  onClose: () => void;
+  /** Manual add-keyword/add-ASIN popup (opened by BookActionBar's "Manual" button). */
+  manualAddOpen: boolean;
+  onOpenManualAdd: () => void;
+  onCloseManualAdd: () => void;
 }
 
 const STATUSES: KeywordStatus[] = ["active", "paused", "negative", "archived", "rejected"];
@@ -141,7 +143,9 @@ export default function KeywordManager({
   bookId,
   metadataCapturedAt,
   onKeywordsChanged,
-  onClose,
+  manualAddOpen,
+  onOpenManualAdd,
+  onCloseManualAdd,
 }: KeywordManagerProps) {
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [competitors, setCompetitors] = useState<CompetitorAsinRow[]>([]);
@@ -590,7 +594,7 @@ export default function KeywordManager({
   }
 
   return (
-    <section className="card" role="dialog" aria-modal="true" aria-label="Keyword manager">
+    <section className="card">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="card-title">Keyword manager</p>
@@ -600,9 +604,6 @@ export default function KeywordManager({
             {metadataCapturedAt ? " · generated from the metadata captured when the book was added" : ""}
           </p>
         </div>
-        <button className="btn btn-tertiary btn-icon btn-sm" onClick={onClose} aria-label="Close keyword manager">
-          <X size={16} />
-        </button>
       </div>
 
       <RecommendationsPanel bookId={bookId} />
@@ -634,68 +635,105 @@ export default function KeywordManager({
         </div>
       )}
 
-      {/* Add keyword */}
-      <div className="mb-5 flex flex-wrap items-start gap-3">
-        <textarea
-          id="manual-keyword-input"
-          value={newText}
-          onChange={(e) => setNewText(e.target.value)}
-          placeholder="Add a keyword, or paste a list (one per line / comma separated)"
-          rows={1}
-          className="input min-w-[240px] flex-1 resize-none"
-          aria-label="New keyword"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              addKeyword();
-            }
+      {manualAddOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Add keywords and competitor ASINs"
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+            padding: 24,
           }}
-        />
-        <select
-          value={newMatchType}
-          onChange={(e) => setNewMatchType(e.target.value as MatchType)}
-          className="input w-auto"
-          aria-label="Match type for new keyword"
         >
-          <option value="broad">Broad</option>
-          <option value="phrase">Phrase</option>
-          <option value="exact">Exact</option>
-        </select>
-        <button onClick={addKeyword} disabled={adding || !newText.trim()} className="btn btn-secondary">
-          <Plus size={20} />
-          Add
-        </button>
-      </div>
+          <div
+            style={{
+              background: "var(--bg-surface, #fff)",
+              borderRadius: 12,
+              padding: 24,
+              width: "min(640px, 92vw)",
+              maxHeight: "90vh",
+              overflowY: "auto",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.25)",
+            }}
+          >
+            <div className="mb-5 flex items-center justify-between">
+              <p className="card-title">Add keywords &amp; ASINs</p>
+              <button className="btn btn-tertiary btn-icon btn-sm" onClick={onCloseManualAdd} aria-label="Close">
+                <X size={16} />
+              </button>
+            </div>
 
-      {/* Add competitor ASIN */}
-      <div className="mb-5 flex flex-wrap items-start gap-3">
-        <textarea
-          value={newAsinText}
-          onChange={(e) => setNewAsinText(e.target.value)}
-          placeholder="Add a competitor ASIN, or paste a list (one per line / comma separated)"
-          rows={1}
-          className="input min-w-[240px] flex-1 resize-none"
-          aria-label="New competitor ASIN"
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey) {
-              e.preventDefault();
-              addAsin();
-            }
-          }}
-        />
-        <button onClick={addAsin} disabled={addingAsin || !newAsinText.trim()} className="btn btn-secondary">
-          <Plus size={20} />
-          Add ASIN
-        </button>
-      </div>
+            {/* Add keyword */}
+            <div className="mb-5 flex flex-wrap items-start gap-3">
+              <textarea
+                id="manual-keyword-input"
+                value={newText}
+                onChange={(e) => setNewText(e.target.value)}
+                placeholder="Add a keyword, or paste a list (one per line / comma separated)"
+                rows={1}
+                className="input min-w-[240px] flex-1 resize-none"
+                aria-label="New keyword"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    addKeyword();
+                  }
+                }}
+              />
+              <select
+                value={newMatchType}
+                onChange={(e) => setNewMatchType(e.target.value as MatchType)}
+                className="input w-auto"
+                aria-label="Match type for new keyword"
+              >
+                <option value="broad">Broad</option>
+                <option value="phrase">Phrase</option>
+                <option value="exact">Exact</option>
+              </select>
+              <button onClick={addKeyword} disabled={adding || !newText.trim()} className="btn btn-secondary">
+                <Plus size={20} />
+                Add
+              </button>
+            </div>
 
-      {asinError && (
-        <div className="alert alert-error mb-6" role="alert">
-          <AlertCircle size={20} className="mt-0.5 shrink-0" />
-          <p className="flex-1">{asinError}</p>
-          <button className="btn btn-tertiary btn-icon btn-sm" onClick={() => setAsinError(null)} aria-label="Dismiss error">
-            <X size={16} />
-          </button>
+            {/* Add competitor ASIN */}
+            <div className="mb-5 flex flex-wrap items-start gap-3">
+              <textarea
+                value={newAsinText}
+                onChange={(e) => setNewAsinText(e.target.value)}
+                placeholder="Add a competitor ASIN, or paste a list (one per line / comma separated)"
+                rows={1}
+                className="input min-w-[240px] flex-1 resize-none"
+                aria-label="New competitor ASIN"
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    addAsin();
+                  }
+                }}
+              />
+              <button onClick={addAsin} disabled={addingAsin || !newAsinText.trim()} className="btn btn-secondary">
+                <Plus size={20} />
+                Add ASIN
+              </button>
+            </div>
+
+            {asinError && (
+              <div className="alert alert-error mb-2" role="alert">
+                <AlertCircle size={20} className="mt-0.5 shrink-0" />
+                <p className="flex-1">{asinError}</p>
+                <button className="btn btn-tertiary btn-icon btn-sm" onClick={() => setAsinError(null)} aria-label="Dismiss error">
+                  <X size={16} />
+                </button>
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -887,19 +925,12 @@ export default function KeywordManager({
             <p className="empty-state-title">{bank.length === 0 ? "No keywords or ASINs yet" : "Nothing matches these filters"}</p>
             <p className="empty-state-body">
               {bank.length === 0
-                ? "Generate keywords from this book's metadata, or add your own above."
+                ? "Generate keywords from this book's metadata, or add your own manually."
                 : "Try a different status tab, or clear the search."}
             </p>
           </div>
           {bank.length === 0 ? (
-            <button
-              onClick={() => {
-                const el = document.getElementById("manual-keyword-input");
-                el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                (el as HTMLTextAreaElement | null)?.focus();
-              }}
-              className="btn btn-primary"
-            >
+            <button onClick={onOpenManualAdd} className="btn btn-primary">
               <Sparkles size={20} />
               Add keywords
             </button>
