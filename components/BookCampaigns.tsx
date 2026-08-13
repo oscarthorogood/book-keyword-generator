@@ -9,9 +9,11 @@ import {
   Megaphone,
   RefreshCw,
   Rocket,
+  Sliders,
   Upload,
   X,
 } from "lucide-react";
+import ManualUpdateModal from "./ManualUpdateModal";
 import ResultsUploadModal from "./ResultsUploadModal";
 
 interface Campaign {
@@ -54,6 +56,7 @@ export default function BookCampaigns({ bookId, metadataReady, onChanged }: Book
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [updatingAll, setUpdatingAll] = useState(false);
   const [showResultsUpload, setShowResultsUpload] = useState(false);
+  const [showManualUpdate, setShowManualUpdate] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [listError, setListError] = useState<string | null>(null);
@@ -252,10 +255,21 @@ export default function BookCampaigns({ bookId, metadataReady, onChanged }: Book
           </button>
 
           {exported.length > 0 && (
-            <button onClick={updateAll} disabled={busy} className="btn btn-secondary" title="Re-scores every campaign against the latest research and results">
-              {updatingAll ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
-              Update all
-            </button>
+            <div className="flex flex-col items-stretch gap-2">
+              <button onClick={updateAll} disabled={busy} className="btn btn-secondary" title="Re-scores every campaign against the latest research and results">
+                {updatingAll ? <Loader2 size={20} className="animate-spin" /> : <RefreshCw size={20} />}
+                Automatic update all
+              </button>
+              <button
+                onClick={() => setShowManualUpdate(true)}
+                disabled={busy}
+                className="btn btn-secondary"
+                title="Pick a campaign and swap individual keywords/ASINs for others from the bank"
+              >
+                <Sliders size={20} />
+                Manual update
+              </button>
+            </div>
           )}
 
           {downloadable.length > 0 && (
@@ -384,7 +398,7 @@ export default function BookCampaigns({ bookId, metadataReady, onChanged }: Book
                         onClick={() => updateCampaign(campaign.id)}
                         title="Re-scores this campaign against the latest research and imported results, then rebuilds its bulksheet"
                       >
-                        {updatingId === campaign.id ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Update
+                        {updatingId === campaign.id ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Automatic update
                       </button>
                     </div>
                   </td>
@@ -401,6 +415,19 @@ export default function BookCampaigns({ bookId, metadataReady, onChanged }: Book
           onClose={() => setShowResultsUpload(false)}
           onImported={() => {
             setNotice("Results imported — updating a campaign will now weigh real performance.");
+            onChanged();
+          }}
+        />
+      )}
+
+      {showManualUpdate && (
+        <ManualUpdateModal
+          bookId={bookId}
+          campaigns={exported}
+          onClose={() => setShowManualUpdate(false)}
+          onSwapped={async (message) => {
+            setNotice(message);
+            await loadCampaigns();
             onChanged();
           }}
         />
