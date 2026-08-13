@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import {
   AlertCircle,
   AlertTriangle,
+  ArrowRight,
   Calculator,
   CheckCircle2,
   Plus,
@@ -692,48 +693,66 @@ export default function KeywordManager({
         </div>
       )}
 
-      {/* Status tabs — the primary cut through the list (§4.4). Ordered so
-          Active/Ready (the working set) sit together, then the rest of the
-          lifecycle, with All last as the escape hatch. Spread to fill the
-          row rather than clustering to one side. */}
-      <div className="mb-4 flex flex-wrap items-center gap-3">
-        <div className="tabs tabs-spread" role="tablist" aria-label="Filter by status">
-          <button
-            role="tab"
-            aria-selected={statusFilter === "active"}
-            onClick={() => changeFilters(() => setStatusFilter("active"))}
-            className={`tab ${statusFilter === "active" ? "tab-active" : ""}`}
-          >
-            Active ({bank.filter((r) => r.status === "active" && inCampaign(r)).length})
-          </button>
-          <button
-            role="tab"
-            aria-selected={statusFilter === "ready"}
-            onClick={() => changeFilters(() => setStatusFilter("ready"))}
-            className={`tab ${statusFilter === "ready" ? "tab-active" : ""}`}
-            title="Passed the relevance filters but not yet part of any campaign"
-          >
-            Ready ({bank.filter((r) => r.status === "active" && !inCampaign(r)).length})
-          </button>
-          {(["archived", "paused", "negative", "rejected"] as KeywordStatus[]).map((status) => (
+      {/* Status tabs — the primary cut through the list (§4.4), regrouped to
+          show the two sides of the bank/campaign flow: the Keyword/ASIN bank
+          (Archived, Paused, Negative, Rejected — where every generated row
+          lands and where "Run Filters" does its work) feeds the Campaign
+          pool (Active, Ready) once a row is promoted. All is the escape
+          hatch on the end. */}
+      <div className="mb-4">
+        <div className="mb-1.5 flex flex-wrap items-center gap-2 text-xs font-semibold uppercase tracking-wide" style={{ color: "var(--text-secondary)" }}>
+          <span>Keyword/ASIN bank</span>
+          <ArrowRight size={14} aria-hidden="true" />
+          <span>Campaigns pull from</span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="tabs tabs-spread" role="tablist" aria-label="Filter by bank status">
+            {(["archived", "paused", "negative", "rejected"] as KeywordStatus[]).map((status) => (
+              <button
+                key={status}
+                role="tab"
+                aria-selected={statusFilter === status}
+                onClick={() => changeFilters(() => setStatusFilter(status))}
+                className={`tab ${statusFilter === status ? "tab-active" : ""}`}
+                title={status === "archived" ? "Where every generated keyword/ASIN lands until it's filtered or promoted" : undefined}
+              >
+                {STATUS_LABELS[status]} ({bank.filter((r) => r.status === status).length})
+              </button>
+            ))}
+          </div>
+
+          <ArrowRight size={16} className="shrink-0" style={{ color: "var(--text-secondary)" }} aria-hidden="true" />
+
+          <div className="tabs tabs-spread" role="tablist" aria-label="Filter by campaign status">
             <button
-              key={status}
               role="tab"
-              aria-selected={statusFilter === status}
-              onClick={() => changeFilters(() => setStatusFilter(status))}
-              className={`tab ${statusFilter === status ? "tab-active" : ""}`}
+              aria-selected={statusFilter === "active"}
+              onClick={() => changeFilters(() => setStatusFilter("active"))}
+              className={`tab ${statusFilter === "active" ? "tab-active" : ""}`}
             >
-              {STATUS_LABELS[status]} ({keywords.filter((k) => k.status === status).length})
+              Active ({bank.filter((r) => r.status === "active" && inCampaign(r)).length})
             </button>
-          ))}
-          <button
-            role="tab"
-            aria-selected={statusFilter === "all"}
-            onClick={() => changeFilters(() => setStatusFilter("all"))}
-            className={`tab ${statusFilter === "all" ? "tab-active" : ""}`}
-          >
-            All ({keptCount})
-          </button>
+            <button
+              role="tab"
+              aria-selected={statusFilter === "ready"}
+              onClick={() => changeFilters(() => setStatusFilter("ready"))}
+              className={`tab ${statusFilter === "ready" ? "tab-active" : ""}`}
+              title="Passed the relevance filters but not yet part of any campaign"
+            >
+              Ready ({bank.filter((r) => r.status === "active" && !inCampaign(r)).length})
+            </button>
+          </div>
+
+          <div className="tabs tabs-spread" role="tablist" aria-label="Show all">
+            <button
+              role="tab"
+              aria-selected={statusFilter === "all"}
+              onClick={() => changeFilters(() => setStatusFilter("all"))}
+              className={`tab ${statusFilter === "all" ? "tab-active" : ""}`}
+            >
+              All ({keptCount})
+            </button>
+          </div>
         </div>
       </div>
 
@@ -789,7 +808,7 @@ export default function KeywordManager({
             <option value="all">Any filter verdict</option>
             {rejectingFilters.map((filter) => (
               <option key={filter} value={filter}>
-                {labelForFilter(filter).trim()} ({keywords.filter((k) => k.rejected_by_filter === filter).length})
+                {labelForFilter(filter).trim()} ({bank.filter((r) => r.rejected_by_filter === filter).length})
               </option>
             ))}
           </select>
