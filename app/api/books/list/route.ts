@@ -1,5 +1,4 @@
-import { currentUser } from "@/lib/supabaseServer";
-import { supabaseServer } from "@/lib/supabaseServer";
+import { currentUser, supabaseServer, withClockSkewRetry } from "@/lib/supabaseServer";
 
 /**
  * GET /api/books/list
@@ -15,10 +14,11 @@ export async function GET() {
 
     const supabase = await supabaseServer();
 
-    const { data: books, error } = await supabase
-      .from("books")
-      .select(
-        `
+    const { data: books, error } = await withClockSkewRetry(() =>
+      supabase
+        .from("books")
+        .select(
+          `
         id,
         asin,
         title,
@@ -28,9 +28,10 @@ export async function GET() {
         created_at,
         metadata_json
       `
-      )
-      .eq("user_id", user.id)
-      .order("created_at", { ascending: false });
+        )
+        .eq("user_id", user.id)
+        .order("created_at", { ascending: false })
+    );
 
     if (error) {
       console.error("Error fetching books:", error);
