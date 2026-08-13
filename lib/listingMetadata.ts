@@ -40,9 +40,6 @@ export interface ListingHtmlMetadata {
   fieldsMissing: string[];
 }
 
-/** Canonical format vocabulary, shared with the format-availability filter. */
-export const KNOWN_FORMATS = ["kindle", "paperback", "hardcover", "audiobook", "large print"] as const;
-
 const FORMAT_ALIASES: Array<{ format: string; pattern: RegExp }> = [
   { format: "kindle", pattern: /\b(kindle|ebook|e-book)\b/i },
   { format: "paperback", pattern: /\b(paperback|mass market|softcover)\b/i },

@@ -8,7 +8,8 @@
  * Amazon Ads API, Firecrawl) with the direct fetch as the fallback. What
  * this module adds is the discipline that keeps it that way:
  *
- *  - every fetch is logged (URL, status, duration, outcome) for auditability;
+ *  - every fetch is logged to the console (URL, status, duration, outcome)
+ *    for auditability;
  *  - per-host rate limiting spaces requests out and caps concurrency;
  *  - a bot-check trips a circuit breaker, so a blocked host is left alone for
  *    a cool-down instead of being hammered into a harder block.
@@ -28,24 +29,19 @@ export interface FetchLogEntry {
   note?: string;
 }
 
-const MAX_LOG_ENTRIES = 200;
-const log: FetchLogEntry[] = [];
-
-/** Recent fetches, newest last. Bounded so a long-running instance can't grow without limit. */
-export function recentFetchLog(limit = 50): FetchLogEntry[] {
-  return log.slice(-limit);
-}
-
 /**
- * Records a fetch. Every attempt lands in the in-memory audit log; the
- * console only gets the anomalies (a block, an error, a non-2xx), unless
- * DEBUG_FETCH_LOG is set — a routine capture makes dozens of requests and
- * logging all of them buries everything else.
+ * Records a fetch to the console: the anomalies (a block, an error, a non-2xx)
+ * always, and the routine successes only when DEBUG_FETCH_LOG is set — a
+ * capture makes dozens of requests and logging all of them buries everything
+ * else.
+ *
+ * This used to also append every entry to a 200-deep in-memory ring buffer,
+ * read back by a `recentFetchLog()` that nothing ever called: no route, no
+ * component, no test. The buffer was write-only, so it cost memory on every
+ * serverless instance to hold records no one could reach. The console line is
+ * the audit trail that actually survives to a human, and it is unchanged.
  */
-export function recordFetch(entry: FetchLogEntry): void {
-  log.push(entry);
-  if (log.length > MAX_LOG_ENTRIES) log.splice(0, log.length - MAX_LOG_ENTRIES);
-
+function recordFetch(entry: FetchLogEntry): void {
   const status = entry.status ? ` ${entry.status}` : "";
   const note = entry.note ? ` — ${entry.note}` : "";
   const line = `[fetch] ${entry.outcome}${status} ${entry.durationMs}ms ${entry.url}${note}`;
@@ -174,12 +170,6 @@ function sleep(ms: number): Promise<void> {
 const BASE_BLOCK_COOLDOWN_MS = 60_000;
 const MAX_BLOCK_COOLDOWN_MS = 15 * 60_000;
 
-/** True when the host is inside a CAPTCHA cool-down and must not be fetched. */
-export function isHostBlocked(url: string): boolean {
-  const state = hostStates.get(hostOf(url));
-  return !!state && state.blockedUntil > Date.now();
-}
-
 /**
  * Records that a host served a bot/CAPTCHA check. The caller aborts; this
  * makes sure the *next* caller doesn't immediately try again.
@@ -283,5 +273,4 @@ export async function withRateLimit<T>(
 /** Clears rate-limit/breaker state. Tests only. */
 export function resetFetchState(): void {
   hostStates.clear();
-  log.length = 0;
 }

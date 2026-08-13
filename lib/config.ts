@@ -1,6 +1,10 @@
 /**
- * Centralized configuration for auth and API behavior.
- * Replaces duplicated constants scattered across lib/auth.ts and middleware.ts
+ * Auth configuration, shared by the proxy and the route handlers.
+ *
+ * This file used to carry API_CONFIG and KEYWORD_CONFIG too. Both were dead:
+ * nothing imported either one, and KEYWORD_CONFIG's marketplace/match-type
+ * lists and caps duplicated the live values in lib/types.ts and
+ * lib/keywordMerge.ts — the exact drift its own comment warned about.
  */
 
 export const AUTH_CONFIG = {
@@ -12,25 +16,4 @@ export const AUTH_CONFIG = {
     "/api/auth", // sign-in request
     "/api/logout",
   ],
-};
-
-export const API_CONFIG = {
-  MAX_DURATION: 60, // Vercel function timeout in seconds
-  COMMON_ERROR: { error: "Internal server error" },
-};
-
-export const KEYWORD_CONFIG = {
-  MARKETPLACES: ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const,
-  MATCH_TYPES: ["broad", "phrase", "exact"] as const,
-  // NOTE: keyword caps deliberately do NOT live here. The live values are
-  // RECOMMENDED_MIN/MAX_KEYWORDS + COMP_NAME_MAX_KEYWORDS in lib/keywordMerge.ts
-  // and PRODUCT_TARGET_MAX in lib/productTargets.ts, next to the scoring code
-  // that reads them. Duplicating them here previously left two contradicting
-  // sets of numbers, with the copies in this file silently unused.
-  //
-  // The same applies to the source list: the live one is ALL_KEYWORD_SOURCES
-  // in app/api/books/[id]/keywords/generate/route.ts, next to the pipeline
-  // that reads it. A duplicate used to live here too — always stale, never
-  // imported by anything — and was removed.
-  ALL_KEYWORD_GROUP_TYPES: ["tropes", "comp-names", "product-targeting"] as const,
 };

@@ -15,7 +15,6 @@ import { cleanTaxonomyTerms, genreFamilySearchTerms, genreFamilyThemeTerms, isCa
 import {
   ALLOWED_GENRE_SYNONYMS,
   BOOK_INTENT_WORDS,
-  DEMONYM_TERMS,
   UI_POLLUTION_TERMS,
 } from "./keywordFilterConfig";
 import { manualCompetitors } from "./manualCompetitors";
@@ -401,12 +400,6 @@ export function buildBookAnchors(input: AnchorInput): BookAnchors {
     primaryGenrePhrase,
     profile: defaultBookProfile(input.bookProfile),
   };
-}
-
-/** True when the keyword names a place/nationality the book has nothing to do with. */
-export function isForeignDemonym(word: string, anchors: BookAnchors): boolean {
-  if (!DEMONYM_TERMS.includes(word)) return false;
-  return !anchors.setting.includes(word);
 }
 
 // One BookAnchors object is built per generate/filter run and then read by

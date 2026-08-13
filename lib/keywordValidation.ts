@@ -285,45 +285,6 @@ export function getKeywordQualityAdjustment(text: string): number {
 }
 
 /**
- * Filter out redundant keywords. If "cozy mystery" appears in Broad, Phrase,
- * AND Exact match types, keep the highest-performing one (usually Exact)
- * and drop duplicates to avoid wasting budget on the same keyword.
- */
-export function filterRedundantMatches(
-  candidates: KeywordCandidate[],
-  matchTypes: string[]
-): KeywordCandidate[] {
-  if (matchTypes.length <= 1) return candidates;
-
-  // Group candidates by keyword text (case-insensitive)
-  const byKeyword = new Map<string, KeywordCandidate[]>();
-  for (const candidate of candidates) {
-    const normalized = candidate.text.toLowerCase();
-    if (!byKeyword.has(normalized)) {
-      byKeyword.set(normalized, []);
-    }
-    byKeyword.get(normalized)!.push(candidate);
-  }
-
-  // For each keyword that appears multiple times with different match types,
-  // keep only the highest-scoring version
-  const result: KeywordCandidate[] = [];
-  for (const variants of byKeyword.values()) {
-    if (variants.length === 1) {
-      result.push(variants[0]);
-    } else {
-      // Multiple match types for same keyword - keep the best one
-      const best = variants.reduce((prev, curr) =>
-        (curr.score ?? 0) > (prev.score ?? 0) ? curr : prev
-      );
-      result.push(best);
-    }
-  }
-
-  return result;
-}
-
-/**
  * Restructure keyword output to allocate budget better:
  * - Remove critical bugs (extreme penalties < -50)
  * - Reduce format-heavy keywords
