@@ -232,16 +232,23 @@ export async function prepareBank(
     }
     if (!keywords.ok) result.warnings.push(errorText(keywords.data, "Could not generate keywords."));
     if (!asins.ok) result.warnings.push(errorText(asins.data, "Could not generate competitor ASINs."));
-
-    // Step 2: genre presets, applied on top of what generation found.
-    const [keywordPresets, asinPresets] = await Promise.all([
-      callRoute(applyKeywordPresets, bookId, "keywords/apply-presets"),
-      callRoute(applyAsinPresets, bookId, "competitors/apply-presets"),
-    ]);
-    result.presetsApplied = num(keywordPresets.data.appliedCount) + num(asinPresets.data.appliedCount);
-    if (!keywordPresets.ok) result.warnings.push(errorText(keywordPresets.data, "Could not apply keyword presets."));
-    if (!asinPresets.ok) result.warnings.push(errorText(asinPresets.data, "Could not apply ASIN presets."));
   }
+
+  // Step 2: genre presets, applied on top of whatever the bank now holds.
+  //
+  // Unconditional, unlike generation. The flowchart has this as its own
+  // step in the line, and it costs nothing to repeat: both preset routes
+  // dedupe against the book's existing keywords/ASINs first, so a re-run
+  // adds only presets that are genuinely missing. Nesting it inside the
+  // generation branch meant a book whose rows were all archived — the
+  // filter-only path — never picked up presets added since its last run.
+  const [keywordPresets, asinPresets] = await Promise.all([
+    callRoute(applyKeywordPresets, bookId, "keywords/apply-presets"),
+    callRoute(applyAsinPresets, bookId, "competitors/apply-presets"),
+  ]);
+  result.presetsApplied = num(keywordPresets.data.appliedCount) + num(asinPresets.data.appliedCount);
+  if (!keywordPresets.ok) result.warnings.push(errorText(keywordPresets.data, "Could not apply keyword presets."));
+  if (!asinPresets.ok) result.warnings.push(errorText(asinPresets.data, "Could not apply ASIN presets."));
 
   // Step 3: promotes archived rows into active — the step campaign
   // selection needs, and the one that reads the book's whole bank back
