@@ -166,6 +166,11 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
       const addedKeywords = kw.data.insertedCount ?? 0;
       const addedAsins = asin.data.insertedCount ?? 0;
       setNotice(`Added ${addedKeywords} keyword${addedKeywords === 1 ? "" : "s"} and ${addedAsins} ASIN${addedAsins === 1 ? "" : "s"}.`);
+      if (!asin.ok) {
+        setError(asin.data.error || "Could not generate ASINs.");
+      } else if (!kw.ok) {
+        setError(kw.data.error || "Could not generate keywords.");
+      }
       onDataChanged();
     } finally {
       setGenerating(false);
@@ -186,6 +191,11 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
         return;
       }
       setNotice(`Re-checked ${(kw.data.examined ?? 0) + (asin.data.examined ?? 0)} row(s).`);
+      if (!asin.ok) {
+        setError(asin.data.error || "Could not re-run the ASIN filters.");
+      } else if (!kw.ok) {
+        setError(kw.data.error || "Could not re-run the keyword filters.");
+      }
       onDataChanged();
     } finally {
       setFiltering(false);
@@ -207,6 +217,11 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
       }
       const applied = (kw.data.appliedCount ?? 0) + (asin.data.appliedCount ?? 0);
       setNotice(applied > 0 ? `Applied ${applied} preset row(s).` : "No new preset rows to apply.");
+      if (!asin.ok) {
+        setError(asin.data.error || "Could not apply ASIN presets.");
+      } else if (!kw.ok) {
+        setError(kw.data.error || "Could not apply keyword presets.");
+      }
       if (applied > 0) onDataChanged();
     } finally {
       setApplyingPresets(false);
