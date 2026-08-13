@@ -91,6 +91,8 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
   // keyword and competitor managers to refetch — simpler than threading a
   // second imperative refresh path through each of them.
   const [dataKey, setDataKey] = useState(0);
+  // KeywordManager only renders as a popup, opened via BookActionBar's "Manual" button.
+  const [showKeywordManager, setShowKeywordManager] = useState(false);
 
   useEffect(() => {
     let active = true;
@@ -336,24 +338,43 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
           </div>
         </section>
 
-        {/* Grouped actions (spec: simplified buttons, no keywords/competitors toggle) — everything below is one working view of the book. */}
+        {/* Grouped actions (spec: simplified buttons) — everything below is one working view of the book. Keyword manager itself only opens as a popup, via the "Manual" button. */}
         <BookActionBar
           bookId={bookId}
           metadataReady={!captureFailed}
           onDataChanged={onDataChanged}
           onMetadataRefreshed={onDataChanged}
+          onOpenKeywordManager={() => setShowKeywordManager(true)}
         />
 
         {/* Per-campaign list + "Filter & update campaign" (Create Campaigns itself lives in BookActionBar's Campaigns dropdown). */}
         <CampaignActions bookId={bookId} />
-
-        <KeywordManager
-          key={`bank-${dataKey}`}
-          bookId={bookId}
-          metadataCapturedAt={snapshot.capturedAt}
-          onKeywordsChanged={reloadBook}
-        />
       </div>
+
+      {showKeywordManager && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            background: "rgba(0,0,0,0.5)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            zIndex: 50,
+            padding: 24,
+          }}
+        >
+          <div style={{ width: "min(1000px, 100%)", maxHeight: "90vh", overflowY: "auto" }}>
+            <KeywordManager
+              key={`bank-${dataKey}`}
+              bookId={bookId}
+              metadataCapturedAt={snapshot.capturedAt}
+              onKeywordsChanged={reloadBook}
+              onClose={() => setShowKeywordManager(false)}
+            />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

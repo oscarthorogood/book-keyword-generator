@@ -94,6 +94,8 @@ interface KeywordManagerProps {
   bookId: string;
   metadataCapturedAt?: string;
   onKeywordsChanged?: () => void;
+  /** Rendered as a popup (BookDetailPage) — closes it. */
+  onClose: () => void;
 }
 
 const STATUSES: KeywordStatus[] = ["active", "paused", "negative", "archived", "rejected"];
@@ -139,6 +141,7 @@ export default function KeywordManager({
   bookId,
   metadataCapturedAt,
   onKeywordsChanged,
+  onClose,
 }: KeywordManagerProps) {
   const [keywords, setKeywords] = useState<Keyword[]>([]);
   const [competitors, setCompetitors] = useState<CompetitorAsinRow[]>([]);
@@ -587,7 +590,7 @@ export default function KeywordManager({
   }
 
   return (
-    <section className="card">
+    <section className="card" role="dialog" aria-modal="true" aria-label="Keyword manager">
       <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div>
           <p className="card-title">Keyword manager</p>
@@ -597,6 +600,9 @@ export default function KeywordManager({
             {metadataCapturedAt ? " · generated from the metadata captured when the book was added" : ""}
           </p>
         </div>
+        <button className="btn btn-tertiary btn-icon btn-sm" onClick={onClose} aria-label="Close keyword manager">
+          <X size={16} />
+        </button>
       </div>
 
       <RecommendationsPanel bookId={bookId} />
