@@ -20,6 +20,13 @@ export async function mapWithConcurrency<T, R>(
     }
   }
 
-  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  // A limit of zero (or less) would spawn no workers at all: Promise.all([])
+  // resolves at once and the caller gets an array of `undefined` the same
+  // length as its input, with `fn` never called and no error raised anywhere.
+  // Every caller currently clamps its own limit, so this is the guard for the
+  // next one that doesn't — silently returning holes is the worst way for
+  // that mistake to surface.
+  const workers = Math.min(Math.max(1, limit), items.length);
+  await Promise.all(Array.from({ length: workers }, worker));
   return results;
 }

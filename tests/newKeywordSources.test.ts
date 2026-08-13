@@ -43,6 +43,28 @@ describe("searchTermImport", () => {
     expect(candidates).toEqual([]);
     expect(negativeSuggestions).toEqual([]);
   });
+
+  // Reports from the non-US marketplaces this app supports write money with
+  // their own symbol; leaving it in made parseFloat return NaN, which the
+  // parser reported as a clean 0 for every spend and sales figure.
+  it("parses money in every marketplace currency, not just the dollar", () => {
+    const rows = parseSearchTermReportRows([
+      { "Customer Search Term": "pound row", Clicks: 4, Orders: 2, Spend: "£12.50", Sales: "£40.00", ACOS: "20%" },
+      { "Customer Search Term": "euro row", Clicks: 4, Orders: 2, Spend: "€ 1,234.56", Sales: "€2,000.00", ACOS: "20%" },
+      { "Customer Search Term": "dollar row", Clicks: 4, Orders: 2, Spend: "$12.50", Sales: "$40.00", ACOS: "20%" },
+    ]);
+
+    expect(rows.map((r) => r.cost)).toEqual([12.5, 1234.56, 12.5]);
+    expect(rows.map((r) => r.sales)).toEqual([40, 2000, 40]);
+  });
+
+  it("suggests a negative for a zero-order term whose spend is in a non-dollar currency", () => {
+    const rows = parseSearchTermReportRows([
+      { "Customer Search Term": "wasted spend", Clicks: 30, Orders: 0, Spend: "£15.00", ACOS: "0%" },
+    ]);
+    const { negativeSuggestions } = buildSearchTermReportCandidates({}, rows);
+    expect(negativeSuggestions.map((n) => n.text)).toEqual(["wasted spend"]);
+  });
 });
 
 describe("reverseAsin", () => {
