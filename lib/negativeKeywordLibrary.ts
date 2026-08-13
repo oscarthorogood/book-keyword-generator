@@ -4,7 +4,7 @@
  * negatives at export time.
  */
 
-import type { NegativeKeyword } from "./negativeKeywords";
+import { fitNegativeMatchType, type NegativeKeyword } from "./negativeKeywords";
 
 export type NegativeScope = "global" | "genre" | "book";
 
@@ -43,6 +43,12 @@ function normalize(text: string): string {
  * Merges a book's own generated negatives with the library negatives that
  * apply to it, deduped by text (case-insensitive) — the book's own
  * negative wins on a collision since it carries the more specific reason.
+ *
+ * Library rows are typed in by hand and stored verbatim, so they get the
+ * same word-count clamp the generated ones do (lib/negativeKeywords.ts): a
+ * phrase row over Amazon's 4-word limit is narrowed to exact, and a row too
+ * long for either is skipped rather than exported as a row that fails on
+ * upload.
  */
 export function mergeNegatives(
   bookNegatives: NegativeKeyword[],
@@ -55,7 +61,9 @@ export function mergeNegatives(
   for (const row of libraryNegatives) {
     const key = normalize(row.keyword);
     if (merged.has(key)) continue;
-    merged.set(key, { text: row.keyword, matchType: row.matchType, reason: row.reason ?? `${row.scope} negative` });
+    const matchType = fitNegativeMatchType(normalize(row.keyword), row.matchType);
+    if (!matchType) continue;
+    merged.set(key, { text: row.keyword, matchType, reason: row.reason ?? `${row.scope} negative` });
   }
   return Array.from(merged.values());
 }

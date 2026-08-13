@@ -57,10 +57,46 @@ export interface NegativeKeyword {
 const MIN_PHRASE_WORDS = 2;
 
 /**
+ * Amazon's own length limits on negative keywords: a negative phrase may be
+ * at most 4 words, a negative exact at most 10. A row over its limit is
+ * rejected at upload, so emitting one doesn't just lose that negative — it
+ * puts an error row in the middle of the user's bulksheet.
+ *
+ * These bite in practice because negatives are built from *rejected*
+ * keywords, and the sources that produce the longest candidates are exactly
+ * the ones whose rejections make the best negatives: autocomplete drift off
+ * the title ("scars of the past world of warcraft quest walkthrough") is a
+ * title collision, and it is nine words long.
+ */
+export const NEGATIVE_PHRASE_MAX_WORDS = 4;
+export const NEGATIVE_EXACT_MAX_WORDS = 10;
+
+/**
+ * The widest negative match type Amazon will accept for `text`, starting
+ * from the one the caller wants, or `undefined` when the term is too long
+ * to express as either.
+ *
+ * A phrase negative that's over its 4-word limit is narrowed to exact rather
+ * than dropped: exact only blocks that one literal query instead of the
+ * whole family, but a long-tail drift term is close to a single query
+ * anyway, and a narrower negative beats an invalid row.
+ */
+export function fitNegativeMatchType(
+  text: string,
+  preferred: NegativeKeyword["matchType"]
+): NegativeKeyword["matchType"] | undefined {
+  const wordCount = text.split(" ").filter(Boolean).length;
+  if (preferred === "phrase" && wordCount <= NEGATIVE_PHRASE_MAX_WORDS) return "phrase";
+  if (wordCount <= NEGATIVE_EXACT_MAX_WORDS) return "exact";
+  return undefined;
+}
+
+/**
  * Turns pipeline rejections into a negative keyword list. Multi-word
  * rejections become negative *phrase* (one entry kills the whole family:
  * "fold cat" covers "scottish fold cat books"); single words stay exact,
- * where they can only match themselves.
+ * where they can only match themselves. Both are then held to Amazon's
+ * word-count limits above.
  */
 export function buildNegativeKeywords(results: FilteredKeyword[], limit = 60): NegativeKeyword[] {
   const byText = new Map<string, NegativeKeyword>();
@@ -72,11 +108,13 @@ export function buildNegativeKeywords(results: FilteredKeyword[], limit = 60): N
     const text = normalizeKeyword(result.text);
     if (!text || byText.has(text)) continue;
 
-    byText.set(text, {
-      text,
-      matchType: text.split(" ").length >= MIN_PHRASE_WORDS ? "phrase" : "exact",
-      reason: result.reason ?? result.filter,
-    });
+    const preferred = text.split(" ").length >= MIN_PHRASE_WORDS ? "phrase" : "exact";
+    const matchType = fitNegativeMatchType(text, preferred);
+    // Too long for even a negative exact: no way to express it, so it's
+    // dropped rather than shipped as a row Amazon will reject.
+    if (!matchType) continue;
+
+    byText.set(text, { text, matchType, reason: result.reason ?? result.filter });
   }
 
   return Array.from(byText.values()).slice(0, limit);
