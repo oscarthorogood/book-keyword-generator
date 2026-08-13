@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import {
   BookOpen,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   LayoutDashboard,
@@ -45,9 +44,10 @@ const SIDEBAR_BOOK_LIMIT = 8;
  * Every section is its own route (Enhancements spec §2) — the sidebar is
  * plain `Link`s, and every page owns its own data fetching.
  *
- * The sidebar is deliberately short: the Books dropdown (a live, capped
- * `SIDEBAR_BOOK_LIMIT` slice of `/api/books/list`, plus "All"), an "Add New
- * Book" button, and Dashboard. The database tables (Campaigns, Results,
+ * The sidebar is deliberately short: an "Add New Book" button, Dashboard,
+ * and then the books themselves — a live, capped (`SIDEBAR_BOOK_LIMIT`)
+ * slice of `/api/books/list` listed flat with no section header, ending in
+ * an "All" link to the full list on /books. The database tables (Campaigns, Results,
  * Presets, Keywords & ASINs) are still real routes, reached from the pages
  * that own them rather than from a second nav group here.
  */
@@ -57,7 +57,6 @@ export default function AppShell({ active, children }: AppShellProps) {
   const [isAdmin, setIsAdmin] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
   const [sidebarBooks, setSidebarBooks] = useState<SidebarBook[]>([]);
-  const [booksExpanded, setBooksExpanded] = useState(active === "books");
 
   useEffect(() => {
     fetch("/api/admin/access")
@@ -140,61 +139,6 @@ export default function AppShell({ active, children }: AppShellProps) {
         </div>
 
         <nav className="flex-1 space-y-1 overflow-y-auto px-4 py-6" aria-label="Main">
-          {/* Books: dropdown listing recent books (with cover icons) + "All". */}
-          <div>
-            <button
-              onClick={() => setBooksExpanded((v) => !v)}
-              className={itemClass("books")}
-              aria-expanded={booksExpanded}
-              title={sidebarOpen ? undefined : "Books"}
-            >
-              <BookOpen size={20} className="shrink-0" style={{ color: iconColor("books") }} />
-              {sidebarOpen && (
-                <>
-                  <span className="flex-1 text-left">Books</span>
-                  <ChevronDown
-                    size={16}
-                    className={`shrink-0 transition-transform ${booksExpanded ? "rotate-180" : ""}`}
-                  />
-                </>
-              )}
-            </button>
-
-            {sidebarOpen && booksExpanded && (
-              <div className="space-y-1 py-1 pl-2" aria-label="Your books">
-                {sidebarBooks.map((book) => (
-                  <Link
-                    key={book.id}
-                    href={`/books/${book.id}`}
-                    className="nav-item"
-                    title={book.author ? `${book.title} — ${book.author}` : book.title}
-                  >
-                    {book.coverImageUrl ? (
-                      // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
-                      <img
-                        src={book.coverImageUrl}
-                        alt=""
-                        className="h-6 w-5 shrink-0 rounded-sm border object-cover"
-                        style={{ borderColor: "var(--line)" }}
-                      />
-                    ) : (
-                      <BookOpen size={20} className="shrink-0" style={{ color: "var(--icon-default)" }} />
-                    )}
-                    <span className="truncate">{book.title}</span>
-                  </Link>
-                ))}
-                <Link
-                  href="/books"
-                  className={`nav-item ${active === "books" ? "nav-item-active" : ""}`}
-                  aria-current={active === "books" ? "page" : undefined}
-                >
-                  <BookOpen size={20} className="shrink-0" style={{ color: iconColor("books") }} />
-                  <span>All</span>
-                </Link>
-              </div>
-            )}
-          </div>
-
           {/* Add New Book sits directly above Dashboard, the only action in the nav. */}
           <Link
             href="/books/add"
@@ -215,6 +159,41 @@ export default function AppShell({ active, children }: AppShellProps) {
             <LayoutDashboard size={22} className="shrink-0" style={{ color: iconColor("dashboard") }} />
             {sidebarOpen && <span>Dashboard</span>}
           </Link>
+
+          {/* The books themselves, listed flat below Dashboard, with "All" last. */}
+          {sidebarOpen && (
+            <div className="space-y-1 pt-4" aria-label="Your books">
+              {sidebarBooks.map((book) => (
+                <Link
+                  key={book.id}
+                  href={`/books/${book.id}`}
+                  className="nav-item"
+                  title={book.author ? `${book.title} — ${book.author}` : book.title}
+                >
+                  {book.coverImageUrl ? (
+                    // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
+                    <img
+                      src={book.coverImageUrl}
+                      alt=""
+                      className="h-6 w-5 shrink-0 rounded-sm border object-cover"
+                      style={{ borderColor: "var(--line)" }}
+                    />
+                  ) : (
+                    <BookOpen size={20} className="shrink-0" style={{ color: "var(--icon-default)" }} />
+                  )}
+                  <span className="truncate">{book.title}</span>
+                </Link>
+              ))}
+              <Link
+                href="/books"
+                className={`nav-item ${active === "books" ? "nav-item-active" : ""}`}
+                aria-current={active === "books" ? "page" : undefined}
+              >
+                <BookOpen size={20} className="shrink-0" style={{ color: iconColor("books") }} />
+                <span>All</span>
+              </Link>
+            </div>
+          )}
         </nav>
 
         {/* Bottom-pinned account area (§4.4). */}
