@@ -236,6 +236,31 @@ describe("negative keywords", () => {
     const negatives = buildFormatNegatives(["kindle"]).map((negative) => negative.text);
     expect(negatives).toEqual(["hardcover", "paperback", "audiobook", "large print"]);
   });
+
+  // Amazon caps a negative phrase at 4 words and a negative exact at 10; an
+  // over-length row is rejected at upload, so it must never reach the sheet.
+  it("keeps a short multi-word rejection as a negative phrase", () => {
+    const negatives = buildNegativeKeywords(rejections);
+    expect(negatives.find((n) => n.text === "scottish fold cat")?.matchType).toBe("phrase");
+  });
+
+  it("narrows a rejection over the 4-word phrase limit to negative exact", () => {
+    const long = "scars of the past world of warcraft quest";
+    const negatives = buildNegativeKeywords([
+      { text: long, originalText: long, verdict: "reject" as const, filter: "titleCollision", reason: "collision", rewritten: false },
+    ]);
+    expect(negatives).toHaveLength(1);
+    expect(negatives[0].matchType).toBe("exact");
+  });
+
+  it("drops a rejection too long for even a negative exact", () => {
+    const tooLong = "scars of the past world of warcraft quest walkthrough guide for beginners";
+    expect(tooLong.split(" ").length).toBeGreaterThan(10);
+    const negatives = buildNegativeKeywords([
+      { text: tooLong, originalText: tooLong, verdict: "reject" as const, filter: "titleCollision", reason: "collision", rewritten: false },
+    ]);
+    expect(negatives).toEqual([]);
+  });
 });
 
 describe("bulksheet export", () => {

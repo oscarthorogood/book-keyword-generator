@@ -169,7 +169,11 @@ function parseRankedKeywordsJson(text: string): AiRankedKeyword[] | null {
   const parsed = parseJsonLoose<{ keywords?: AiRankedKeyword[] } | AiRankedKeyword[]>(text);
   if (!parsed) return null;
   if (Array.isArray(parsed)) return parsed;
-  return parsed.keywords ?? null;
+  // `keywords` is whatever the model actually emitted, not necessarily the
+  // array the schema asked for. Returning a non-array here reached
+  // applyAiRelevance, which calls .map on it — a model answering
+  // {"keywords": "none"} would take the generate route down with a TypeError.
+  return Array.isArray(parsed.keywords) ? parsed.keywords : null;
 }
 
 /** Response-token budget for one chunk: enough for a verdict object per candidate, plus slack. */
@@ -474,11 +478,17 @@ export function mergeAiRanking(
 ): KeywordCandidate[] {
   const byText = new Map(pool.map((c) => [c.text, c]));
   const merged: KeywordCandidate[] = [];
+  // A model can name the same candidate twice in one verdict list. Each
+  // mention resolved to the same pool entry, so the keyword shipped into the
+  // final list more than once, taking a slot under the cap each time.
+  const seen = new Set<string>();
 
   for (const r of ranked) {
     if (r.category !== category) continue;
     const base = byText.get(r.text);
     if (!base) continue; // AI referenced text outside the shortlist — ignore rather than trust it blindly
+    if (seen.has(r.text)) continue; // first verdict wins
+    seen.add(r.text);
     merged.push({ ...base, score: r.score });
   }
 

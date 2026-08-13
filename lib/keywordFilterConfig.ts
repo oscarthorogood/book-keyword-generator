@@ -273,14 +273,6 @@ export const GIFT_AUDIENCE_PAUSE_WORDS = ["readers", "reader", "book lovers", "b
 /** Single words distinctive enough to be worth keeping, but too broad to activate unreviewed. */
 export const SINGLE_WORD_PAUSE_TERMS = ["whodunit", "sleuth", "noir", "romantasy", "cozy"];
 
-/** Endings that mean the phrase names a product ("... crime thriller", "... books"). */
-export const VALID_GENRE_ENDINGS = [
-  "thriller", "thrillers", "mystery", "mysteries", "noir", "fiction", "procedural",
-  "books", "book", "novel", "novels", "series", "reads", "read", "turner",
-  "whodunit", "audiobook", "audiobooks", "bestsellers", "saga", "sagas", "stories",
-  "romance", "fantasy", "memoir", "cookbook", "guide", "biography", "poems",
-];
-
 /**
  * Established phrases that end on a modifier but are how readers really
  * search. Extended per book with the setting anchors the scrape derives.

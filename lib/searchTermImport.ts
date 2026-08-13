@@ -60,7 +60,16 @@ export function parseSearchTermReportRows(
   const toNumber = (value: unknown): number => {
     if (typeof value === "number") return Number.isFinite(value) ? value : 0;
     if (typeof value === "string") {
-      const cleaned = value.replace(/[%$,]/g, "").trim();
+      // Every currency this app's marketplaces trade in, not just the dollar
+      // (lib/marketplaceCurrency.ts: USD, GBP, CAD, EUR). A UK report writes
+      // Spend as "£12.50"; leaving the symbol in made parseFloat return NaN,
+      // which this function then reported as a clean 0 — so for every non-US
+      // marketplace the whole report imported with zero spend and zero sales,
+      // silently disabling the zero-order negative suggestions (they key off
+      // `cost >= minSpendForNegative`) and collapsing avgCpc to its fallback.
+      // Non-breaking and narrow spaces go too: exports separate the symbol
+      // from the amount with one, and parseFloat stops at whitespace.
+      const cleaned = value.replace(/[%$,£€¥\s  ]/g, "").trim();
       const num = parseFloat(cleaned);
       if (!Number.isFinite(num)) return 0;
       // A percentage-formatted ACOS ("25%") parses to 25, not 0.25.

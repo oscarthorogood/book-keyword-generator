@@ -410,10 +410,6 @@ function definitionFor(family: GenreFamily): GenreFamilyDefinition | undefined {
   return GENRE_FAMILIES.find((d) => d.family === family);
 }
 
-export function genreFamilyLabel(family: GenreFamily): string {
-  return definitionFor(family)?.label ?? family;
-}
-
 /** Curated, search-shaped phrases for the detected families (top families first). */
 export function genreFamilySearchTerms(families: GenreFamily[], limit = 20): string[] {
   const out: string[] = [];
@@ -476,25 +472,4 @@ export function deriveGenreTerms(input: GenreSignalInput, limit = 25): string[] 
   }
 
   return ordered.slice(0, limit);
-}
-
-/**
- * Genre words for autocomplete seeding — a blend of the book's real category
- * vocabulary and the curated search phrases for its families. Replaces the
- * old hardcoded thriller/mystery/crime list that was applied to every book
- * regardless of what it was about.
- */
-export function buildGenreSeedModifiers(genreTerms: string[], families: GenreFamily[], limit = 10): string[] {
-  const out: string[] = [];
-  const push = (term: string) => {
-    const trimmed = term.trim();
-    // Long genre phrases make useless autocomplete seeds once concatenated
-    // with a title, so seeds stay short.
-    if (trimmed && trimmed.split(" ").length <= 3 && !out.includes(trimmed)) out.push(trimmed);
-  };
-
-  for (const term of genreTerms) push(term);
-  for (const term of genreFamilySearchTerms(families, limit)) push(term);
-
-  return out.slice(0, limit);
 }

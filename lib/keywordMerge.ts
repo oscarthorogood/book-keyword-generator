@@ -304,23 +304,6 @@ export function buildKnownTagCandidates(tags: string[]): KeywordCandidate[] {
   return Array.from(texts).map((text) => ({ text, sources: ["user-tag" as const] }));
 }
 
-/**
- * Keywords the user typed directly into the "add more" search bar. Same
- * light length check as buildKnownTagCandidates (not the full
- * isUsableKeyword pipeline) — a human explicitly asked for this exact term,
- * so it skips generic-term/phrase-length filtering. The generate route
- * still routes bare ASINs here to product targeting via extractAsinCandidates,
- * and guarantees these a slot in the output regardless of scoring/caps.
- */
-export function buildManualKeywordCandidates(keywords: string[]): KeywordCandidate[] {
-  const texts = new Set<string>();
-  for (const keyword of keywords) {
-    const normalized = normalize(keyword);
-    if (normalized.length >= 2 && normalized.length <= 80) texts.add(normalized);
-  }
-  return Array.from(texts).map((text) => ({ text, sources: ["manual" as const] }));
-}
-
 // Patterns publishers/authors use to explicitly name comparable authors or
 // titles in a book's own blurb — a hand-picked, high-confidence signal
 // nothing else here sources (comp-title/comp-name come from Amazon's
@@ -855,15 +838,9 @@ export function scoreAndTierBids(
 // was corroborated via secondary sources quoting Amazon's public guide,
 // rather than pulled directly from the primary page — worth a spot check
 // against Seller Central's own current guidance if it matters precisely).
-export const RECOMMENDED_MIN_KEYWORDS = 25;
 export const RECOMMENDED_MAX_KEYWORDS = 50;
 
-// Blueprint's Comparable Authors/Titles harvest targets ~20-40 direct
-// competitors; caps the comp-names ad group independently of the tropes cap
-// above since they're two separate ad groups now, not one shared budget.
-export const COMP_NAME_MAX_KEYWORDS = 40;
-
-// The caps above size a single *ad group*. A book's keyword library in the
+// The cap above sizes a single *ad group*. A book's keyword library in the
 // keyword manager is research output, not an ad group: the user reviews it,
 // keeps what fits, and pauses or deletes the rest, so cutting the list to 50
 // throws away the long tail that the 20-plus sources exist to find. These are
@@ -885,7 +862,6 @@ const COMP_NAME_SOURCES: KeywordSource[] = ["comp-name", "amazon-recs"];
  * Broad or Phrase pulls in every book that mentions it.
  */
 export type MatchTypeProfile = "mixed" | "phrase-only";
-export const MATCH_TYPE_PROFILES: MatchTypeProfile[] = ["mixed", "phrase-only"];
 
 /**
  * Match type per keyword, rather than one type for the whole batch:
@@ -1008,24 +984,6 @@ export function boostScoresByCompetitorQuality(
     }
     return candidate;
   });
-}
-
-/**
- * Full pipeline from raw per-source candidate groups to the final keyword
- * list handed to the Bulksheet writer: merge + dedupe, collapse near-dupes,
- * score and tier bids, then cap at a per-ad-group ceiling (defaults to
- * Amazon's recommended RECOMMENDED_MAX_KEYWORDS), keeping the best-scoring
- * keywords first.
- */
-export function finalizeKeywords(
-  groups: KeywordCandidate[][],
-  defaultBid: number,
-  maxResults: number = RECOMMENDED_MAX_KEYWORDS
-): KeywordCandidate[] {
-  const merged = mergeKeywordCandidates(...groups);
-  const collapsed = collapseNearDuplicates(merged);
-  const scored = scoreAndTierBids(collapsed, defaultBid);
-  return scored.slice(0, maxResults);
 }
 
 /**

@@ -15,7 +15,6 @@ import { cleanTaxonomyTerms, genreFamilySearchTerms, genreFamilyThemeTerms, isCa
 import {
   ALLOWED_GENRE_SYNONYMS,
   BOOK_INTENT_WORDS,
-  DEMONYM_TERMS,
   UI_POLLUTION_TERMS,
 } from "./keywordFilterConfig";
 import { manualCompetitors } from "./manualCompetitors";
@@ -226,7 +225,8 @@ function authorAnchors(author: string | undefined): string[] {
   return out;
 }
 
-function escapeForRegExp(value: string): string {
+/** Escapes every regex metacharacter in `value` so it can be embedded in a pattern literally. Shared with lib/keywordFilters.ts, which builds its term patterns the same way. */
+export function escapeForRegExp(value: string): string {
   return value.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
 }
 
@@ -403,12 +403,6 @@ export function buildBookAnchors(input: AnchorInput): BookAnchors {
   };
 }
 
-/** True when the keyword names a place/nationality the book has nothing to do with. */
-export function isForeignDemonym(word: string, anchors: BookAnchors): boolean {
-  if (!DEMONYM_TERMS.includes(word)) return false;
-  return !anchors.setting.includes(word);
-}
-
 // One BookAnchors object is built per generate/filter run and then read by
 // this function from a dozen-plus call sites across lib/keywordFilters.ts,
 // once per keyword — up to BOOK_KEYWORD_MAX + BOOK_COMP_NAME_MAX times per
@@ -426,7 +420,15 @@ export function qualifyingAnchors(anchors: BookAnchors): string[] {
   return combined;
 }
 
+// The permissive default for hand-built anchors carrying no profile. Shared
+// rather than rebuilt per call: profileOf is read once per keyword by four
+// filters plus scoreForRank, so allocating an object and nine arrays each
+// time was pure garbage. Sharing it also gives those empty lists a stable
+// identity, which the derived-list caches in lib/keywordFilters.ts key on.
+// Frozen because it is now shared state; every call site only reads it.
+const EMPTY_BOOK_PROFILE: BookProfile = Object.freeze(defaultBookProfile(undefined));
+
 /** Reads `anchors.profile` with an empty (permissive) default filled in for hand-built anchors that omit it. */
 export function profileOf(anchors: BookAnchors): BookProfile {
-  return anchors.profile ?? defaultBookProfile(undefined);
+  return anchors.profile ?? EMPTY_BOOK_PROFILE;
 }

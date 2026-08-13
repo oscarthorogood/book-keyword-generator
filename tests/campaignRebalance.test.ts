@@ -1,10 +1,18 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { rebalanceCampaignTargets, MIN_CAMPAIGN_TARGETS, MAX_CAMPAIGN_TARGETS, type RebalanceCandidate } from "../lib/campaignRebalance";
+import { callOpenRouterJson } from "../lib/llmClient";
 import type { KeywordPerformance } from "../lib/recommendations";
 
 vi.mock("../lib/llmClient", () => ({
   callOpenRouterJson: vi.fn(async () => null),
 }));
+
+const mockLlm = vi.mocked(callOpenRouterJson);
+
+beforeEach(() => {
+  mockLlm.mockReset();
+  mockLlm.mockResolvedValue(null);
+});
 
 function perf(id: string, overrides: Partial<KeywordPerformance> = {}): KeywordPerformance {
   return {
@@ -96,5 +104,50 @@ describe("rebalanceCampaignTargets", () => {
     });
 
     expect(result.targets.length).toBeLessThanOrEqual(MAX_CAMPAIGN_TARGETS);
+  });
+
+  // The model's ordering is untrusted output. Naming one candidate several
+  // times used to resolve to the same pool entry each time, letting it fill
+  // more than one replacement slot and ship as a duplicate target.
+  it("does not duplicate a target when the LLM names the same candidate twice", async () => {
+    mockLlm.mockResolvedValue({ order: ["kw-new1", "kw-new1", "kw-new1", "kw-new2"] });
+
+    const current = Array.from({ length: 10 }, (_, i) => candidate(`ok${i}`));
+    const ready = [candidate("new1", 5), candidate("new2", 4), candidate("new3", 3), candidate("new4", 2), candidate("new5", 1)];
+
+    const result = await rebalanceCampaignTargets({
+      campaignName: "Test",
+      current,
+      ready,
+      performanceById: new Map(),
+      targetAcos: 0.3,
+      useLlm: true,
+    });
+
+    const texts = result.targets.map((t) => t.text);
+    expect(new Set(texts).size).toBe(texts.length);
+    expect(texts.filter((t) => t === "kw-new1")).toHaveLength(1);
+    expect(result.targets).toHaveLength(MIN_CAMPAIGN_TARGETS);
+  });
+
+  it("ignores LLM-named candidates that aren't in the ready pool", async () => {
+    mockLlm.mockResolvedValue({ order: ["kw-does-not-exist", "kw-new2"] });
+
+    const current = Array.from({ length: 14 }, (_, i) => candidate(`ok${i}`));
+    const ready = [candidate("new1", 5), candidate("new2", 4)];
+
+    const result = await rebalanceCampaignTargets({
+      campaignName: "Test",
+      current,
+      ready,
+      performanceById: new Map(),
+      targetAcos: 0.3,
+      useLlm: true,
+    });
+
+    const texts = result.targets.map((t) => t.text);
+    expect(texts).not.toContain("kw-does-not-exist");
+    expect(texts).toContain("kw-new2");
+    expect(new Set(texts).size).toBe(texts.length);
   });
 });

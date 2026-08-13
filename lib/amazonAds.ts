@@ -1,4 +1,4 @@
-import { KeywordCandidate, Marketplace, MatchType } from "./types";
+import { KeywordCandidate, Marketplace } from "./types";
 
 // Amazon Ads API endpoint host per marketplace region.
 // https://advertising.amazon.com/API/docs/en-us/info/api-overview#api-endpoints
@@ -130,8 +130,6 @@ export async function getAdsApiKeywordRecommendations(
 export function isAdsApiConfigured(): boolean {
   return getCredentials() !== null;
 }
-
-export const SUPPORTED_MATCH_TYPES: MatchType[] = ["broad", "phrase", "exact"];
 
 export interface BidRange {
   min: number;

@@ -55,3 +55,42 @@ describe("findNegativeCollisions", () => {
     expect(findNegativeCollisions("barclaycard", ["cozy mystery"])).toEqual([]);
   });
 });
+
+// Library rows are typed in by hand, so they get the same word-count clamp
+// the generated negatives do — Amazon rejects an over-length row at upload.
+describe("mergeNegatives length limits", () => {
+  it("narrows a library phrase row over the 4-word limit to exact", () => {
+    const merged = mergeNegatives(
+      [],
+      [
+        {
+          keyword: "world of warcraft quest walkthrough",
+          matchType: "phrase",
+          scope: "global",
+          genreId: null,
+          bookId: null,
+          reason: "off-topic",
+        },
+      ]
+    );
+    expect(merged).toHaveLength(1);
+    expect(merged[0].matchType).toBe("exact");
+  });
+
+  it("skips a library row too long for even a negative exact", () => {
+    const merged = mergeNegatives(
+      [],
+      [
+        {
+          keyword: "one two three four five six seven eight nine ten eleven",
+          matchType: "phrase",
+          scope: "global",
+          genreId: null,
+          bookId: null,
+          reason: "off-topic",
+        },
+      ]
+    );
+    expect(merged).toEqual([]);
+  });
+});

@@ -168,22 +168,45 @@ export async function rebalanceCampaignTargets(input: RebalanceInput): Promise<R
   let orderedPool = pool;
   if (orderedTexts) {
     const byText = new Map(pool.map((c) => [c.text, c]));
-    const llmOrdered = orderedTexts.map((t) => byText.get(t)).filter((c): c is RebalanceCandidate => !!c);
-    const remaining = pool.filter((c) => !orderedTexts!.includes(c.text));
+    // The model's ordering is untrusted output: it can name the same
+    // candidate more than once, and each mention used to resolve to the same
+    // pool entry, so one candidate could fill several replacement slots and
+    // ship as a duplicate target. Taken first-mention-wins instead.
+    const seen = new Set<string>();
+    const llmOrdered: RebalanceCandidate[] = [];
+    for (const text of orderedTexts) {
+      const candidate = byText.get(text);
+      if (!candidate || seen.has(text)) continue;
+      seen.add(text);
+      llmOrdered.push(candidate);
+    }
+    const remaining = pool.filter((c) => !seen.has(c.text));
     orderedPool = [...llmOrdered, ...remaining];
   }
 
   const added = orderedPool.slice(0, wantReplacements);
-  let targets = [...keep, ...added];
+
+  // Deduped by identity key rather than concatenated blind: `pool` is
+  // filtered against the campaign's keepers as they stood *before* the
+  // flagged-but-unswappable ones were put back above, so a ready candidate
+  // matching one of those would otherwise be added a second time.
+  const targetKeys = new Set<string>();
+  let targets: RebalanceCandidate[] = [];
+  for (const candidate of [...keep, ...added]) {
+    const key = candidateKey(candidate);
+    if (targetKeys.has(key)) continue;
+    targetKeys.add(key);
+    targets.push(candidate);
+  }
 
   // Top up further if still short of min (e.g. nothing was flagged as underperforming).
   if (targets.length < min) {
-    const usedKeys = new Set(targets.map(candidateKey));
     for (const c of orderedPool) {
       if (targets.length >= min) break;
-      if (usedKeys.has(candidateKey(c))) continue;
+      const key = candidateKey(c);
+      if (targetKeys.has(key)) continue;
       targets.push(c);
-      usedKeys.add(candidateKey(c));
+      targetKeys.add(key);
     }
   }
 
@@ -192,9 +215,12 @@ export async function rebalanceCampaignTargets(input: RebalanceInput): Promise<R
     targets = [...targets].sort((a, b) => b.score - a.score).slice(0, max);
   }
 
+  const survivingKeys = new Set(targets.map(candidateKey));
   return {
     targets: targets.map(toPlanTarget),
     removed,
-    added: added.filter((c) => targets.includes(c)).map((c) => ({ text: c.text, reason: "replacement from ready pool" })),
+    added: added
+      .filter((c) => survivingKeys.has(candidateKey(c)))
+      .map((c) => ({ text: c.text, reason: "replacement from ready pool" })),
   };
 }

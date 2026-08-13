@@ -54,8 +54,3 @@ export function expandSynonyms(terms: string[], limit = 8): string[] {
 
   return Array.from(out);
 }
-
-/** Every phrase the allowlist can ever produce — used by the synonym filter to police its own source. */
-export function allowedSynonymPhrases(): string[] {
-  return Array.from(new Set([...Object.keys(ALLOWED_GENRE_SYNONYMS), ...Object.values(ALLOWED_GENRE_SYNONYMS).flat()]));
-}

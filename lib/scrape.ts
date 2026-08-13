@@ -1,6 +1,7 @@
 import * as cheerio from "cheerio";
 import { mapWithConcurrency } from "./concurrency";
 import { HostBlockedError, withRateLimit } from "./fetchLog";
+import { parseCountText, parsePriceText } from "./numberText";
 import { type AmazonPageMetadata } from "./firecrawl";
 import { extractListingHtmlMetadata, fallbackFormats } from "./listingMetadata";
 import { fetchAmazonProductViaSerpApi, isSerpApiConfigured } from "./serpApi";
@@ -793,12 +794,8 @@ function extractReviewCount($: cheerio.CheerioAPI): number | undefined {
   ];
 
   for (const selector of selectors) {
-    const text = $(selector).first().text().trim();
-    const match = text.match(/([\d,]+)/);
-    if (match) {
-      const value = parseInt(match[1].replace(/,/g, ''), 10);
-      if (Number.isFinite(value)) return value;
-    }
+    const value = parseCountText($(selector).first().text().trim());
+    if (value !== undefined) return value;
   }
   return undefined;
 }
@@ -881,11 +878,8 @@ function extractPrice($: cheerio.CheerioAPI): number | undefined {
   ];
 
   for (const selector of selectors) {
-    const text = $(selector).first().text().trim();
-    const match = text.match(/[\d,]+\.\d{2}/);
-    if (!match) continue;
-    const value = parseFloat(match[0].replace(/,/g, ""));
-    if (Number.isFinite(value)) return value;
+    const value = parsePriceText($(selector).first().text().trim());
+    if (value !== undefined) return value;
   }
   return undefined;
 }
@@ -898,11 +892,8 @@ function extractOriginalPrice($: cheerio.CheerioAPI): number | undefined {
   ];
 
   for (const selector of selectors) {
-    const text = $(selector).first().text().trim();
-    const match = text.match(/[\d,]+\.\d{2}/);
-    if (match) {
-      return parseFloat(match[0].replace(/,/g, ""));
-    }
+    const value = parsePriceText($(selector).first().text().trim());
+    if (value !== undefined) return value;
   }
   return undefined;
 }
@@ -1039,12 +1030,8 @@ function extractQaCount($: cheerio.CheerioAPI): number | undefined {
   ];
 
   for (const selector of selectors) {
-    const text = $(selector).first().text().trim();
-    const match = text.match(/([\d,]+)/);
-    if (match) {
-      const value = parseInt(match[1].replace(/,/g, ''), 10);
-      if (Number.isFinite(value)) return value;
-    }
+    const value = parseCountText($(selector).first().text().trim());
+    if (value !== undefined) return value;
   }
   return undefined;
 }
