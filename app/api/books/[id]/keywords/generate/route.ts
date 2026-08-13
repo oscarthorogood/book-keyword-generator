@@ -44,7 +44,6 @@ import {
 } from "@/lib/keywordMerge";
 import { validateFinalKeywords } from "@/lib/keywordValidation";
 import { scoreSpecificity } from "@/lib/keywordSpecificity";
-import { findAllowlistOverrides } from "@/lib/filterAllowlist";
 import { buildListingMetadataCandidates } from "@/lib/listingKeywords";
 import { buildFormatNegatives, buildNegativeKeywords } from "@/lib/negativeKeywords";
 import { buildBrandTargets, buildProductTargets } from "@/lib/productTargets";
@@ -320,7 +319,6 @@ export async function POST(
     // work below (and, for the ASIN rows, with the live source fetches)
     // instead of serializing in front of it.
     const existingAsinRowsPromise = getCompetitorAsins(supabase, bookId, user.id);
-    const allowlistRowsPromise = supabase.from("filter_allowlist").select("keyword_text").eq("user_id", user.id);
 
     const filterContext = buildFilterContext({
       title: snapshot.title,
@@ -661,9 +659,7 @@ export async function POST(
     // is still recorded (rejection_reason/rejected_by_filter) so the bank UI
     // can show it, but the row itself only moves to active/paused/rejected
     // once a human (or "Run Filters") explicitly promotes it out of the
-    // archive. The one exception is an allowlist override: a term a human
-    // already vetted onto the allowlist goes straight to active, same as a
-    // manually-added keyword.
+    // archive.
     const passedRows = finalCandidates.map((candidate) => ({
       book_id: bookId,
       user_id: user.id,
@@ -681,10 +677,11 @@ export async function POST(
       specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
 
-    // Both buckets land in "archived" the same way now — rejection_reason/
+    // Both buckets land in "archived" the same way — rejection_reason/
     // rejected_by_filter still distinguish "paused" from "rejected" verdicts
-    // for display, and for the allowlist-override check below.
-    const reviewRowsRaw = [...pausedCandidates, ...rejectedCandidates].map((candidate) => ({
+    // in the error messages Create Campaigns produces when nothing is
+    // eligible.
+    const reviewRows = [...pausedCandidates, ...rejectedCandidates].map((candidate) => ({
       book_id: bookId,
       user_id: user.id,
       text: candidate.text,
@@ -697,16 +694,6 @@ export async function POST(
       rejected_by_filter: candidate.filter ?? null,
       specificity: scoreSpecificity(candidate, filterContext.anchors),
     }));
-
-    const { data: allowlistRows } = await allowlistRowsPromise;
-    const allowlistOverrides = new Set(
-      findAllowlistOverrides(reviewRowsRaw, (allowlistRows ?? []).map((r) => r.keyword_text))
-    );
-    const reviewRows = reviewRowsRaw.map((row) =>
-      allowlistOverrides.has(row)
-        ? { ...row, status: "active" as const, rejection_reason: null, rejected_by_filter: null }
-        : row
-    );
 
     const negativeRows = negatives.map((negative) => ({
       book_id: bookId,
@@ -799,7 +786,6 @@ export async function POST(
       ),
       byMatchType: countBy(passedRows.map((r) => r.match_type)),
       matchTypeProfile,
-      allowlistOverrideCount: allowlistOverrides.size,
       genreTerms: snapshot.genreTerms.slice(0, 10),
       anchors: {
         bookSpecific: filterContext.anchors.bookSpecific.slice(0, 10),
