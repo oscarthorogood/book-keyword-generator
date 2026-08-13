@@ -1,11 +1,25 @@
 # Amazon Book Ads Builder
 
-A keyword research tool for book ads. The flow is deliberately simple:
+A campaign builder for book ads. The flow is deliberately simple:
 
 1. **Add a book** — paste its Amazon link (or an ASIN/ISBN). That is the
    whole form.
-2. **Generate keywords** — from the book page, the app builds a long,
-   reviewable keyword list out of 20-plus free sources.
+2. **Create campaigns** — one press on the book page. It researches the
+   book's keywords and competitor ASINs out of 20-plus free sources, filters
+   them, selects targets, and hands back an Amazon bulksheet to upload.
+3. **Upload results** — feed an Amazon Search Term Report back in, and
+   updating a campaign re-scores it against real performance.
+
+The keyword and competitor-ASIN research is still the engine underneath, but
+it is no longer something to operate: there are no Generate, Genre Presets or
+Run Filters buttons, and no per-book keyword table to curate. The pipeline
+runs server-side inside Create Campaigns (`lib/campaignPrepare.ts`), skipping
+work that has already been done. What it found is visible, read-only, in the
+Keywords &amp; ASINs database.
+
+Everything is organised as five databases, one route each: **Books**,
+**Campaigns**, **Results**, **Presets**, and the combined **Keywords &amp;
+ASINs** table.
 
 Built from two source docs: an analysis of a live account
 (`AmazonAdsKeywordGeneratorCampaignBuilderLearnings`) and a manual

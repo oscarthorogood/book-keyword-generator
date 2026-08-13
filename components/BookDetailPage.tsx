@@ -1,10 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { AlertTriangle, ArrowLeft } from "lucide-react";
-import BookActionBar from "./BookActionBar";
-import CampaignActions from "./CampaignActions";
-import KeywordManager from "./KeywordManager";
+import { AlertTriangle, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
+import BookCampaigns from "./BookCampaigns";
 
 /** The slice of the stored snapshot (books.metadata_json) this page renders. */
 export interface BookSnapshotView {
@@ -87,12 +85,9 @@ async function fetchBook(bookId: string): Promise<Book | null> {
 export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) {
   const [book, setBook] = useState<Book | null>(null);
   const [loading, setLoading] = useState(true);
-  // Bumped after a shared action (generate/filter/presets) to force the
-  // keyword and competitor managers to refetch — simpler than threading a
-  // second imperative refresh path through each of them.
-  const [dataKey, setDataKey] = useState(0);
-  // The manual add-keyword/add-ASIN inputs only render as a popup, opened via BookActionBar's "Manual" button.
-  const [showManualAdd, setShowManualAdd] = useState(false);
+  const [refreshingMeta, setRefreshingMeta] = useState(false);
+  const [metaNotice, setMetaNotice] = useState<string | null>(null);
+  const [metaError, setMetaError] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -124,9 +119,25 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
     if (!res.ok) setBook((current) => (current ? { ...current, match_type_profile: previous } : current));
   }
 
-  function onDataChanged() {
-    setDataKey((k) => k + 1);
-    void reloadBook();
+  /** Re-scrapes the Amazon listing — the one input every campaign is built from. */
+  async function refreshMetadata() {
+    setRefreshingMeta(true);
+    setMetaError(null);
+    setMetaNotice(null);
+    try {
+      const res = await fetch(`/api/books/${bookId}/refresh`, { method: "POST" });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setMetaError(body.error || "Could not re-fetch this book's metadata.");
+        return;
+      }
+      setMetaNotice(body.warning ?? "Metadata re-fetched from Amazon.");
+      await reloadBook();
+    } catch {
+      setMetaError("Could not re-fetch this book's metadata.");
+    } finally {
+      setRefreshingMeta(false);
+    }
   }
 
   if (loading) {
@@ -227,23 +238,27 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
           <div className="min-w-0">
             <h1 className="page-title">{book.title}</h1>
             <p className="page-subtitle mt-1">
-              {book.author} · {book.total_keywords} keyword{book.total_keywords === 1 ? "" : "s"}
+              {book.author} · <span className="font-mono">{book.asin}</span> · {book.marketplace}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             <label className="sr-only" htmlFor="match-type-profile">
-              Match-type strategy
+              Match types to target
             </label>
             <select
               id="match-type-profile"
               value={book.match_type_profile ?? "mixed"}
               onChange={(e) => updateMatchTypeProfile(e.target.value as "mixed" | "phrase-only")}
               className="input input-sm w-auto"
-              title="Which match types the next generate run assigns (§21)"
+              title="Which match types this book's campaigns target"
             >
               <option value="mixed">Broad + Phrase + Exact</option>
               <option value="phrase-only">Phrase-only (+ Exact for comps)</option>
             </select>
+            <button onClick={refreshMetadata} disabled={refreshingMeta} className="btn btn-secondary btn-sm">
+              {refreshingMeta ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+              {refreshingMeta ? "Re-fetching…" : "Re-fetch metadata"}
+            </button>
           </div>
         </div>
       </header>
@@ -255,19 +270,35 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
             <div>
               <p className="alert-title">Amazon didn&apos;t return this book&apos;s product page</p>
               <p className="mt-1">
-                The metadata is incomplete and keyword generation needs it — re-fetch to try again.
+                Campaigns are built from this metadata, so they can&apos;t be created until it reads — re-fetch to try
+                again.
               </p>
             </div>
           </div>
         )}
 
-        {/* Captured metadata — the exact input keyword generation runs on. */}
+        {metaError && (
+          <div className="alert alert-error" role="alert">
+            <AlertTriangle size={20} className="mt-0.5 shrink-0" />
+            <p className="flex-1">{metaError}</p>
+          </div>
+        )}
+
+        {metaNotice && (
+          <div className="alert alert-success" aria-live="polite">
+            <p className="flex-1">{metaNotice}</p>
+          </div>
+        )}
+
+        {/* Campaigns first — this is what the page is for. */}
+        <BookCampaigns bookId={bookId} metadataReady={!captureFailed} onChanged={reloadBook} />
+
+        {/* Captured metadata — the exact listing every campaign is built from. */}
         <section className="card">
           <div className="mb-5">
-            <p className="card-title">Metadata from the ASIN scrape</p>
+            <p className="card-title">Listing this book&apos;s campaigns are built from</p>
             <p className="meta-line mt-1">
-              Captured {formatDate(snapshot.capturedAt)} · {mineable} data points available to the keyword
-              generator
+              Captured {formatDate(snapshot.capturedAt)} · {mineable} data points available to campaign generation
               {snapshot.capture?.completeness !== undefined &&
                 ` · ${Math.round(snapshot.capture.completeness * 100)}% of listing fields read`}
             </p>
@@ -301,7 +332,7 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
               {genreTerms.length > 0 && (
                 <div>
                   <p className="mb-2 text-xs" style={{ color: "var(--text-secondary)" }}>
-                    Genre vocabulary used to seed keywords
+                    Genre vocabulary campaign targeting is seeded from
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {genreTerms.slice(0, 14).map((term) => (
@@ -338,27 +369,6 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
           </div>
         </section>
 
-        {/* Grouped actions (spec: simplified buttons, no keywords/competitors toggle) — everything below is one working view of the book. */}
-        <BookActionBar
-          bookId={bookId}
-          metadataReady={!captureFailed}
-          onDataChanged={onDataChanged}
-          onMetadataRefreshed={onDataChanged}
-          onOpenManualAdd={() => setShowManualAdd(true)}
-        />
-
-        {/* Per-campaign list + "Filter & update campaign" (Create Campaigns itself lives in BookActionBar's Campaigns dropdown). */}
-        <CampaignActions bookId={bookId} />
-
-        <KeywordManager
-          key={`bank-${dataKey}`}
-          bookId={bookId}
-          metadataCapturedAt={snapshot.capturedAt}
-          onKeywordsChanged={reloadBook}
-          manualAddOpen={showManualAdd}
-          onOpenManualAdd={() => setShowManualAdd(true)}
-          onCloseManualAdd={() => setShowManualAdd(false)}
-        />
       </div>
     </div>
   );

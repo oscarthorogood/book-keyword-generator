@@ -150,28 +150,23 @@ describe("summarizeCampaigns", () => {
 });
 
 describe("booksNeedingAttention", () => {
-  it("flags capture issues, books with keywords but none active, and failed exports", () => {
+  it("flags capture issues, books with no campaigns, and failed exports", () => {
     const items = booksNeedingAttention(
       [
-        { id: "b1", title: "Flagged Capture", total_keywords: 3, metadata_json: { capture: { ok: false } } },
-        { id: "b2", title: "All Paused", total_keywords: 2, metadata_json: { capture: { ok: true } } },
-        { id: "b3", title: "Healthy", total_keywords: 4, metadata_json: { capture: { ok: true } } },
-        { id: "b4", title: "No Keywords Yet", total_keywords: 0, metadata_json: {} },
+        { id: "b1", title: "Flagged Capture", metadata_json: { capture: { ok: false } } },
+        { id: "b2", title: "No Campaigns", metadata_json: { capture: { ok: true } } },
+        { id: "b3", title: "Healthy", metadata_json: { capture: { ok: true } } },
       ],
       [
-        { book_id: "b1", status: "active" },
-        { book_id: "b2", status: "paused" },
-        { book_id: "b2", status: "paused" },
-        { book_id: "b3", status: "active" },
-        { book_id: "b3", status: "active" },
-      ],
-      [{ book_id: "b3", name: "Alpha Exact", last_export_error: "Amazon rejected the bulksheet" }]
+        { book_id: "b1", name: "Brand Guard", last_export_error: null },
+        { book_id: "b3", name: "Alpha Exact", last_export_error: "Amazon rejected the bulksheet" },
+      ]
     );
 
     expect(items).toEqual(
       expect.arrayContaining([
         { bookId: "b1", bookTitle: "Flagged Capture", reason: "capture_issue", detail: "Capture issue" },
-        { bookId: "b2", bookTitle: "All Paused", reason: "no_active_keywords", detail: "No active keywords" },
+        { bookId: "b2", bookTitle: "No Campaigns", reason: "no_campaigns", detail: "No campaigns yet" },
         {
           bookId: "b3",
           bookTitle: "Healthy",
@@ -183,52 +178,30 @@ describe("booksNeedingAttention", () => {
     expect(items).toHaveLength(3);
   });
 
-  it("returns nothing for a clean book", () => {
+  it("returns nothing for a book with a clean capture and at least one campaign", () => {
     const items = booksNeedingAttention(
-      [{ id: "b1", title: "Fine", total_keywords: 1, metadata_json: { capture: { ok: true } } }],
-      [{ book_id: "b1", status: "active" }],
-      []
+      [{ id: "b1", title: "Fine", metadata_json: { capture: { ok: true } } }],
+      [{ book_id: "b1", name: "Alpha Exact", last_export_error: null }]
     );
     expect(items).toEqual([]);
   });
 
-  // Since generation lands every row in "archived" (PR #61), a book straight
-  // out of a Generate run has keywords and nothing active. That is the normal
-  // pending state, so it must not be reported as the same fault as a book
-  // whose keywords are all paused/negative with nothing left to promote.
-  it("names Run Filters as the next step when archived rows are waiting", () => {
+  // Keyword status is no longer a reason to flag a book: the bank is filled
+  // and filtered inside Create Campaigns, so "nothing active" is either
+  // brand new or already handled, and there is no button to point the user
+  // at. A book with campaigns is a book that worked.
+  it("does not flag a book with campaigns, whatever its keyword statuses are", () => {
     const items = booksNeedingAttention(
-      [{ id: "b1", title: "Just Generated", total_keywords: 473, metadata_json: { capture: { ok: true } } }],
-      [
-        { book_id: "b1", status: "archived" },
-        { book_id: "b1", status: "archived" },
-        { book_id: "b1", status: "negative" },
-      ],
-      []
+      [{ id: "b1", title: "Just Generated", metadata_json: { capture: { ok: true } } }],
+      [{ book_id: "b1", name: "BMM Discovery", last_export_error: null }]
     );
-
-    expect(items).toEqual([
-      {
-        bookId: "b1",
-        bookTitle: "Just Generated",
-        reason: "awaiting_filters",
-        detail: "Run Filters to promote the generated keywords into the campaign pool",
-      },
-    ]);
+    expect(items).toEqual([]);
   });
 
-  it("still reports no_active_keywords when nothing is left to promote", () => {
-    const items = booksNeedingAttention(
-      [{ id: "b1", title: "Stuck", total_keywords: 2, metadata_json: { capture: { ok: true } } }],
-      [
-        { book_id: "b1", status: "paused" },
-        { book_id: "b1", status: "negative" },
-      ],
-      []
-    );
-
+  it("flags a brand-new book once, for having no campaigns", () => {
+    const items = booksNeedingAttention([{ id: "b1", title: "Brand New", metadata_json: { capture: { ok: true } } }], []);
     expect(items).toEqual([
-      { bookId: "b1", bookTitle: "Stuck", reason: "no_active_keywords", detail: "No active keywords" },
+      { bookId: "b1", bookTitle: "Brand New", reason: "no_campaigns", detail: "No campaigns yet" },
     ]);
   });
 });

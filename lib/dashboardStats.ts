@@ -220,13 +220,7 @@ export function summarizeCampaigns(
 export interface AttentionBookRow {
   id: string;
   title: string;
-  total_keywords: number;
   metadata_json: unknown;
-}
-
-export interface AttentionKeywordCountRow {
-  book_id: string;
-  status: string;
 }
 
 export interface AttentionCampaignRow {
@@ -235,11 +229,7 @@ export interface AttentionCampaignRow {
   last_export_error: string | null;
 }
 
-export type AttentionReason =
-  | "capture_issue"
-  | "no_active_keywords"
-  | "awaiting_filters"
-  | "export_failed";
+export type AttentionReason = "capture_issue" | "no_campaigns" | "export_failed";
 
 export interface AttentionItem {
   bookId: string;
@@ -250,45 +240,32 @@ export interface AttentionItem {
 
 const ATTENTION_REASON_LABEL: Record<AttentionReason, string> = {
   capture_issue: "Capture issue",
-  no_active_keywords: "No active keywords",
-  awaiting_filters: "Run Filters to promote the generated keywords into the campaign pool",
+  no_campaigns: "No campaigns yet",
   export_failed: "Campaign export failed",
 };
 
 /**
  * "Books needing attention" widget: flags books whose capture snapshot
- * reported a problem (lib/bookSnapshot.ts's `capture.ok`), books that have
- * keywords but none are `active` (nothing would actually get targeted), and
- * campaigns whose last export failed (`campaigns.last_export_error`, sql/28).
- * One book can surface more than once if it has more than one issue.
+ * reported a problem (lib/bookSnapshot.ts's `capture.ok`), books with no
+ * campaigns yet, and campaigns whose last export failed
+ * (`campaigns.last_export_error`, sql/28). One book can surface more than
+ * once if it has more than one issue.
  *
- * The "none active" case is split in two. Since generation started landing
- * every row in `archived` (PR #61), a book sitting on a pile of archived
- * rows with nothing active is the *normal* state straight after a Generate
- * run, not a fault — reporting it as "No active keywords" fired on every
- * freshly generated book and buried the real problems. A book with archived
- * rows waiting on Run Filters gets that next step named instead, matching
- * the wording the campaign-creation route already uses for the same dead
- * end. "No active keywords" is now reserved for the genuinely stuck case:
- * keywords exist, none are active, and none are waiting to be promoted.
+ * This used to flag books by keyword status — "No active keywords", or
+ * "Run Filters to promote the generated keywords into the campaign pool".
+ * Neither is something the user can act on any more: the bank is filled and
+ * filtered server-side inside Create Campaigns (lib/campaignPrepare.ts), so
+ * a book with nothing active is either brand new or already handled. What
+ * is worth surfacing is the campaign-level fact — this book has no
+ * campaigns — which is one press away from fixed.
  */
 export function booksNeedingAttention(
   books: AttentionBookRow[],
-  keywordRows: AttentionKeywordCountRow[],
   campaigns: AttentionCampaignRow[]
 ): AttentionItem[] {
   const items: AttentionItem[] = [];
   const bookById = new Map(books.map((b) => [b.id, b]));
-
-  const activeCountByBook = new Map<string, number>();
-  const archivedCountByBook = new Map<string, number>();
-  for (const row of keywordRows) {
-    if (row.status === "active") {
-      activeCountByBook.set(row.book_id, (activeCountByBook.get(row.book_id) ?? 0) + 1);
-    } else if (row.status === "archived") {
-      archivedCountByBook.set(row.book_id, (archivedCountByBook.get(row.book_id) ?? 0) + 1);
-    }
-  }
+  const booksWithCampaigns = new Set(campaigns.map((c) => c.book_id));
 
   for (const book of books) {
     const snapshot = (book.metadata_json ?? {}) as { capture?: { ok?: boolean } };
@@ -300,14 +277,12 @@ export function booksNeedingAttention(
         detail: ATTENTION_REASON_LABEL.capture_issue,
       });
     }
-    if (book.total_keywords > 0 && (activeCountByBook.get(book.id) ?? 0) === 0) {
-      const awaitingFilters = (archivedCountByBook.get(book.id) ?? 0) > 0;
-      const reason: AttentionReason = awaitingFilters ? "awaiting_filters" : "no_active_keywords";
+    if (!booksWithCampaigns.has(book.id)) {
       items.push({
         bookId: book.id,
         bookTitle: book.title,
-        reason,
-        detail: ATTENTION_REASON_LABEL[reason],
+        reason: "no_campaigns",
+        detail: ATTENTION_REASON_LABEL.no_campaigns,
       });
     }
   }

@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
-// Competitors moved into the Databases tab switcher (Enhancements spec §2).
+// Competitor ASINs are part of the combined Keywords/ASINs database now.
 export default function CompetitorsPage() {
-  redirect("/databases?tab=competitors");
+  redirect("/targets");
 }

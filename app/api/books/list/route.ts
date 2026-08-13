@@ -38,9 +38,30 @@ export async function GET() {
       return Response.json({ error: error.message }, { status: 400 });
     }
 
+    // Campaign counts, because that's what the books list is about now.
+    // books.active_campaign_count (sql/21) only counts live/paused ones, so
+    // a book whose campaigns are all still `exported` would read as 0 —
+    // count the rows instead. One extra query, no schema change.
+    const { data: campaignRows, error: campaignsError } = await supabase
+      .from("campaigns")
+      .select("book_id")
+      .eq("user_id", user.id);
+    if (campaignsError) {
+      console.error("Error fetching campaign counts:", campaignsError);
+      return Response.json({ error: campaignsError.message }, { status: 400 });
+    }
+
+    const campaignCountByBook = new Map<string, number>();
+    for (const row of campaignRows ?? []) {
+      campaignCountByBook.set(row.book_id, (campaignCountByBook.get(row.book_id) ?? 0) + 1);
+    }
+
     return Response.json({
       success: true,
-      books: books || [],
+      books: (books || []).map((book) => ({
+        ...book,
+        campaign_count: campaignCountByBook.get(book.id) ?? 0,
+      })),
     });
   } catch (err) {
     console.error("Error in list books:", err);

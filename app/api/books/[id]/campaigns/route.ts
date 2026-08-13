@@ -5,40 +5,50 @@ import { toCsv } from "@/lib/bulksheetSchema";
 import { describeExportFailure } from "@/lib/campaignExportError";
 import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
 import { loadCampaignContext } from "@/lib/campaignContext";
+import { describePrepare, prepareBank, type PrepareBankResult } from "@/lib/campaignPrepare";
 import type { KeywordWithRollups } from "@/lib/campaignSelection";
 import { marketplaceCurrency } from "@/lib/marketplaceCurrency";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import type { CompetitorAsin, Marketplace } from "@/lib/types";
 
 export const runtime = "nodejs";
-export const maxDuration = 60;
+// Create Campaigns now runs the whole generate → filter pipeline inline when
+// a book's bank is empty (lib/campaignPrepare.ts), so this request can take
+// as long as the old Generate button did plus selection on top — 60s is no
+// longer enough headroom.
+export const maxDuration = 300;
 
 /** Decision 2 (docs/CAMPAIGNS-PROGRESS.md): typed confirmation required above this total daily spend. */
 const CONFIRMATION_THRESHOLD_PER_DAY = 50;
 
 /**
- * Distinguishes the three ways `buildCampaignPlans` can come back empty —
- * generation (#61) always lands new rows in `archived`, so a book can look
- * fully populated in the Keyword Manager's default view (which shows
- * archived rows) while the campaign-eligible bank (`active`/`paused` only,
- * lib/campaignContext.ts) is empty. The generic message gave no clue which
- * case applied, so this only fires the extra archived-count query on the
- * failure path, never the common success path.
+ * Explains an empty plan set in terms of what the user can actually do.
+ *
+ * The book page no longer has bank buttons to point at — Create Campaigns
+ * runs generation and filtering itself (lib/campaignPrepare.ts) — so this
+ * reports what the automatic pass found rather than instructing the user to
+ * press controls that no longer exist. The archived-count query only fires
+ * on this failure path, never on the common success path.
  */
 async function noEligibleTargetsMessage(
   supabase: Awaited<ReturnType<typeof supabaseServer>>,
   bookId: string,
   userId: string,
   bank: KeywordWithRollups[],
-  asinBank: CompetitorAsin[]
+  asinBank: CompetitorAsin[],
+  prepare: PrepareBankResult
 ): Promise<string> {
   const base = "No eligible targets for any of the five campaigns — nothing to create.";
+  // Whatever went wrong upstream is the most useful thing we can say; a
+  // failed capture or a dead keyword source is the real cause here, not the
+  // selection rules.
+  const because = prepare.warnings.length > 0 ? ` ${prepare.warnings.join(" ")}` : "";
 
   if (bank.length > 0 || asinBank.length > 0) {
     return (
-      `${base} This book has ${bank.length} active/paused keyword(s) and ${asinBank.length} ASIN(s), but none matched ` +
-      "a campaign's targeting rules (e.g. no exact-match keywords for Alpha Exact, no series siblings for Catalog " +
-      "Cross-Sell). Review the Keyword Manager for this book."
+      `${base} This book has ${bank.length} keyword(s) and ${asinBank.length} ASIN(s) ready, but none matched a ` +
+      "campaign's targeting rules (for example: no exact-match keywords for Alpha Exact, or no other books in the " +
+      `series for Catalog Cross-Sell).${because}`
     );
   }
 
@@ -49,12 +59,12 @@ async function noEligibleTargetsMessage(
 
   if ((archivedKeywordCount ?? 0) > 0 || (archivedAsinCount ?? 0) > 0) {
     return (
-      `${base} This book's keywords/ASINs are still sitting in Archived — run "Keyword/ASIN Bank Actions → Run ` +
-      "Filters\" to promote them into Active, then try Create Campaigns again."
+      `${base} This book has ${archivedKeywordCount ?? 0} keyword(s) and ${archivedAsinCount ?? 0} ASIN(s), but the ` +
+      `filters rejected all of them as too broad or off-target for this listing.${because}`
     );
   }
 
-  return `${base} This book has no keywords or ASINs yet — run "Keyword/ASIN Bank Actions → Generate" first, then Run Filters.`;
+  return `${base} Nothing could be generated for this book — check that its Amazon metadata was captured.${because}`;
 }
 
 /** GET /api/books/[id]/campaigns — this book's sub-campaigns, for the Create/Update Campaign action row and the "needs Amazon ID" badge. */
@@ -108,6 +118,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const supabase = await supabaseServer();
 
+    // The one press the book page offers has to do the whole job: if this
+    // book has no campaign-eligible targets yet, generate and filter them
+    // now. No-ops when the bank is already populated, which is what keeps
+    // the `confirmed: true` round-trip below from generating twice.
+    const prepare = await prepareBank(supabase, bookId, user.id);
+
     const context = await loadCampaignContext(supabase, bookId, user.id);
     if (!context) return Response.json({ error: "Book not found" }, { status: 404 });
     const { book, campaignBook, bank, asinBank, siblingBooks, negatives, anchors } = context;
@@ -124,7 +140,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     });
 
     if (plans.length === 0) {
-      return Response.json({ error: await noEligibleTargetsMessage(supabase, bookId, user.id, bank, asinBank) }, { status: 400 });
+      return Response.json(
+        { error: await noEligibleTargetsMessage(supabase, bookId, user.id, bank, asinBank, prepare) },
+        { status: 400 }
+      );
     }
 
     const totalDailyBudget = Math.round(plans.reduce((sum, p) => sum + p.dailyBudget, 0) * 100) / 100;
@@ -312,6 +331,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         exportBatchId,
         totalDailyBudget,
         downloadUrl: signedUpload?.signedUrl ?? null,
+        // What the automatic bank pass did, if anything, plus any pipeline
+        // that failed without stopping the campaigns from being built —
+        // the UI shows this so a partial run never looks like a clean one.
+        prepared: describePrepare(prepare),
+        warnings: prepare.warnings,
       });
     } catch (uploadErr) {
       // Campaigns stay `draft` (spec §4 step 7) — no row points at a file
