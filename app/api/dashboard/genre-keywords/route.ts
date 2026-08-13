@@ -1,4 +1,5 @@
 import { topKeywordsByGenre } from "@/lib/dashboardStats";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
@@ -19,12 +20,23 @@ export async function GET() {
     const supabase = await supabaseServer();
 
     const [{ data: books, error: booksError }, { data: keywords, error: keywordsError }] = await Promise.all([
-      supabase.from("books").select("id, title, metadata_json").eq("user_id", user.id),
-      supabase
-        .from("keywords")
-        .select("book_id, text, status, specificity")
-        .eq("user_id", user.id)
-        .eq("status", "active"),
+      fetchAllRows(
+        (from, to) =>
+          supabase.from("books").select("id, title, metadata_json").eq("user_id", user.id).range(from, to),
+        { label: "dashboard/genre-keywords:books" }
+      ),
+      // Paged: the widget ranks the top keywords per genre, so a truncated
+      // read would silently rank only whichever rows arrived first.
+      fetchAllRows(
+        (from, to) =>
+          supabase
+            .from("keywords")
+            .select("book_id, text, status, specificity")
+            .eq("user_id", user.id)
+            .eq("status", "active")
+            .range(from, to),
+        { label: "dashboard/genre-keywords:keywords" }
+      ),
     ]);
 
     if (booksError) return Response.json({ error: booksError.message }, { status: 400 });

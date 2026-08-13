@@ -1,4 +1,5 @@
 import { booksNeedingAttention } from "@/lib/dashboardStats";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
@@ -23,8 +24,23 @@ export async function GET() {
       { data: keywordRows, error: keywordsError },
       { data: campaigns, error: campaignsError },
     ] = await Promise.all([
-      supabase.from("books").select("id, title, total_keywords, metadata_json").eq("user_id", user.id),
-      supabase.from("keywords").select("book_id, status").eq("user_id", user.id),
+      fetchAllRows(
+        (from, to) =>
+          supabase
+            .from("books")
+            .select("id, title, total_keywords, metadata_json")
+            .eq("user_id", user.id)
+            .range(from, to),
+        { label: "dashboard/attention:books" }
+      ),
+      // Paged: "has keywords but none active" is decided by grouping these
+      // rows per book, so a truncated read would wrongly flag books whose
+      // active keywords fell past the cap.
+      fetchAllRows(
+        (from, to) =>
+          supabase.from("keywords").select("book_id, status").eq("user_id", user.id).range(from, to),
+        { label: "dashboard/attention:keywords" }
+      ),
       supabase
         .from("campaigns")
         .select("book_id, name, last_export_error")

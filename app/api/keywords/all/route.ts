@@ -1,4 +1,5 @@
 import { aggregateKeywordsAcrossBooks } from "@/lib/allKeywordsAggregate";
+import { fetchAllRows } from "@/lib/supabasePaging";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
@@ -25,11 +26,19 @@ export async function GET() {
 
     const bookById = new Map((books ?? []).map((b) => [b.id, b]));
 
-    const { data: keywords, error: keywordsError } = await supabase
-      .from("keywords")
-      .select("book_id, text, status, match_type, source, specificity, bid")
-      .eq("user_id", user.id)
-      .neq("status", "negative");
+    // Paged: this is every keyword across every book, which is the largest
+    // read in the app. An unranged select would silently stop at PostgREST's
+    // row cap and quietly drop keywords from the view.
+    const { data: keywords, error: keywordsError } = await fetchAllRows(
+      (from, to) =>
+        supabase
+          .from("keywords")
+          .select("book_id, text, status, match_type, source, specificity, bid")
+          .eq("user_id", user.id)
+          .neq("status", "negative")
+          .range(from, to),
+      { label: "keywords/all" }
+    );
     if (keywordsError) return Response.json({ error: keywordsError.message }, { status: 400 });
 
     const rows = (keywords ?? [])

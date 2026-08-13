@@ -226,14 +226,14 @@ export async function signDecisionToken(
     .setProtectedHeader({ alg: "HS256" })
     .setIssuedAt()
     .setExpirationTime(DECISION_TOKEN_TTL)
-    .sign(AUTH_CONFIG.SECRET_KEY);
+    .sign(AUTH_CONFIG.secretKey());
 }
 
 export async function verifyDecisionToken(
   token: string
 ): Promise<DecisionClaims | null> {
   try {
-    const { payload } = await jwtVerify(token, AUTH_CONFIG.SECRET_KEY);
+    const { payload } = await jwtVerify(token, AUTH_CONFIG.secretKey());
     const { email, action, nonce } = payload as Partial<DecisionClaims>;
     if (
       typeof email !== "string" ||

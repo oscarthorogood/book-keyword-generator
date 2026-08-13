@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { mapWithConcurrency } from "@/lib/concurrency";
 import { parseCsv } from "@/lib/csv";
 import { marketplaceCurrency } from "@/lib/marketplaceCurrency";
 import { aggregateByTarget, matchResultRows, type MatchContext } from "@/lib/resultsMatching";
@@ -178,11 +179,34 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   }
 }
 
+const RESULT_CACHE_CONCURRENCY = 8;
+
+interface EntitySums {
+  impressions: number;
+  clicks: number;
+  spend: number;
+  sales: number;
+  orders: number;
+}
+
 /**
  * Refreshes the last_* denormalised cache (sql/24) on every keyword/ASIN
  * this import touched. Sums per entity first since one report can carry
  * several aggregated rows resolving to the same keyword (e.g. it appears
  * in more than one ad group) — writing once per entity, not once per row.
+ *
+ * Each entity needs its own UPDATE (distinct values per row, keyed by id),
+ * so the row count here scales with the report. Those updates are therefore
+ * bounded by RESULT_CACHE_CONCURRENCY rather than dispatched all at once: a
+ * Search Term Report covering a few thousand keywords previously opened a
+ * request per keyword simultaneously, which exhausts the PostgREST
+ * connection pool and gets the tail of the batch rejected.
+ *
+ * Failures here are logged and counted, not thrown. campaign_results has
+ * already been committed by this point, so the import genuinely succeeded —
+ * losing a denormalised cache refresh must not flip it to 'failed' and tell
+ * the user to re-upload a file that landed correctly. The cache is rebuilt
+ * by the next import that touches the same entity.
  */
 async function refreshLastPeriodCache(
   supabase: SupabaseClient,
@@ -199,7 +223,7 @@ async function refreshLastPeriodCache(
   const nowIso = new Date().toISOString();
 
   const sumsByEntity = (idKey: "keywordId" | "competitorAsinId") => {
-    const sums = new Map<string, { impressions: number; clicks: number; spend: number; sales: number; orders: number }>();
+    const sums = new Map<string, EntitySums>();
     for (const row of matched) {
       const id = row[idKey];
       if (!id) continue;
@@ -217,32 +241,55 @@ async function refreshLastPeriodCache(
   const keywordSums = sumsByEntity("keywordId");
   const asinSums = sumsByEntity("competitorAsinId");
 
-  await Promise.all([
-    ...Array.from(keywordSums.entries()).map(([id, sums]) =>
-      supabase
-        .from("keywords")
-        .update({
-          last_impressions: sums.impressions,
-          last_clicks: sums.clicks,
-          last_spend: sums.spend,
-          last_sales: sums.sales,
-          last_orders: sums.orders,
-          results_updated_at: nowIso,
-        })
-        .eq("id", id)
+  const updates: Array<{ table: "keywords" | "competitor_asins"; id: string; sums: EntitySums }> = [
+    ...Array.from(keywordSums.entries()).map(
+      ([id, sums]) => ({ table: "keywords" as const, id, sums })
     ),
-    ...Array.from(asinSums.entries()).map(([id, sums]) =>
-      supabase
-        .from("competitor_asins")
-        .update({
-          last_impressions: sums.impressions,
-          last_clicks: sums.clicks,
-          last_spend: sums.spend,
-          last_sales: sums.sales,
-          last_orders: sums.orders,
-          results_updated_at: nowIso,
-        })
-        .eq("id", id)
+    ...Array.from(asinSums.entries()).map(
+      ([id, sums]) => ({ table: "competitor_asins" as const, id, sums })
     ),
-  ]);
+  ];
+
+  const failures = await mapWithConcurrency(
+    updates,
+    RESULT_CACHE_CONCURRENCY,
+    async ({ table, id, sums }): Promise<number> => {
+      try {
+        const { error } = await supabase
+          .from(table)
+          .update({
+            last_impressions: sums.impressions,
+            last_clicks: sums.clicks,
+            last_spend: sums.spend,
+            last_sales: sums.sales,
+            last_orders: sums.orders,
+            results_updated_at: nowIso,
+          })
+          .eq("id", id);
+        // Previously discarded: a rejected update left the cache silently
+        // stale with nothing in the logs to explain the drift.
+        if (error) {
+          console.error(
+            `[results-import] cache refresh failed for ${table} ${id}: ${error.message}`
+          );
+          return 1;
+        }
+        return 0;
+      } catch (err) {
+        console.error(
+          `[results-import] cache refresh threw for ${table} ${id}:`,
+          err instanceof Error ? err.message : err
+        );
+        return 1;
+      }
+    }
+  );
+
+  const failedCount = failures.reduce((sum, n) => sum + n, 0);
+  if (failedCount > 0) {
+    console.error(
+      `[results-import] ${failedCount}/${updates.length} last_* cache updates failed; ` +
+        "campaign_results were still written and the import stands."
+    );
+  }
 }

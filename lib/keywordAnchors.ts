@@ -226,18 +226,46 @@ function authorAnchors(author: string | undefined): string[] {
   return out;
 }
 
+function escapeForRegExp(value: string): string {
+  return value.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&");
+}
+
+/**
+ * Word-boundary matchers for the two lexicons, compiled once at module load
+ * rather than per call — the same convention lib/keywordValidation.ts uses,
+ * and for the same reason. buildAnchors runs these over every taxonomy
+ * string a book carries (breadcrumbs, categories, Goodreads tags, tropes),
+ * so rebuilding 66 + 81 regexes on each call re-did that work thousands of
+ * times per generate. Neither lexicon changes at runtime.
+ */
+const GENRE_LEXICON_PATTERNS: Array<[string, RegExp]> = GENRE_LEXICON.map((term) => [
+  term,
+  new RegExp(`\\b${escapeForRegExp(term)}\\b`),
+]);
+
+const SETTING_GAZETTEER_PATTERNS: Array<[string, RegExp]> = SETTING_GAZETTEER.map((place) => [
+  place,
+  new RegExp(`\\b${escapeForRegExp(place)}\\b`),
+]);
+
 /** The genre words present in one taxonomy string, e.g. "Crime, Thriller & Mystery" → crime, thriller, mystery. */
 function genreWordsIn(text: string): string[] {
   const normalized = normalizeAnchor(text);
-  return GENRE_LEXICON.filter((term) => new RegExp(`\\b${term.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`).test(normalized));
+  const found: string[] = [];
+  for (const [term, pattern] of GENRE_LEXICON_PATTERNS) {
+    if (pattern.test(normalized)) found.push(term);
+  }
+  return found;
 }
 
 /** Setting words present in one string, from the gazetteer above. */
 function settingWordsIn(text: string): string[] {
   const normalized = normalizeAnchor(text);
-  return SETTING_GAZETTEER.filter((place) =>
-    new RegExp(`\\b${place.replace(/[-/\\^$*+?.()|[\]{}]/g, "\\$&")}\\b`).test(normalized)
-  );
+  const found: string[] = [];
+  for (const [place, pattern] of SETTING_GAZETTEER_PATTERNS) {
+    if (pattern.test(normalized)) found.push(place);
+  }
+  return found;
 }
 
 /**
@@ -289,8 +317,12 @@ export function buildBookAnchors(input: AnchorInput): BookAnchors {
   ];
   for (const raw of taxonomyStrings) {
     for (const term of cleanTaxonomyTerms(raw)) {
-      if (genreWordsIn(term).length > 0) pushAnchor(genre, term);
-      for (const word of genreWordsIn(term)) pushAnchor(genre, word);
+      // Computed once and reused: this was calling genreWordsIn twice with
+      // the same argument, scanning the whole lexicon a second time to
+      // rebuild a list it had just discarded.
+      const words = genreWordsIn(term);
+      if (words.length > 0) pushAnchor(genre, term);
+      for (const word of words) pushAnchor(genre, word);
     }
   }
   for (const term of [...genreFamilySearchTerms(input.genreFamilies, 20), ...genreFamilyThemeTerms(input.genreFamilies)]) {
