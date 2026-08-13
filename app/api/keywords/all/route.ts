@@ -36,6 +36,7 @@ export async function GET() {
           .select("book_id, text, status, match_type, source, specificity, bid")
           .eq("user_id", user.id)
           .neq("status", "negative")
+          .order("id")
           .range(from, to),
       { label: "keywords/all" }
     );

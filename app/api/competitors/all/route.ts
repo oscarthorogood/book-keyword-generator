@@ -37,6 +37,7 @@ export async function GET() {
             "book_id, competitor_asin, source, status, bid, title, author, price, bsr, competitor_count, mean_rank"
           )
           .eq("user_id", user.id)
+          .order("id")
           .range(from, to),
       { label: "competitors/all" }
     );

@@ -26,6 +26,7 @@ export async function GET() {
           .from("keywords")
           .select("status, match_type, source, specificity, rejected_by_filter")
           .eq("user_id", user.id)
+          .order("id")
           .range(from, to),
       { label: "dashboard/keyword-stats" }
     );

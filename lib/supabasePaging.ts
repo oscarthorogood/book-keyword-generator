@@ -33,6 +33,15 @@ export const SUPABASE_MAX_ROWS = 100_000;
  * SUPABASE_PAGE_SIZE still walks the table correctly instead of stopping
  * after the first short page.
  *
+ * IMPORTANT: the query built by `runPage` must carry a **deterministic total
+ * order** — in practice `.order("id")` as the final key. Range paging is
+ * LIMIT/OFFSET underneath, and Postgres guarantees nothing about row order
+ * between two queries that don't fully order their output. Without a unique
+ * tiebreaker the same row can land on two pages (or on none), which would
+ * reintroduce, quietly, the miscounting this helper exists to prevent.
+ * Ordering by a non-unique column alone is not enough: a generate run
+ * inserts hundreds of rows sharing one `created_at`.
+ *
  * Errors are returned, not thrown, matching the `{ data, error }` shape the
  * calling routes already branch on.
  */

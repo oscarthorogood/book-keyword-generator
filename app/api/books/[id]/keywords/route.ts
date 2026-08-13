@@ -46,6 +46,11 @@ export async function GET(
           .eq("book_id", bookId)
           .eq("user_id", user.id)
           .order("created_at", { ascending: false })
+          // Tiebreaker, and load-bearing for paging: a generate run inserts
+          // hundreds of rows sharing one created_at, so ordering on that
+          // column alone leaves their relative order undefined between
+          // pages — the same keyword could arrive twice, or not at all.
+          .order("id", { ascending: false })
           .range(from, to),
       { label: `books/${bookId}/keywords` }
     );

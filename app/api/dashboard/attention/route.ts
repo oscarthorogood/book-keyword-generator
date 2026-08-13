@@ -30,6 +30,7 @@ export async function GET() {
             .from("books")
             .select("id, title, total_keywords, metadata_json")
             .eq("user_id", user.id)
+            .order("id")
             .range(from, to),
         { label: "dashboard/attention:books" }
       ),
@@ -38,7 +39,7 @@ export async function GET() {
       // active keywords fell past the cap.
       fetchAllRows(
         (from, to) =>
-          supabase.from("keywords").select("book_id, status").eq("user_id", user.id).range(from, to),
+          supabase.from("keywords").select("book_id, status").eq("user_id", user.id).order("id").range(from, to),
         { label: "dashboard/attention:keywords" }
       ),
       supabase

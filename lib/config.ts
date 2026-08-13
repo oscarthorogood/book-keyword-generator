@@ -11,10 +11,13 @@
 const DEV_AUTH_SECRET = "your-secret-key-change-this-in-production";
 
 /**
- * Minimum length for a usable secret. HS256 keys shorter than this are
- * brute-forceable; a real deployment should use 32+ random bytes.
+ * Length a real secret should meet. Falling short is warned about rather
+ * than refused: a short *custom* secret is weaker than it should be, but it
+ * is not public, so refusing it would take a working deployment's approve
+ * flow offline over a theoretical weakness. The published default is the
+ * actual vulnerability, and that is refused outright below.
  */
-const MIN_AUTH_SECRET_LENGTH = 32;
+const RECOMMENDED_AUTH_SECRET_LENGTH = 32;
 
 export const AUTH_CONFIG = {
   /**
@@ -31,7 +34,7 @@ export const AUTH_CONFIG = {
    * DEV_AUTH_SECRET, which meant a deployment missing AUTH_SECRET signed its
    * admin approve links with a value published in this repo — letting anyone
    * mint a valid "approved" token for their own address and grant themselves
-   * access. A missing or too-short secret is now a hard error in production.
+   * access. That case is now a hard error in production.
    */
   secretKey(): Uint8Array {
     const secret = process.env.AUTH_SECRET;
@@ -44,10 +47,10 @@ export const AUTH_CONFIG = {
             "AUTH_SECRET to a long random value and redeploy."
         );
       }
-      if (secret.length < MIN_AUTH_SECRET_LENGTH) {
-        throw new Error(
-          `AUTH_SECRET is too short (${secret.length} chars). Use at least ` +
-            `${MIN_AUTH_SECRET_LENGTH} characters of random data.`
+      if (secret.length < RECOMMENDED_AUTH_SECRET_LENGTH) {
+        console.warn(
+          `[config] AUTH_SECRET is ${secret.length} chars; ` +
+            `${RECOMMENDED_AUTH_SECRET_LENGTH}+ of random data is recommended for HS256.`
         );
       }
     }

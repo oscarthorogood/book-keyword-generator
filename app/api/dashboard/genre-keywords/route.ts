@@ -22,7 +22,7 @@ export async function GET() {
     const [{ data: books, error: booksError }, { data: keywords, error: keywordsError }] = await Promise.all([
       fetchAllRows(
         (from, to) =>
-          supabase.from("books").select("id, title, metadata_json").eq("user_id", user.id).range(from, to),
+          supabase.from("books").select("id, title, metadata_json").eq("user_id", user.id).order("id").range(from, to),
         { label: "dashboard/genre-keywords:books" }
       ),
       // Paged: the widget ranks the top keywords per genre, so a truncated
@@ -34,6 +34,7 @@ export async function GET() {
             .select("book_id, text, status, specificity")
             .eq("user_id", user.id)
             .eq("status", "active")
+            .order("id")
             .range(from, to),
         { label: "dashboard/genre-keywords:keywords" }
       ),

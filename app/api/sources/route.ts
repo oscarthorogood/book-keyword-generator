@@ -55,7 +55,7 @@ export async function GET() {
         // a truncated read would under-report how much each source has added.
         fetchAllRows(
           (from, to) =>
-            supabase.from("keywords").select("source, created_at").eq("user_id", user.id).range(from, to),
+            supabase.from("keywords").select("source, created_at").eq("user_id", user.id).order("id").range(from, to),
           { label: "sources:keywords" }
         ),
         fetchAllRows(
@@ -64,6 +64,7 @@ export async function GET() {
               .from("competitor_asins")
               .select("source, created_at")
               .eq("user_id", user.id)
+              .order("id")
               .range(from, to),
           { label: "sources:competitor_asins" }
         ),

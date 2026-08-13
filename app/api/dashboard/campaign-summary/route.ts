@@ -22,7 +22,7 @@ export async function GET() {
     const [{ data: campaigns, error: campaignsError }, { data: results, error: resultsError }] = await Promise.all([
       fetchAllRows(
         (from, to) =>
-          supabase.from("campaigns").select("id, status").eq("user_id", user.id).range(from, to),
+          supabase.from("campaigns").select("id, status").eq("user_id", user.id).order("id").range(from, to),
         { label: "dashboard/campaign-summary:campaigns" }
       ),
       // Paged: campaign_results grows by a row per keyword per report period,
@@ -34,6 +34,7 @@ export async function GET() {
             .from("campaign_results")
             .select("campaign_id, spend, sales, orders, clicks, impressions, report_start, report_end")
             .eq("user_id", user.id)
+            .order("id")
             .range(from, to),
         { label: "dashboard/campaign-summary:results" }
       ),
