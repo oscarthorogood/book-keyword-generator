@@ -64,4 +64,15 @@ describe("describePrepare", () => {
     expect(summary).toContain("filtered 120 row(s)");
     expect(summary).not.toContain("generated");
   });
+
+  // The flowchart's Create Campaigns branch runs generation, then presets,
+  // then the filter pass — the summary reads back in that same order so it
+  // describes what actually happened.
+  it("orders the summary generation, then presets, then filtering", () => {
+    const summary = describePrepare(
+      result({ generated: true, generatedKeywords: 300, generatedAsins: 20, presetsApplied: 12, filtered: true, examined: 332 })
+    )!;
+    expect(summary.indexOf("generated")).toBeLessThan(summary.indexOf("applied"));
+    expect(summary.indexOf("applied")).toBeLessThan(summary.indexOf("filtered"));
+  });
 });

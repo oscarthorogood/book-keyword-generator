@@ -9,14 +9,19 @@
  * campaigns now) but the pipeline behind it is unchanged — it just runs
  * here instead, triggered by POST /api/books/[id]/campaigns.
  *
- * Ordering matters and mirrors what the old buttons did:
- *   1. apply-presets — genre preset keywords/ASINs land in the bank first so
- *      the generation pass can dedupe against them rather than the other way
- *      round.
- *   2. generate — every new row lands in `archived` (PR #61), never straight
- *      into `active`.
- *   3. filter — the only step that promotes `archived` rows into `active`,
- *      which is the status lib/campaignContext.ts actually selects from.
+ * Ordering follows the flowchart's Create Campaigns branch exactly:
+ *   1. "Use Generation to find keywords (300) and add to all bank" — runs
+ *      first, at the full BOOK_KEYWORD_MAX cap rather than the generate
+ *      form's 50-per-ad-group default. Every new row lands in `archived`
+ *      (PR #61), never straight into `active`.
+ *   2. "Collect Preset Keywords and ASINs" — genre presets are applied on
+ *      top of what generation found.
+ *   3. "Run Through Filter" — the only step that promotes `archived` rows
+ *      into `active`, which is the status lib/campaignContext.ts selects
+ *      from. Step 3's "collect ASINs and keywords stored in our database
+ *      from all generation or manual input" is that same read: the filter
+ *      pass and loadCampaignContext both read the book's whole bank back,
+ *      generated and hand-added rows alike.
  *
  * Skipping rules keep this cheap and idempotent. Generation costs real
  * upstream API calls, so it only runs when the book has nothing at all;
@@ -27,6 +32,8 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
+
+import { BOOK_KEYWORD_MAX } from "./keywordMerge";
 
 /**
  * The route handlers are pulled in lazily, inside prepareBank, rather than
@@ -204,16 +211,12 @@ export async function prepareBank(
   } = await pipelineHandlers();
 
   if (plan.generate) {
-    const [keywordPresets, asinPresets] = await Promise.all([
-      callRoute(applyKeywordPresets, bookId, "keywords/apply-presets"),
-      callRoute(applyAsinPresets, bookId, "competitors/apply-presets"),
-    ]);
-    result.presetsApplied = num(keywordPresets.data.appliedCount) + num(asinPresets.data.appliedCount);
-    if (!keywordPresets.ok) result.warnings.push(errorText(keywordPresets.data, "Could not apply keyword presets."));
-    if (!asinPresets.ok) result.warnings.push(errorText(asinPresets.data, "Could not apply ASIN presets."));
-
+    // Step 1: generation, at the flowchart's 300. Without an explicit cap
+    // the route falls back to RECOMMENDED_MAX_KEYWORDS (50 per ad group),
+    // which was right for a human filling in the old Generate form and far
+    // too small for an unattended run feeding five campaigns.
     const [keywords, asins] = await Promise.all([
-      callRoute(generateKeywords, bookId, "keywords/generate"),
+      callRoute(generateKeywords, bookId, "keywords/generate", { resultCap: BOOK_KEYWORD_MAX }),
       callRoute(generateAsins, bookId, "competitors/generate"),
     ]);
     result.generated = true;
@@ -229,9 +232,20 @@ export async function prepareBank(
     }
     if (!keywords.ok) result.warnings.push(errorText(keywords.data, "Could not generate keywords."));
     if (!asins.ok) result.warnings.push(errorText(asins.data, "Could not generate competitor ASINs."));
+
+    // Step 2: genre presets, applied on top of what generation found.
+    const [keywordPresets, asinPresets] = await Promise.all([
+      callRoute(applyKeywordPresets, bookId, "keywords/apply-presets"),
+      callRoute(applyAsinPresets, bookId, "competitors/apply-presets"),
+    ]);
+    result.presetsApplied = num(keywordPresets.data.appliedCount) + num(asinPresets.data.appliedCount);
+    if (!keywordPresets.ok) result.warnings.push(errorText(keywordPresets.data, "Could not apply keyword presets."));
+    if (!asinPresets.ok) result.warnings.push(errorText(asinPresets.data, "Could not apply ASIN presets."));
   }
 
-  // Promotes archived rows into active — the step campaign selection needs.
+  // Step 3: promotes archived rows into active — the step campaign
+  // selection needs, and the one that reads the book's whole bank back
+  // (generated, preset and manually added rows alike).
   const [keywordFilter, asinFilter] = await Promise.all([
     callRoute(filterKeywords, bookId, "keywords/filter"),
     callRoute(filterAsins, bookId, "competitors/filter"),

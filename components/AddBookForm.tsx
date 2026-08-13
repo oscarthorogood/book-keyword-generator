@@ -97,8 +97,8 @@ export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
         </button>
         <h1 className="page-title">Add a book</h1>
         <p className="page-subtitle mt-1 max-w-2xl">
-          Paste the Amazon link and we capture the book&apos;s full metadata once, now. Every keyword you
-          generate later is built from that capture.
+          Paste the Amazon link and we capture the book&apos;s full metadata once, now. Every campaign you
+          create later is built from that capture.
         </p>
       </header>
 
