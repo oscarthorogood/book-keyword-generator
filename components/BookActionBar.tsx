@@ -1,19 +1,89 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   Download,
+  Edit3,
   Filter,
   ListChecks,
+  ListPlus,
   Loader2,
+  Megaphone,
   Rocket,
   RefreshCw,
   Sparkles,
   Upload,
 } from "lucide-react";
 import ResultsUploadModal from "./ResultsUploadModal";
+
+interface MenuItem {
+  key: string;
+  label: string;
+  icon: ReactNode;
+  onClick: () => void;
+  disabled?: boolean;
+  title?: string;
+}
+
+/** A single button that fans out into a small menu of related actions (spec: group book-page buttons by function). */
+function ActionMenu({ label, icon, items, primary }: { label: string; icon: ReactNode; items: MenuItem[]; primary?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    function onClickOutside(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", onClickOutside);
+    return () => document.removeEventListener("mousedown", onClickOutside);
+  }, [open]);
+
+  return (
+    <div className="relative" ref={ref}>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        aria-haspopup="menu"
+        className={`action-card ${primary ? "" : "action-card-secondary"} w-full`}
+      >
+        <div className="flex items-center justify-between">
+          <span className={`icon-tile ${primary ? "icon-tile-inverted" : ""}`}>{icon}</span>
+          <ChevronDown size={18} className={`transition-transform ${open ? "rotate-180" : ""}`} style={{ color: primary ? undefined : "var(--icon-active)" }} />
+        </div>
+        <span className="text-md font-semibold">{label}</span>
+      </button>
+
+      {open && (
+        <div
+          role="menu"
+          className="absolute left-0 z-20 mt-2 w-64 overflow-hidden rounded-md border bg-white shadow-lg"
+          style={{ borderColor: "var(--line)" }}
+        >
+          {items.map((item) => (
+            <button
+              key={item.key}
+              role="menuitem"
+              disabled={item.disabled}
+              title={item.title}
+              onClick={() => {
+                setOpen(false);
+                item.onClick();
+              }}
+              className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {item.icon}
+              <span>{item.label}</span>
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 interface Campaign {
   id: string;
@@ -256,98 +326,70 @@ export default function BookActionBar({ bookId, metadataReady, onDataChanged, on
 
   const needsAmazonId = campaigns.filter((c) => c.status === "exported" && !c.amazon_campaign_id);
 
+  function focusManualAdd() {
+    const el = document.getElementById("manual-keyword-input");
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    (el as HTMLTextAreaElement | null)?.focus();
+  }
+
   return (
     <div className="mb-6">
-      <div className="mb-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <button onClick={generateAll} disabled={generating || !metadataReady} className="action-card">
-          <div className="flex items-start justify-between">
-            <span className="icon-tile icon-tile-inverted">
-              {generating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-            </span>
-          </div>
-          <span className="text-md font-semibold">{generating ? "Generating…" : "Generate keywords/ASINs"}</span>
-        </button>
+      {/* Buttons grouped by function into dropdown menus (spec: simplify book page). */}
+      <div className="mb-2 grid gap-3 sm:grid-cols-3">
+        <ActionMenu
+          label="Add Keywords/ASINs"
+          icon={generating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
+          primary
+          items={[
+            { key: "generate", label: generating ? "Generating…" : "Generate", icon: <Sparkles size={16} />, onClick: generateAll, disabled: generating || !metadataReady },
+            { key: "manual", label: "Manual", icon: <Edit3 size={16} />, onClick: focusManualAdd },
+            { key: "presets", label: applyingPresets ? "Applying…" : "Genre Presets", icon: <ListChecks size={16} />, onClick: addPresetsAll, disabled: applyingPresets },
+          ]}
+        />
 
-        <button onClick={rerunFiltersAll} disabled={filtering} className="action-card action-card-secondary">
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              {filtering ? <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} /> : <Filter size={20} style={{ color: "var(--icon-active)" }} />}
-            </span>
-          </div>
-          <span className="text-md font-semibold">{filtering ? "Filtering…" : "Re-run filters"}</span>
-        </button>
+        <ActionMenu
+          label="Campaigns"
+          icon={<Megaphone size={20} style={{ color: "var(--icon-active)" }} />}
+          items={[
+            { key: "create", label: creatingCampaigns ? "Creating…" : "Create Campaigns", icon: <Rocket size={16} />, onClick: () => createCampaigns(false), disabled: creatingCampaigns },
+            {
+              key: "update",
+              label: updatingCampaigns ? "Updating…" : "Update Campaigns",
+              icon: <RefreshCw size={16} />,
+              onClick: updateCampaigns,
+              disabled: updatingCampaigns || campaigns.every((c) => c.status !== "exported" || !c.amazon_campaign_id),
+              title: "Re-scores every exported campaign that has an Amazon Campaign ID against the current bank",
+            },
+            {
+              key: "export",
+              label: "Export Campaigns",
+              icon: <Download size={16} />,
+              onClick: exportCampaigns,
+              disabled: exportable.length === 0,
+              title: "Download the current bulksheet for every campaign that has one",
+            },
+            {
+              key: "upload",
+              label: "Upload Results",
+              icon: <Upload size={16} />,
+              onClick: () => {
+                setError(null);
+                setNotice(null);
+                setShowResultsUpload(true);
+              },
+              title: "Upload an Amazon Search Term Report to feed Update Campaigns real performance data",
+            },
+          ]}
+        />
 
-        <button onClick={addPresetsAll} disabled={applyingPresets} className="action-card action-card-secondary">
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              {applyingPresets ? <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} /> : <ListChecks size={20} style={{ color: "var(--icon-active)" }} />}
-            </span>
-          </div>
-          <span className="text-md font-semibold">{applyingPresets ? "Applying…" : "Add genre presets"}</span>
-        </button>
-
-        <button onClick={refreshMetadata} disabled={refreshingMeta} className="action-card action-card-secondary">
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              <RefreshCw size={20} className={refreshingMeta ? "animate-spin" : undefined} style={{ color: "var(--icon-active)" }} />
-            </span>
-          </div>
-          <span className="text-md font-semibold">{refreshingMeta ? "Re-fetching…" : "Refresh metadata"}</span>
-        </button>
-
-        <button
-          onClick={() => {
-            setError(null);
-            setNotice(null);
-            setShowResultsUpload(true);
-          }}
-          className="action-card action-card-secondary"
-          title="Upload an Amazon Search Term Report to feed Update Campaigns real performance data"
-        >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              <Upload size={20} style={{ color: "var(--icon-active)" }} />
-            </span>
-          </div>
-          <span className="text-md font-semibold">Upload results</span>
-        </button>
-
-        <button onClick={() => createCampaigns(false)} disabled={creatingCampaigns} className="action-card">
-          <div className="flex items-start justify-between">
-            <span className="icon-tile icon-tile-inverted">
-              {creatingCampaigns ? <Loader2 size={20} className="animate-spin" /> : <Rocket size={20} />}
-            </span>
-          </div>
-          <span className="text-md font-semibold">{creatingCampaigns ? "Creating…" : "Create campaigns"}</span>
-        </button>
-
-        <button
-          onClick={updateCampaigns}
-          disabled={updatingCampaigns || campaigns.every((c) => c.status !== "exported" || !c.amazon_campaign_id)}
-          className="action-card action-card-secondary"
-          title="Re-scores every exported campaign that has an Amazon Campaign ID against the current bank"
-        >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              {updatingCampaigns ? <Loader2 size={20} className="animate-spin" style={{ color: "var(--icon-active)" }} /> : <RefreshCw size={20} style={{ color: "var(--icon-active)" }} />}
-            </span>
-          </div>
-          <span className="text-md font-semibold">{updatingCampaigns ? "Updating…" : "Update campaigns"}</span>
-        </button>
-
-        <button
-          onClick={exportCampaigns}
-          disabled={exportable.length === 0}
-          className="action-card action-card-secondary"
-          title="Download the current bulksheet for every campaign that has one"
-        >
-          <div className="flex items-start justify-between">
-            <span className="icon-tile">
-              <Download size={20} style={{ color: "var(--icon-active)" }} />
-            </span>
-          </div>
-          <span className="text-md font-semibold">Export campaigns</span>
-        </button>
+        <ActionMenu
+          label="Organise"
+          icon={<ListPlus size={20} style={{ color: "var(--icon-active)" }} />}
+          items={[
+            { key: "filters", label: filtering ? "Filtering…" : "Run Filters", icon: <Filter size={16} />, onClick: rerunFiltersAll, disabled: filtering },
+            { key: "refresh", label: refreshingMeta ? "Re-fetching…" : "Refresh Metadata", icon: <RefreshCw size={16} />, onClick: refreshMetadata, disabled: refreshingMeta },
+          ]}
+        />
       </div>
 
       {needsAmazonId.length > 0 && (
