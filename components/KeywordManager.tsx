@@ -6,7 +6,6 @@ import {
   AlertTriangle,
   Calculator,
   CheckCircle2,
-  Loader2,
   Plus,
   Search,
   ShieldMinus,
@@ -89,31 +88,9 @@ const SPECIFICITY_LABELS: Record<number, string> = {
   5: "Very specific",
 };
 
-interface GenerateSummary {
-  insertedCount: number;
-  alreadyPresentCount: number;
-  generatedCount: number;
-  contributingSources: string[];
-  byMatchType: Record<string, number>;
-  aiRanked: boolean;
-  pausedCount?: number;
-  rejectedCount?: number;
-  negativeCount?: number;
-  filterSummary?: {
-    byVerdict: Record<string, number>;
-    byFilter: Record<string, number>;
-    /** Positive-verdict codes for passed keywords — COMP_TITLE_MATCH, CORE_GENRE_MATCH, … */
-    byPassCode?: Record<string, number>;
-  };
-  /** True when the database predates sql/08 and only the active keywords could be stored. */
-  needsFilterMigration?: boolean;
-}
-
 interface KeywordManagerProps {
   bookId: string;
   metadataCapturedAt?: string;
-  metadataReady: boolean;
-  genreTerms: string[];
   onKeywordsChanged?: () => void;
 }
 
@@ -143,11 +120,6 @@ function labelForFilter(filter: string | null | undefined): string {
   return filter.replace(/([A-Z])/g, " $1").toLowerCase();
 }
 
-/** Positive-verdict codes (lib/keywordFilters.ts) are SCREAMING_SNAKE_CASE; show them as words. */
-function labelForPassCode(code: string): string {
-  return code.replace(/_/g, " ").toLowerCase();
-}
-
 /** Fetches without touching state, so effects never set state synchronously. */
 async function fetchKeywords(bookId: string): Promise<Keyword[]> {
   const res = await fetch(`/api/books/${bookId}/keywords`);
@@ -163,8 +135,6 @@ function labelForSource(source: string | null): string {
 export default function KeywordManager({
   bookId,
   metadataCapturedAt,
-  metadataReady,
-  genreTerms,
   onKeywordsChanged,
 }: KeywordManagerProps) {
   const [keywords, setKeywords] = useState<Keyword[]>([]);
@@ -201,16 +171,6 @@ export default function KeywordManager({
   const [promotingId, setPromotingId] = useState<string | null>(null);
   const [promoteNotice, setPromoteNotice] = useState<string | null>(null);
   const [restoreError, setRestoreError] = useState<string | null>(null);
-
-  const [showGenerateForm, setShowGenerateForm] = useState(false);
-  const [generating, setGenerating] = useState(false);
-  const [generateError, setGenerateError] = useState<string | null>(null);
-  const [summary, setSummary] = useState<GenerateSummary | null>(null);
-  const [keyTropes, setKeyTropes] = useState("");
-  // Amazon's own guidance is 25-50 keywords per ad group, so 50 — the top of
-  // that range — is the recommended default. Applies per ad group (tropes,
-  // comp names), each still bounded by the book-library hard ceiling server-side.
-  const [resultCap, setResultCap] = useState(50);
 
   useEffect(() => {
     let active = true;
@@ -486,38 +446,6 @@ export default function KeywordManager({
     onKeywordsChanged?.();
   }
 
-  async function generateKeywords() {
-    setGenerating(true);
-    setGenerateError(null);
-    setSummary(null);
-    try {
-      const res = await fetch(`/api/books/${bookId}/keywords/generate`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          keyTropes: keyTropes
-            .split(/[\n,]/)
-            .map((t) => t.trim())
-            .filter(Boolean),
-          resultCap,
-        }),
-      });
-      const body = await res.json().catch(() => ({}));
-      if (!res.ok) {
-        setGenerateError(body.error || "Could not generate keywords.");
-        return;
-      }
-      setSummary(body as GenerateSummary);
-      setShowGenerateForm(false);
-      setKeyTropes("");
-      await reload();
-    } catch (err) {
-      setGenerateError(err instanceof Error ? err.message : "Could not generate keywords.");
-    } finally {
-      setGenerating(false);
-    }
-  }
-
   /**
    * Every filter change runs through here. Selection is scoped to what's on
    * screen: selecting rows on one tab and then switching tabs would otherwise
@@ -665,20 +593,6 @@ export default function KeywordManager({
 
       <RecommendationsPanel bookId={bookId} />
 
-      {/* Generation is driven from the page-level action bar (BookActionBar); this stays as
-          an opt-in for the advanced options (key tropes, result cap) that bar's one-click
-          "Generate keywords/ASINs" doesn't expose. */}
-      <div className="mb-6">
-        <button
-          onClick={() => setShowGenerateForm((open) => !open)}
-          className="btn-link"
-          aria-expanded={showGenerateForm}
-        >
-          <Sparkles size={16} />
-          Advanced generate options (key tropes, result cap)
-        </button>
-      </div>
-
       {promoteNotice && (
         <div className="alert mb-6" aria-live="polite">
           <ShieldMinus size={20} className="mt-0.5 shrink-0" style={{ color: "var(--icon-default)" }} />
@@ -702,152 +616,6 @@ export default function KeywordManager({
           <div>
             <p className="alert-title">Couldn&apos;t load the keyword/ASIN bank</p>
             <p className="mt-1">{loadError}</p>
-          </div>
-        </div>
-      )}
-
-      {showGenerateForm && (
-        <div className="card card-compact mb-6" style={{ background: "var(--bg-subtle)" }}>
-          <div className="mb-4 flex items-start justify-between gap-4">
-            <div>
-              <p className="text-sm font-semibold" style={{ color: "var(--text-primary)" }}>
-                Generate from this book&apos;s metadata
-              </p>
-              <p className="meta-line mt-1 max-w-2xl">
-                Runs the stored ASIN scrape — categories, comparable titles, reviews, Q&amp;A, author
-                catalogue, Goodreads/Open Library/Google Books — through every keyword source, plus live
-                autocomplete and SerpApi sweeps. Everything is then gated by this book&apos;s relevance
-                filters before anything is activated.
-              </p>
-              {genreTerms.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {genreTerms.slice(0, 6).map((term) => (
-                    <span key={term} className="chip-tag">
-                      {term}
-                    </span>
-                  ))}
-                </div>
-              )}
-            </div>
-            <button
-              onClick={() => setShowGenerateForm(false)}
-              className="btn btn-tertiary btn-icon btn-sm"
-              aria-label="Close generate panel"
-            >
-              <X size={20} />
-            </button>
-          </div>
-
-          {!metadataReady && (
-            <div className="alert alert-warning mb-4">
-              <AlertTriangle size={20} className="mt-0.5 shrink-0" />
-              <p>
-                This book&apos;s metadata is incomplete. Re-fetch it above before generating, or the keywords
-                won&apos;t reflect the book.
-              </p>
-            </div>
-          )}
-
-          <label className="field-label" htmlFor="key-tropes">
-            Key tropes or themes <span style={{ color: "var(--text-tertiary)" }}>(optional)</span>
-          </label>
-          <textarea
-            id="key-tropes"
-            value={keyTropes}
-            onChange={(e) => setKeyTropes(e.target.value)}
-            rows={2}
-            placeholder="e.g. enemies to lovers, small town, locked room mystery"
-            className="input resize-none"
-            aria-describedby="key-tropes-hint"
-          />
-          <span className="field-hint" id="key-tropes-hint">
-            One per line or comma separated. These are the highest-trust signal in the run — they seed the
-            trope categories and anchor relevance.
-          </span>
-
-          <label className="field-label mt-4" htmlFor="keyword-result-cap">
-            Result cap
-          </label>
-          <select
-            id="keyword-result-cap"
-            value={resultCap}
-            onChange={(e) => setResultCap(Number(e.target.value))}
-            className="input w-auto"
-          >
-            <option value={25}>25 keywords</option>
-            <option value={50}>50 keywords (recommended)</option>
-            <option value={100}>100 keywords</option>
-            <option value={150}>150 keywords</option>
-            <option value={300}>300 keywords (no cap)</option>
-          </select>
-          <span className="field-hint">
-            Applies per ad group (tropes, comp names). Amazon recommends 25-50 keywords per ad group for
-            focused targeting.
-          </span>
-
-          {generateError && (
-            <div className="alert alert-error mt-4" role="alert">
-              <AlertCircle size={20} className="mt-0.5 shrink-0" />
-              <p>{generateError}</p>
-            </div>
-          )}
-
-          <div className="mt-5 flex justify-end">
-            <button onClick={generateKeywords} disabled={generating || !metadataReady} className="btn btn-primary">
-              {generating ? <Loader2 size={20} className="animate-spin" /> : <Sparkles size={20} />}
-              {generating ? "Generating…" : "Generate keywords"}
-            </button>
-          </div>
-        </div>
-      )}
-
-      {summary && (
-        <div className="alert alert-success mb-6" aria-live="polite">
-          <CheckCircle2 size={20} className="mt-0.5 shrink-0" />
-          <div className="min-w-0">
-            <p className="alert-title">
-              Added {summary.insertedCount} new keyword{summary.insertedCount === 1 ? "" : "s"}
-              {summary.alreadyPresentCount > 0 && ` · ${summary.alreadyPresentCount} already in the list`}
-            </p>
-            <p className="mt-1">
-              {summary.contributingSources.length} sources contributed
-              {summary.byMatchType &&
-                ` · ${Object.entries(summary.byMatchType)
-                  .map(([type, count]) => `${count} ${type}`)
-                  .join(", ")}`}
-              {summary.aiRanked && " · AI relevance pass applied"}
-            </p>
-            {summary.needsFilterMigration && (
-              <p className="mt-1" style={{ color: "var(--color-error-700)" }}>
-                Rejected and paused keywords could not be stored — apply{" "}
-                <code className="font-mono">sql/08-keyword-filter-status.sql</code> to this database to keep
-                them.
-              </p>
-            )}
-            {summary.filterSummary && (
-              <p className="mt-1">
-                Relevance filters: {summary.filterSummary.byVerdict.pass ?? 0} kept ·{" "}
-                {summary.filterSummary.byVerdict.pause ?? 0} paused ·{" "}
-                {summary.filterSummary.byVerdict.reject ?? 0} rejected
-                {summary.negativeCount ? ` · ${summary.negativeCount} negatives added` : ""}
-                {Object.keys(summary.filterSummary.byFilter).length > 0 &&
-                  ` — ${Object.entries(summary.filterSummary.byFilter)
-                    .sort((a, b) => b[1] - a[1])
-                    .slice(0, 4)
-                    .map(([filter, count]) => `${count} ${labelForFilter(filter).trim()}`)
-                    .join(", ")}`}
-              </p>
-            )}
-            {summary.filterSummary?.byPassCode && Object.keys(summary.filterSummary.byPassCode).length > 0 && (
-              <p className="mt-1">
-                Why kept:{" "}
-                {Object.entries(summary.filterSummary.byPassCode)
-                  .sort((a, b) => b[1] - a[1])
-                  .map(([code, count]) => `${count} ${labelForPassCode(code)}`)
-                  .join(", ")}
-              </p>
-            )}
-            <p className="mt-1">{summary.contributingSources.map(labelForSource).join(", ")}</p>
           </div>
         </div>
       )}
@@ -1092,9 +860,16 @@ export default function KeywordManager({
             </p>
           </div>
           {bank.length === 0 ? (
-            <button onClick={() => setShowGenerateForm(true)} className="btn btn-primary">
+            <button
+              onClick={() => {
+                const el = document.getElementById("manual-keyword-input");
+                el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                (el as HTMLTextAreaElement | null)?.focus();
+              }}
+              className="btn btn-primary"
+            >
               <Sparkles size={20} />
-              Generate keywords
+              Add keywords
             </button>
           ) : (
             <button

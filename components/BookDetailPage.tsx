@@ -351,8 +351,6 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
           key={`bank-${dataKey}`}
           bookId={bookId}
           metadataCapturedAt={snapshot.capturedAt}
-          metadataReady={!captureFailed}
-          genreTerms={genreTerms}
           onKeywordsChanged={reloadBook}
         />
       </div>
