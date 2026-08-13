@@ -44,22 +44,20 @@ interface SidebarBook {
 const SIDEBAR_BOOK_LIMIT = 8;
 
 /**
- * The five databases, each its own route.
+ * The databases, each its own route.
  *
- * Books and Campaigns are listed here as well as being reachable from the
- * Books section above — they are databases in their own right, and the
- * sidebar naming the same five things the app is built around is worth more
- * than avoiding one duplicated link.
+ * Books is deliberately absent: the Books section above already owns the
+ * book list and every book's page, so there is exactly one place in the
+ * sidebar to reach a book rather than two links to the same route.
  */
 const DATABASE_LINKS: Array<{ section: ShellSection; label: string; href: string; Icon: typeof BookOpen }> = [
-  { section: "books", label: "Books", href: "/books", Icon: BookOpen },
   { section: "campaigns", label: "Campaigns", href: "/campaigns", Icon: Megaphone },
   { section: "results", label: "Results", href: "/results", Icon: BarChart3 },
   { section: "presets", label: "Presets", href: "/presets", Icon: ListChecks },
   { section: "targets", label: "Keywords & ASINs", href: "/targets", Icon: Tags },
 ];
 
-const DATABASE_SECTIONS: ShellSection[] = ["books", "campaigns", "results", "presets", "targets"];
+const DATABASE_SECTIONS: ShellSection[] = ["campaigns", "results", "presets", "targets"];
 
 /**
  * The app chrome: fixed 280px sidebar + fluid content (§3.2/§4.4).
@@ -73,10 +71,12 @@ const DATABASE_SECTIONS: ShellSection[] = ["books", "campaigns", "results", "pre
  * `/api/books/list` data BooksListDashboard renders in full on /books,
  * followed by an "All" link to that full list.
  *
- * Below it, "Databases" names the five things the app is built around —
- * Books, Campaigns, Results, Presets, and one combined Keywords & ASINs
- * table. The old /databases tab switcher is gone; each is a real route, so
- * there is one way to reach each thing rather than a route and a tab.
+ * Below it, "Databases" holds the rest — Campaigns, Results, Presets, and
+ * one combined Keywords & ASINs table. Books is not repeated there; the
+ * Books dropdown above is the single way to reach the book list and each
+ * book's page. The old /databases tab switcher is gone; each is a real
+ * route, so there is one way to reach each thing rather than a route and a
+ * tab.
  */
 export default function AppShell({ active, children }: AppShellProps) {
   const router = useRouter();
