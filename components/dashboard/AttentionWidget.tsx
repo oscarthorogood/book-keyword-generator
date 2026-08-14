@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { AlertTriangle, CheckCircle2 } from "lucide-react";
+import { AlertTriangle, BookOpen, CheckCircle2 } from "lucide-react";
 import Link from "next/link";
 import type { AttentionItem } from "@/lib/dashboardStats";
 
@@ -77,7 +77,9 @@ export default function AttentionWidget() {
                 {item.coverImageUrl ? (
                   // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
                   <img src={item.coverImageUrl} alt="" className="h-full w-full object-cover" />
-                ) : null}
+                ) : (
+                  <BookOpen size={14} style={{ color: "var(--icon-default)" }} />
+                )}
               </span>
               <div className="min-w-0 flex-1">
                 <Link href={`/books/${item.bookId}`} className="cell-primary block truncate">

@@ -17,11 +17,11 @@ import TargetingAccuracyWidget from "@/components/dashboard/TargetingAccuracyWid
 export default function DashboardPage() {
   return (
     <AppShell active="dashboard">
-      <div className="page-body" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24 }}>
+      <div className="page-body grid-split">
         <div className="flex flex-col gap-6">
           <TargetingFunnelWidget variant="hero" />
 
-          <div className="grid gap-6" style={{ gridTemplateColumns: "1.2fr 1fr" }}>
+          <div className="grid-split-tight">
             <AttentionWidget />
 
             <Link href="/books/add" className="action-card action-card-gradient">

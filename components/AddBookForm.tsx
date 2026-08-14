@@ -111,7 +111,7 @@ export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
       </header>
 
       <div className="page-body flex-1">
-        <form onSubmit={handleSubmit} className="grid gap-6" style={{ gridTemplateColumns: "1.4fr 1fr", alignItems: "start" }}>
+        <form onSubmit={handleSubmit} className="grid-split">
           <div className="card">
             <div className="mb-5 flex items-start gap-3.5">
               <span className="stat-tile-icon">

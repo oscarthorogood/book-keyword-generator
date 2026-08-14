@@ -286,7 +286,7 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
 
         <BookStatTiles bookId={bookId} genreTermCount={genreTerms.length} rating={snapshot.rating} />
 
-        <div className="grid gap-6" style={{ gridTemplateColumns: "1.4fr 1fr", alignItems: "start" }}>
+        <div className="grid-split">
           <div className="flex flex-col gap-6">
             {/* Campaigns first — this is what the page is for. */}
             <BookCampaigns bookId={bookId} metadataReady={!captureFailed} onChanged={reloadBook} />
