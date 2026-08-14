@@ -34,8 +34,8 @@ function LoginPageContent() {
         </div>
 
         <p className="mt-6 text-center text-sm" style={{ color: "var(--text-secondary)" }}>
-          This is a private application. New email addresses are reviewed by the administrator before access
-          is granted.
+          This is a private application. Anyone with a plausible email address can sign in; an administrator
+          can block a specific address afterward.
         </p>
       </div>
     </div>
