@@ -21,16 +21,14 @@ export async function GET() {
       { data: keywords, error: keywordError },
       { data: competitorAsins, error: competitorAsinError },
     ] = await Promise.all([
-      supabase.from("preset_genres").select("id, name, parent_id, created_at").eq("user_id", user.id).order("name"),
+      supabase.from("preset_genres").select("id, name, parent_id, created_at").order("name"),
       supabase
         .from("preset_keywords")
         .select("id, genre_id, keyword, match_type, specificity, tier, author_references")
-        .eq("user_id", user.id)
         .order("keyword"),
       supabase
         .from("preset_competitor_asins")
         .select("id, genre_id, competitor_asin, notes, tier")
-        .eq("user_id", user.id)
         .order("competitor_asin"),
     ]);
 
@@ -59,7 +57,6 @@ export async function GET() {
       const retry = await supabase
         .from("preset_keywords")
         .select("id, genre_id, keyword, match_type, specificity, tier")
-        .eq("user_id", user.id)
         .order("keyword");
       if (retry.error) return Response.json({ error: retry.error.message }, { status: 400 });
       resolvedKeywords = retry.data;
@@ -79,7 +76,7 @@ export async function GET() {
       ? /relation .*preset_competitor_asins.* does not exist/i.test(competitorAsinError.message)
         ? []
         : null
-      : competitorAsins ?? [];
+      : (competitorAsins ?? []);
     if (competitorAsinsList === null) {
       return Response.json({ error: competitorAsinError!.message }, { status: 400 });
     }

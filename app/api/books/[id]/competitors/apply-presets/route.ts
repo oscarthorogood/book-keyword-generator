@@ -29,21 +29,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const supabase = await supabaseServer();
 
-    const loaded = await loadBookWithSnapshot(supabase, bookId, user.id);
+    const loaded = await loadBookWithSnapshot(supabase, bookId);
     if (!loaded) return Response.json({ error: "Book not found" }, { status: 404 });
     const { snapshot, book } = loaded;
 
-    const [{ data: genreRows, error: genreError }, { data: presetRows, error: presetError }] = await Promise.all([
-      supabase.from("preset_genres").select("id, name, parent_id").eq("user_id", user.id),
-      supabase
-        .from("preset_competitor_asins")
-        .select("id, genre_id, competitor_asin, notes, tier")
-        .eq("user_id", user.id),
-    ]);
+    const [{ data: genreRows, error: genreError }, { data: presetRows, error: presetError }] =
+      await Promise.all([
+        supabase.from("preset_genres").select("id, name, parent_id"),
+        supabase
+          .from("preset_competitor_asins")
+          .select("id, genre_id, competitor_asin, notes, tier"),
+      ]);
     if (genreError) return Response.json({ error: genreError.message }, { status: 400 });
     if (presetError) return Response.json({ error: presetError.message }, { status: 400 });
 
-    const genres: PresetGenreRow[] = (genreRows ?? []).map((g) => ({ id: g.id, name: g.name, parentId: g.parent_id }));
+    const genres: PresetGenreRow[] = (genreRows ?? []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      parentId: g.parent_id,
+    }));
     const presetCompetitorAsins: PresetCompetitorAsinRow[] = (presetRows ?? []).map((pc) => ({
       id: pc.id,
       genreId: pc.genre_id,
@@ -76,7 +80,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Dedupe against ASINs already tracked for this book, and against the
     // book's own ASIN — a preset competitor ASIN can't be the seed book
     // itself.
-    const { data: existing } = await getCompetitorAsins(supabase, bookId, user.id);
+    const { data: existing } = await getCompetitorAsins(supabase, bookId);
     const existingAsins = new Set(existing.map((row) => row.competitor_asin.toUpperCase()));
     const ownAsin = (snapshot.asin ?? book.asin ?? "").toUpperCase();
 
@@ -119,12 +123,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Subscribe the book to every matched genre, so future edits to that
     // genre's preset competitor-ASIN list know to propagate here (idempotent
     // — a re-apply just re-affirms the subscription).
-    await supabase
-      .from("book_preset_competitor_asin_genres")
-      .upsert(
-        matchedGenres.map((g) => ({ book_id: bookId, genre_id: g.id, user_id: user.id })),
-        { onConflict: "book_id,genre_id", ignoreDuplicates: true }
-      );
+    await supabase.from("book_preset_competitor_asin_genres").upsert(
+      matchedGenres.map((g) => ({ book_id: bookId, genre_id: g.id, user_id: user.id })),
+      { onConflict: "book_id,genre_id", ignoreDuplicates: true }
+    );
 
     return Response.json({
       success: true,

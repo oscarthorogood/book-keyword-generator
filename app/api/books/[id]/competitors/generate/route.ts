@@ -76,14 +76,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const competitorCap = Math.min(requestedCap, MAX_COMPETITOR_CAP);
 
     const supabase = await supabaseServer();
-    const loaded = await loadBookWithSnapshot(supabase, bookId, user.id);
+    const loaded = await loadBookWithSnapshot(supabase, bookId);
     if (!loaded) return Response.json({ error: "Book not found" }, { status: 404 });
 
     const { snapshot, book } = loaded;
     if (!snapshot.capture?.ok) {
       return Response.json(
         {
-          error: "This book's Amazon metadata could not be read, so there's no competitor crawl to draw from. Re-fetch the metadata and try again.",
+          error:
+            "This book's Amazon metadata could not be read, so there's no competitor crawl to draw from. Re-fetch the metadata and try again.",
           needsRefresh: true,
         },
         { status: 422 }
@@ -114,7 +115,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       isKindleUnlimited: !!snapshot.isKindleUnlimited,
     });
 
-    const { data: existing } = await getCompetitorAsins(supabase, bookId, user.id);
+    const { data: existing } = await getCompetitorAsins(supabase, bookId);
     const existingAsins = new Set(existing.map((row) => row.competitor_asin.toUpperCase()));
     const ownAsin = (snapshot.asin ?? book.asin ?? "").toUpperCase();
 
@@ -123,9 +124,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // competitor_count (distinct source agreement) and mean_rank (average
     // position) per sql/17-competitor-asin-metadata.sql, the same shape as
     // aggregateReverseAsinRows' competitorCount/meanRank in lib/reverseAsin.ts.
-    const candidates = new Map<string, { notes: string | null; source: string; positions: number[] }>();
+    const candidates = new Map<
+      string,
+      { notes: string | null; source: string; positions: number[] }
+    >();
 
-    const addCandidate = (asinRaw: string | undefined, notes: string | null, source: string, position: number) => {
+    const addCandidate = (
+      asinRaw: string | undefined,
+      notes: string | null,
+      source: string,
+      position: number
+    ) => {
       const asin = asinRaw?.toUpperCase();
       if (!asin || !ASIN_PATTERN.test(asin) || asin === ownAsin || existingAsins.has(asin)) return;
       const entry = candidates.get(asin);
@@ -145,10 +154,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       addCandidate(asinRaw, "Related listing", "auto-crawl", i + 1);
     });
     (snapshot.frequentlyBoughtTogether ?? []).forEach((item, i) => {
-      addCandidate(item.asin, item.title ? `Frequently bought together — ${item.title}` : "Frequently bought together", "auto-crawl", i + 1);
+      addCandidate(
+        item.asin,
+        item.title ? `Frequently bought together — ${item.title}` : "Frequently bought together",
+        "auto-crawl",
+        i + 1
+      );
     });
     (snapshot.compareWithSimilar ?? []).forEach((item, i) => {
-      addCandidate(item.asin, item.title ? `Similar title — ${item.title}` : "Similar title", "auto-crawl", i + 1);
+      addCandidate(
+        item.asin,
+        item.title ? `Similar title — ${item.title}` : "Similar title",
+        "auto-crawl",
+        i + 1
+      );
     });
 
     const totalCrawled = candidates.size;
@@ -204,10 +223,12 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       compDiscovery,
     ] = await Promise.all([
       isAdsApiConfigured()
-        ? getAdsApiKeywordRecommendations(snapshot.asin ?? "", snapshot.marketplace).catch((err: Error) => {
-            console.error("[generate] Ads API recommendations failed:", err.message);
-            return [] as KeywordCandidate[];
-          })
+        ? getAdsApiKeywordRecommendations(snapshot.asin ?? "", snapshot.marketplace).catch(
+            (err: Error) => {
+              console.error("[generate] Ads API recommendations failed:", err.message);
+              return [] as KeywordCandidate[];
+            }
+          )
         : Promise.resolve([] as KeywordCandidate[]),
       getAutocompleteKeywordSet(autocompleteSeeds, snapshot.marketplace),
       getGoogleAutocompleteKeywordSet(autocompleteSeeds),
@@ -229,18 +250,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     // The Ads API is the one live source that can name an ASIN directly.
     const adsApiAsins = extractAsinCandidates(adsApiCandidates).asins;
-    adsApiAsins.forEach((asin, i) => addCandidate(asin, "Discovered via ads-api", "ads-api", i + 1));
+    adsApiAsins.forEach((asin, i) =>
+      addCandidate(asin, "Discovered via ads-api", "ads-api", i + 1)
+    );
 
     /** Persona queries worth a competitor search: comp/genre intents, not mood phrases. */
     const personaQueries = (candidatesList: KeywordCandidate[], origin: string): DiscoveryQuery[] =>
       candidatesList
-        .filter((candidate) => !candidate.intentSegment || COMPETITIVE_SEGMENTS.has(candidate.intentSegment))
+        .filter(
+          (candidate) =>
+            !candidate.intentSegment || COMPETITIVE_SEGMENTS.has(candidate.intentSegment)
+        )
         .slice(0, MAX_PERSONA_QUERIES)
         .map((candidate) => ({ query: candidate.text, origin }));
 
     const discoveryQueries: DiscoveryQuery[] = [
       // Genre/series seeds first: the proven baseline this route already used.
-      ...genreSeeds.slice(0, MAX_GENRE_SEED_QUERIES).map((query) => ({ query, origin: "genre-seed" })),
+      ...genreSeeds
+        .slice(0, MAX_GENRE_SEED_QUERIES)
+        .map((query) => ({ query, origin: "genre-seed" })),
       // Then the LLM's comp-finding queries and the names it identified — the
       // most targeted competitor queries available.
       ...compDiscovery.queries.map((query) => ({ query, origin: "comp-discovery" })),
@@ -249,9 +277,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       ...personaQueries(personaLlmCandidates, "persona-llm"),
       ...personaQueries(groqPersonaCandidates, "groq-persona"),
       // Autocomplete phrases last: broad, and there are a lot of them.
-      ...amazonAutocomplete.slice(0, MAX_AUTOCOMPLETE_QUERIES).map((c) => ({ query: c.text, origin: "amazon-autocomplete" })),
-      ...googleAutocomplete.slice(0, MAX_AUTOCOMPLETE_QUERIES).map((c) => ({ query: c.text, origin: "google-autocomplete" })),
-      ...youtubeAutocomplete.slice(0, MAX_AUTOCOMPLETE_QUERIES).map((c) => ({ query: c.text, origin: "youtube-autocomplete" })),
+      ...amazonAutocomplete
+        .slice(0, MAX_AUTOCOMPLETE_QUERIES)
+        .map((c) => ({ query: c.text, origin: "amazon-autocomplete" })),
+      ...googleAutocomplete
+        .slice(0, MAX_AUTOCOMPLETE_QUERIES)
+        .map((c) => ({ query: c.text, origin: "google-autocomplete" })),
+      ...youtubeAutocomplete
+        .slice(0, MAX_AUTOCOMPLETE_QUERIES)
+        .map((c) => ({ query: c.text, origin: "youtube-autocomplete" })),
       ...duckDuckGoAutocomplete
         .slice(0, MAX_AUTOCOMPLETE_QUERIES)
         .map((c) => ({ query: c.text, origin: "duckduckgo-autocomplete" })),
@@ -261,7 +295,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     // Metadata the providers returned alongside each ASIN — saves a
     // product-page fetch per row further down.
-    const discoveredMetadata = new Map<string, { title?: string; author?: string; price?: number }>();
+    const discoveredMetadata = new Map<
+      string,
+      { title?: string; author?: string; price?: number }
+    >();
     for (const found of discovery.discovered) {
       // Title/author first, then provenance in a trailing "Discovered via …"
       // segment: the keyword pipeline mines these notes for comparable names
@@ -322,13 +359,18 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // discovery provider gave us instead of a row of nulls.
     const selectedAsins = Array.from(selected.keys());
     const asinsToEnrich = [
-      ...selectedAsins.filter((asin) => !discoveredMetadata.get(asin)?.title || !discoveredMetadata.get(asin)?.author),
-      ...selectedAsins.filter((asin) => discoveredMetadata.get(asin)?.title && discoveredMetadata.get(asin)?.author),
+      ...selectedAsins.filter(
+        (asin) => !discoveredMetadata.get(asin)?.title || !discoveredMetadata.get(asin)?.author
+      ),
+      ...selectedAsins.filter(
+        (asin) => discoveredMetadata.get(asin)?.title && discoveredMetadata.get(asin)?.author
+      ),
     ].slice(0, MAX_METADATA_FETCHES);
 
-    const metadataByAsin = new Map<string, { title?: string; author?: string; price?: number; bsr?: number }>(
-      Array.from(discoveredMetadata.entries()).map(([asin, meta]) => [asin, { ...meta }])
-    );
+    const metadataByAsin = new Map<
+      string,
+      { title?: string; author?: string; price?: number; bsr?: number }
+    >(Array.from(discoveredMetadata.entries()).map(([asin, meta]) => [asin, { ...meta }]));
     // Discovery costs wall clock the old snapshot-only path didn't, so the
     // enrichment loop stops at a deadline rather than assuming 40 sequential
     // batches will fit. Whatever is left keeps its discovery metadata.
@@ -382,7 +424,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         if (!meta?.author) return true;
         const normalizedAuthor = meta.author.trim().toLowerCase();
         if (bookAuthor && normalizedAuthor === bookAuthor.trim().toLowerCase()) return false;
-        if (isApprovedAuthor(meta.author, bookAuthor, ownAsin) && existingAuthors.has(normalizedAuthor)) return false;
+        if (
+          isApprovedAuthor(meta.author, bookAuthor, ownAsin) &&
+          existingAuthors.has(normalizedAuthor)
+        )
+          return false;
         return true;
       })
       .map(([asin, data]) => {
@@ -404,7 +450,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           // Generation always lands in "archived" — "Run Filters" (or a
           // manual promotion) is what moves a row into active/paused/rejected.
           status: "archived" as const,
-          specificity: scoreAsinSpecificity({ title: meta?.title ?? null, author: meta?.author ?? null }, filterContext.anchors),
+          specificity: scoreAsinSpecificity(
+            { title: meta?.title ?? null, author: meta?.author ?? null },
+            filterContext.anchors
+          ),
           bid: computeCompetitorBid({
             price: meta?.price ?? null,
             bsr: meta?.bsr ?? null,
@@ -422,14 +471,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // A database from before sql/29-competitor-asin-specificity.sql has no
     // specificity column — retry without it rather than losing the whole run.
     if (error && /specificity/i.test(error.message)) {
-      console.error("[competitors generate] specificity column missing — apply sql/29-competitor-asin-specificity.sql:", error.message);
+      console.error(
+        "[competitors generate] specificity column missing — apply sql/29-competitor-asin-specificity.sql:",
+        error.message
+      );
       const rowsWithoutSpecificity = rows.map(({ specificity, ...row }) => {
         void specificity;
         return row;
       });
       ({ data, error } = await supabase
         .from("competitor_asins")
-        .upsert(rowsWithoutSpecificity, { onConflict: "book_id,competitor_asin", ignoreDuplicates: true })
+        .upsert(rowsWithoutSpecificity, {
+          onConflict: "book_id,competitor_asin",
+          ignoreDuplicates: true,
+        })
         .select("id"));
     }
 

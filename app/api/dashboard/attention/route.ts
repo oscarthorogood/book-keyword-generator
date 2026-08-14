@@ -23,31 +23,26 @@ export async function GET() {
 
     const supabase = await supabaseServer();
 
-    const [{ data: books, error: booksError }, { data: campaigns, error: campaignsError }] = await Promise.all([
-      fetchAllRows(
-        (from, to) =>
-          supabase
-            .from("books")
-            .select("id, title, metadata_json")
-            .eq("user_id", user.id)
-            .order("id")
-            .range(from, to),
-        { label: "dashboard/attention:books" }
-      ),
-      // Every campaign, not just failed ones: "this book has no campaigns"
-      // is decided by which book_ids appear here at all. Paged for the same
-      // reason — a truncated read would invent books with no campaigns.
-      fetchAllRows(
-        (from, to) =>
-          supabase
-            .from("campaigns")
-            .select("book_id, name, last_export_error")
-            .eq("user_id", user.id)
-            .order("id")
-            .range(from, to),
-        { label: "dashboard/attention:campaigns" }
-      ),
-    ]);
+    const [{ data: books, error: booksError }, { data: campaigns, error: campaignsError }] =
+      await Promise.all([
+        fetchAllRows(
+          (from, to) =>
+            supabase.from("books").select("id, title, metadata_json").order("id").range(from, to),
+          { label: "dashboard/attention:books" }
+        ),
+        // Every campaign, not just failed ones: "this book has no campaigns"
+        // is decided by which book_ids appear here at all. Paged for the same
+        // reason — a truncated read would invent books with no campaigns.
+        fetchAllRows(
+          (from, to) =>
+            supabase
+              .from("campaigns")
+              .select("book_id, name, last_export_error")
+              .order("id")
+              .range(from, to),
+          { label: "dashboard/attention:campaigns" }
+        ),
+      ]);
 
     if (booksError) return Response.json({ error: booksError.message }, { status: 400 });
     if (campaignsError) return Response.json({ error: campaignsError.message }, { status: 400 });

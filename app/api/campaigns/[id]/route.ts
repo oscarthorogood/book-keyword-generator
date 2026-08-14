@@ -24,13 +24,16 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .from("campaigns")
       .select("*")
       .eq("id", campaignId)
-      .eq("user_id", user.id)
       .maybeSingle();
     if (campaignError) return Response.json({ error: campaignError.message }, { status: 400 });
     if (!campaign) return Response.json({ error: "Campaign not found" }, { status: 404 });
 
     const [{ data: book }, { data: targets }, { data: results }] = await Promise.all([
-      supabase.from("books").select("id, title, author, asin").eq("id", campaign.book_id).maybeSingle(),
+      supabase
+        .from("books")
+        .select("id, title, author, asin")
+        .eq("id", campaign.book_id)
+        .maybeSingle(),
       supabase
         .from("campaign_targets")
         .select(

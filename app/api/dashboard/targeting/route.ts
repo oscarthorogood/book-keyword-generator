@@ -1,5 +1,9 @@
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
-import { computeTargetingSummary, type TargetingSourceRow, type TargetingTargetRow } from "@/lib/dashboardStats";
+import {
+  computeTargetingSummary,
+  type TargetingSourceRow,
+  type TargetingTargetRow,
+} from "@/lib/dashboardStats";
 
 export const runtime = "nodejs";
 
@@ -23,8 +27,8 @@ export async function GET(request: Request) {
     const bookId = new URL(request.url).searchParams.get("bookId");
     const supabase = await supabaseServer();
 
-    let keywordQuery = supabase.from("keywords").select("id, status, last_sales").eq("user_id", user.id);
-    let asinQuery = supabase.from("competitor_asins").select("id, status, last_sales").eq("user_id", user.id);
+    let keywordQuery = supabase.from("keywords").select("id, status, last_sales");
+    let asinQuery = supabase.from("competitor_asins").select("id, status, last_sales");
     if (bookId) {
       keywordQuery = keywordQuery.eq("book_id", bookId);
       asinQuery = asinQuery.eq("book_id", bookId);
@@ -35,8 +39,7 @@ export async function GET(request: Request) {
       asinQuery,
       supabase
         .from("campaign_targets")
-        .select("keyword_id, competitor_asin_id, is_negative, state")
-        .eq("user_id", user.id),
+        .select("keyword_id, competitor_asin_id, is_negative, state"),
     ]);
 
     for (const result of [keywordsRes, asinsRes, targetsRes]) {
@@ -58,7 +61,9 @@ export async function GET(request: Request) {
     if (bookId) {
       const bookIds = new Set([...keywords.map((k) => k.id), ...asins.map((a) => a.id)]);
       targets = targets.filter(
-        (t) => (t.keyword_id && bookIds.has(t.keyword_id)) || (t.competitor_asin_id && bookIds.has(t.competitor_asin_id))
+        (t) =>
+          (t.keyword_id && bookIds.has(t.keyword_id)) ||
+          (t.competitor_asin_id && bookIds.has(t.competitor_asin_id))
       );
     }
 

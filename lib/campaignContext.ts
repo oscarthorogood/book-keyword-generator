@@ -10,7 +10,11 @@
 import { loadBookWithSnapshot, type BookRecord } from "./bookStore";
 import type { CampaignBook, KeywordWithRollups } from "./campaignSelection";
 import { buildBookAnchors, type BookAnchors } from "./keywordAnchors";
-import { mergeNegatives, selectApplicableNegatives, type LibraryNegativeRow } from "./negativeKeywordLibrary";
+import {
+  mergeNegatives,
+  selectApplicableNegatives,
+  type LibraryNegativeRow,
+} from "./negativeKeywordLibrary";
 import type { NegativeKeyword } from "./negativeKeywords";
 import { matchGenresToBook } from "./presetKeywords";
 import type { CompetitorAsin, KeywordSource, MatchType } from "./types";
@@ -76,10 +80,9 @@ export interface CampaignContext {
 
 export async function loadCampaignContext(
   supabase: SupabaseClient,
-  bookId: string,
-  userId: string
+  bookId: string
 ): Promise<CampaignContext | null> {
-  const loaded = await loadBookWithSnapshot(supabase, bookId, userId);
+  const loaded = await loadBookWithSnapshot(supabase, bookId);
   if (!loaded) return null;
   const { book, snapshot } = loaded;
 
@@ -91,36 +94,42 @@ export async function loadCampaignContext(
     asin: book.asin,
   };
 
-  const [{ data: keywordRows }, { data: asinRows }, { data: siblingRows }, { data: libraryRows }, { data: genreRows }] =
-    await Promise.all([
-      supabase
-        .from("keywords")
-        .select(
-          "id, text, match_type, status, bid, specificity, source, rejection_reason, last_impressions, last_clicks, last_spend, last_sales, last_orders, results_updated_at"
-        )
-        .eq("book_id", bookId)
-        .eq("user_id", userId)
-        .in("status", ["active", "paused", "negative"]),
-      supabase
-        .from("competitor_asins")
-        .select(
-          "id, competitor_asin, status, bid, price, bsr, mean_rank, relationship, last_impressions, last_clicks, last_spend, last_sales, last_orders, results_updated_at"
-        )
-        .eq("book_id", bookId)
-        .eq("user_id", userId)
-        .in("status", ["active", "paused"]),
-      campaignBook.series_key
-        ? supabase
-            .from("books")
-            .select("id, author, title, series_key, asin")
-            .eq("user_id", userId)
-            .eq("series_key", campaignBook.series_key)
-        : Promise.resolve({ data: [] as CampaignBook[] }),
-      supabase.from("negative_keywords").select("keyword, match_type, scope, genre_id, book_id, reason").eq("user_id", userId),
-      supabase.from("preset_genres").select("id, name, parent_id").eq("user_id", userId),
-    ]);
+  const [
+    { data: keywordRows },
+    { data: asinRows },
+    { data: siblingRows },
+    { data: libraryRows },
+    { data: genreRows },
+  ] = await Promise.all([
+    supabase
+      .from("keywords")
+      .select(
+        "id, text, match_type, status, bid, specificity, source, rejection_reason, last_impressions, last_clicks, last_spend, last_sales, last_orders, results_updated_at"
+      )
+      .eq("book_id", bookId)
+      .in("status", ["active", "paused", "negative"]),
+    supabase
+      .from("competitor_asins")
+      .select(
+        "id, competitor_asin, status, bid, price, bsr, mean_rank, relationship, last_impressions, last_clicks, last_spend, last_sales, last_orders, results_updated_at"
+      )
+      .eq("book_id", bookId)
+      .in("status", ["active", "paused"]),
+    campaignBook.series_key
+      ? supabase
+          .from("books")
+          .select("id, author, title, series_key, asin")
+          .eq("series_key", campaignBook.series_key)
+      : Promise.resolve({ data: [] as CampaignBook[] }),
+    supabase
+      .from("negative_keywords")
+      .select("keyword, match_type, scope, genre_id, book_id, reason"),
+    supabase.from("preset_genres").select("id, name, parent_id"),
+  ]);
 
-  const activeKeywords = (keywordRows ?? []).filter((r): r is KeywordRow => r.status !== "negative");
+  const activeKeywords = (keywordRows ?? []).filter(
+    (r): r is KeywordRow => r.status !== "negative"
+  );
   const bank: KeywordWithRollups[] = activeKeywords.map((row) => ({
     id: row.id,
     text: row.text,
@@ -144,7 +153,11 @@ export async function loadCampaignContext(
     const rollupByKeywordId = new Map(
       (rollups ?? []).map((r) => [
         r.keyword_id as string,
-        { lifetimeClicks: r.lifetime_clicks as number | null, lifetimeSpend: r.lifetime_spend as number | null, lifetimeOrders: r.lifetime_orders as number | null },
+        {
+          lifetimeClicks: r.lifetime_clicks as number | null,
+          lifetimeSpend: r.lifetime_spend as number | null,
+          lifetimeOrders: r.lifetime_orders as number | null,
+        },
       ])
     );
     for (const keyword of bank) {
@@ -178,7 +191,11 @@ export async function loadCampaignContext(
     const asinRollupById = new Map(
       (asinRollups ?? []).map((r) => [
         r.competitor_asin_id as string,
-        { lifetimeClicks: r.lifetime_clicks as number | null, lifetimeSpend: r.lifetime_spend as number | null, lifetimeOrders: r.lifetime_orders as number | null },
+        {
+          lifetimeClicks: r.lifetime_clicks as number | null,
+          lifetimeSpend: r.lifetime_spend as number | null,
+          lifetimeOrders: r.lifetime_orders as number | null,
+        },
       ])
     );
     for (const row of asinRowList) {
@@ -218,7 +235,9 @@ export async function loadCampaignContext(
     relationship: (row.relationship ?? "rival") as CompetitorAsin["relationship"],
   }));
 
-  const siblingBooks: CampaignBook[] = ((siblingRows ?? []) as CampaignBook[]).filter((b) => b.id !== campaignBook.id);
+  const siblingBooks: CampaignBook[] = ((siblingRows ?? []) as CampaignBook[]).filter(
+    (b) => b.id !== campaignBook.id
+  );
 
   // Same starter + library negative merge as app/api/books/[id]/keywords/export/route.ts.
   const bookNegatives: NegativeKeyword[] = (keywordRows ?? [])
@@ -230,8 +249,14 @@ export async function loadCampaignContext(
     }));
   let negatives = bookNegatives;
   if (libraryRows) {
-    const genres = (genreRows ?? []).map((g) => ({ id: g.id, name: g.name, parentId: g.parent_id }));
-    const matchedGenreIds = new Set(matchGenresToBook(genres, snapshot.genreTerms).map((g) => g.id));
+    const genres = (genreRows ?? []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      parentId: g.parent_id,
+    }));
+    const matchedGenreIds = new Set(
+      matchGenresToBook(genres, snapshot.genreTerms).map((g) => g.id)
+    );
     const applicable: LibraryNegativeRow[] = libraryRows.map((row) => ({
       keyword: row.keyword,
       matchType: row.match_type as "phrase" | "exact",
@@ -240,7 +265,10 @@ export async function loadCampaignContext(
       bookId: row.book_id,
       reason: row.reason,
     }));
-    negatives = mergeNegatives(bookNegatives, selectApplicableNegatives(applicable, bookId, matchedGenreIds));
+    negatives = mergeNegatives(
+      bookNegatives,
+      selectApplicableNegatives(applicable, bookId, matchedGenreIds)
+    );
   }
 
   const anchors = buildBookAnchors({

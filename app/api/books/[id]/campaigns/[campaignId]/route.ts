@@ -5,7 +5,12 @@ import { describeExportFailure } from "@/lib/campaignExportError";
 import { loadCampaignContext } from "@/lib/campaignContext";
 import { toCsv } from "@/lib/bulksheetSchema";
 import { buildUploadXlsx } from "@/lib/bulksheetXlsx";
-import { diffCampaignTargets, targetKey, type DiffCampaignTarget, type DiffedCampaignTarget } from "@/lib/campaignDiff";
+import {
+  diffCampaignTargets,
+  targetKey,
+  type DiffCampaignTarget,
+  type DiffedCampaignTarget,
+} from "@/lib/campaignDiff";
 import { sendCampaignActivityEmail } from "@/lib/email";
 import { isOpenRouterConfigured } from "@/lib/llmClient";
 import { rebalanceCampaignTargets, type RebalanceCandidate } from "@/lib/campaignRebalance";
@@ -85,7 +90,10 @@ function buildSnapshot(rows: CampaignTargetRow[]): DiffCampaignTarget[] {
  * Discovery has multiple ad groups and buildUpdateReviewRows/
  * buildUpdateUploadRows take one ad group for the whole diffed batch.
  */
-export async function PATCH(request: Request, { params }: { params: Promise<{ id: string; campaignId: string }> }) {
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string; campaignId: string }> }
+) {
   try {
     const { id: bookId, campaignId } = await params;
 
@@ -99,7 +107,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       .select("id, book_id, campaign_type, name, daily_budget, status, amazon_campaign_id")
       .eq("id", campaignId)
       .eq("book_id", bookId)
-      .eq("user_id", user.id)
       .maybeSingle();
     if (campaignError) return Response.json({ error: campaignError.message }, { status: 400 });
     if (!campaign) return Response.json({ error: "Campaign not found" }, { status: 404 });
@@ -127,14 +134,30 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const campaignType = campaign.campaign_type as CampaignType;
     const adGroup = SINGLE_AD_GROUP_LABEL[campaignType];
     if (!adGroup) {
-      return Response.json({ error: "Update Campaign isn't supported for Auto Discovery." }, { status: 400 });
+      return Response.json(
+        { error: "Update Campaign isn't supported for Auto Discovery." },
+        { status: 400 }
+      );
     }
 
-    const context = await loadCampaignContext(supabase, bookId, user.id);
+    const context = await loadCampaignContext(supabase, bookId);
     if (!context) return Response.json({ error: "Book not found" }, { status: 404 });
-    const { book, campaignBook, bank, asinBank, siblingBooks, negatives, anchors, performanceById: rawPerformanceById } = context;
+    const {
+      book,
+      campaignBook,
+      bank,
+      asinBank,
+      siblingBooks,
+      negatives,
+      anchors,
+      performanceById: rawPerformanceById,
+    } = context;
 
-    const { data: bookAcosRow } = await supabase.from("books").select("target_acos").eq("id", bookId).eq("user_id", user.id).maybeSingle();
+    const { data: bookAcosRow } = await supabase
+      .from("books")
+      .select("target_acos")
+      .eq("id", bookId)
+      .maybeSingle();
     const targetAcos = typeof bookAcosRow?.target_acos === "number" ? bookAcosRow.target_acos : 0.3;
 
     const plans = await buildCampaignPlans({
@@ -190,7 +213,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         });
       }
 
-      const currentIds = new Set(plan.targets.map((t) => t.keywordId ?? t.competitorAsinId).filter(Boolean));
+      const currentIds = new Set(
+        plan.targets.map((t) => t.keywordId ?? t.competitorAsinId).filter(Boolean)
+      );
       const currentTexts = new Set(plan.targets.map((t) => t.text));
 
       const readyKeywords: RebalanceCandidate[] = bank
@@ -201,7 +226,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           matchType: k.matchType,
           bid: bidById.get(k.id) ?? null,
           adGroup,
-          score: scoreForRank(k, anchors) + (rawPerformanceById.get(k.id)?.lifetimeOrders ?? 0) * 10,
+          score:
+            scoreForRank(k, anchors) + (rawPerformanceById.get(k.id)?.lifetimeOrders ?? 0) * 10,
         }));
       const readyAsins: RebalanceCandidate[] = asinBank
         .filter((a) => a.status === "active" && !currentIds.has(a.id))
@@ -213,7 +239,10 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           adGroup,
           score: -(a.mean_rank ?? 999) + (rawPerformanceById.get(a.id)?.lifetimeOrders ?? 0) * 10,
         }));
-      const ready = campaignType === "rival_asin_offensive" || campaignType === "catalog_cross_sell" ? readyAsins : readyKeywords;
+      const ready =
+        campaignType === "rival_asin_offensive" || campaignType === "catalog_cross_sell"
+          ? readyAsins
+          : readyKeywords;
 
       const rebalanced = await rebalanceCampaignTargets({
         campaignName: campaign.name,
@@ -238,9 +267,12 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const { data: previousTargetRows, error: previousTargetsError } = await supabase
       .from("campaign_targets")
-      .select("id, keyword_id, competitor_asin_id, target_text, match_type, targeting_expression, bid, state, operation, is_negative, created_at")
+      .select(
+        "id, keyword_id, competitor_asin_id, target_text, match_type, targeting_expression, bid, state, operation, is_negative, created_at"
+      )
       .eq("campaign_id", campaignId);
-    if (previousTargetsError) return Response.json({ error: previousTargetsError.message }, { status: 400 });
+    if (previousTargetsError)
+      return Response.json({ error: previousTargetsError.message }, { status: 400 });
 
     const snapshot = buildSnapshot((previousTargetRows ?? []) as CampaignTargetRow[]);
     const diffed = diffCampaignTargets(snapshot, current);
@@ -262,17 +294,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     try {
       const xlsxBuffer = await buildUploadXlsx(uploadRows);
       const [uploadResult, reviewResult] = await Promise.all([
+        supabase.storage.from("bulksheets").upload(uploadPath, xlsxBuffer, {
+          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
         supabase.storage
           .from("bulksheets")
-          .upload(uploadPath, xlsxBuffer, {
-            contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          }),
-        supabase.storage.from("bulksheets").upload(reviewPath, reviewCsv, { contentType: "text/csv" }),
+          .upload(reviewPath, reviewCsv, { contentType: "text/csv" }),
       ]);
       if (uploadResult.error) throw new Error(uploadResult.error.message);
       if (reviewResult.error) throw new Error(reviewResult.error.message);
 
-      const { data: signedUpload } = await supabase.storage.from("bulksheets").createSignedUrl(uploadPath, 3600);
+      const { data: signedUpload } = await supabase.storage
+        .from("bulksheets")
+        .createSignedUrl(uploadPath, 3600);
 
       const { error: insertTargetsError } = await supabase.from("campaign_targets").insert(
         diffed.map((t) => ({
@@ -313,10 +347,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
           to: user.email,
           bookTitle: book.title ?? bookId,
           action: "updated",
-          changeLines: diffed.map((t: DiffedCampaignTarget) => `${t.operation}: ${t.text}${t.bid != null ? ` (bid $${t.bid.toFixed(2)})` : ""}`),
+          changeLines: diffed.map(
+            (t: DiffedCampaignTarget) =>
+              `${t.operation}: ${t.text}${t.bid != null ? ` (bid $${t.bid.toFixed(2)})` : ""}`
+          ),
           attachments: [
-            { filename: "campaign-update-upload.xlsx", content: Buffer.from(xlsxBuffer).toString("base64") },
-            { filename: "campaign-update-review.csv", content: Buffer.from(reviewCsv).toString("base64") },
+            {
+              filename: "campaign-update-upload.xlsx",
+              content: Buffer.from(xlsxBuffer).toString("base64"),
+            },
+            {
+              filename: "campaign-update-review.csv",
+              content: Buffer.from(reviewCsv).toString("base64"),
+            },
           ],
         });
       } catch (emailErr) {
@@ -330,7 +373,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         downloadUrl: signedUpload?.signedUrl ?? null,
       });
     } catch (uploadErr) {
-      const message = describeExportFailure(uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed");
+      const message = describeExportFailure(
+        uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed"
+      );
       await supabase
         .from("campaigns")
         .update({ last_export_error: message, last_export_error_at: new Date().toISOString() })

@@ -16,16 +16,16 @@ export async function GET() {
 
     const supabase = await supabaseServer();
 
-    const [{ data: campaigns, error: campaignsError }, { data: results, error: resultsError }] = await Promise.all([
-      supabase
-        .from("campaigns")
-        .select(
-          "id, book_id, export_batch_id, campaign_type, name, daily_budget, currency, status, amazon_campaign_id, operation, updated_at, bulksheet_path, last_export_error, last_export_error_at"
-        )
-        .eq("user_id", user.id)
-        .order("updated_at", { ascending: false }),
-      supabase.from("campaign_results").select("campaign_id, spend, sales").eq("user_id", user.id),
-    ]);
+    const [{ data: campaigns, error: campaignsError }, { data: results, error: resultsError }] =
+      await Promise.all([
+        supabase
+          .from("campaigns")
+          .select(
+            "id, book_id, export_batch_id, campaign_type, name, daily_budget, currency, status, amazon_campaign_id, operation, updated_at, bulksheet_path, last_export_error, last_export_error_at"
+          )
+          .order("updated_at", { ascending: false }),
+        supabase.from("campaign_results").select("campaign_id, spend, sales"),
+      ]);
     if (campaignsError) return Response.json({ error: campaignsError.message }, { status: 400 });
     if (resultsError) return Response.json({ error: resultsError.message }, { status: 400 });
 

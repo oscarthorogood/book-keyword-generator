@@ -272,6 +272,7 @@ Supabase SQL Editor:
 | `30-bulksheets-bucket-mime-types.sql` | **Required if campaign export fails with "mime type text/csv is not supported"** — dashboard-created buckets default `allowed_mime_types` to a single type, which blocks the review CSV upload that runs alongside the xlsx upload |
 | `31-total-keywords-after-archived-generation.sql` | **Required if a book's keyword count reads far too low (often 0) after generating** — `08` excluded archived rows from `books.total_keywords` back when archived meant "removed by hand"; generation now lands every row archived, so the count has to exclude only `rejected` |
 | `34-open-signup-usage-tracking.sql` | **Required for open sign-up** — adds `sign_in_count`/`last_signed_in_at` to `access_requests` and flips any leftover `pending` rows to `approved` now that there's no approval queue |
+| `35-shared-workspace-data-access.sql` | **Required for shared team data** — replaces every table's per-owner RLS policy with an authenticated-user check, so every signed-in account reads and edits the same books/keywords/campaigns/presets instead of only its own |
 
 Without `08`, generating keywords fails on the status check constraint: the
 pipeline writes rejected and paused rows alongside the active ones.

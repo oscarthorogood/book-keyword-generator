@@ -2,8 +2,8 @@
  * DB helper for the competitor-ASIN subsystem — a typed wrapper over
  * `competitor_asins`, mirroring the pattern lib/bookStore.ts uses for
  * `books`: it takes the request-scoped Supabase client
- * (lib/supabaseServer.ts) so RLS enforces the user scoping, with `user_id`
- * also filtered explicitly for defense in depth.
+ * (lib/supabaseServer.ts) and relies on RLS for authorization — every
+ * signed-in user shares the same book/ASIN data (sql/35).
  *
  * This file used to carry the full CRUD surface for both `competitor_asins`
  * and `competitor_keywords`, serving the hand-editable ASIN manager. That
@@ -20,15 +20,13 @@ const COMPETITOR_ASIN_COLUMNS =
   "id, book_id, competitor_asin, source, notes, status, bid, rejection_reason, rejected_by_filter, title, author, price, bsr, competitor_count, mean_rank, specificity, created_at, updated_at";
 export async function getCompetitorAsins(
   supabase: SupabaseClient,
-  bookId: string,
-  userId: string
+  bookId: string
 ): Promise<{ data: CompetitorAsin[]; error: string | null }> {
   const { data, error } = await withClockSkewRetry(() =>
     supabase
       .from("competitor_asins")
       .select(COMPETITOR_ASIN_COLUMNS)
       .eq("book_id", bookId)
-      .eq("user_id", userId)
       .order("created_at", { ascending: false })
   );
 

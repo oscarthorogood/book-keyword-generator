@@ -49,26 +49,27 @@ export async function GET() {
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const supabase = await supabaseServer();
-    const [{ data: keywordRows, error: keywordError }, { data: competitorRows, error: competitorError }] =
-      await Promise.all([
-        // Paged: per-source contribution is counted by grouping every row, so
-        // a truncated read would under-report how much each source has added.
-        fetchAllRows(
-          (from, to) =>
-            supabase.from("keywords").select("source, created_at").eq("user_id", user.id).order("id").range(from, to),
-          { label: "sources:keywords" }
-        ),
-        fetchAllRows(
-          (from, to) =>
-            supabase
-              .from("competitor_asins")
-              .select("source, created_at")
-              .eq("user_id", user.id)
-              .order("id")
-              .range(from, to),
-          { label: "sources:competitor_asins" }
-        ),
-      ]);
+    const [
+      { data: keywordRows, error: keywordError },
+      { data: competitorRows, error: competitorError },
+    ] = await Promise.all([
+      // Paged: per-source contribution is counted by grouping every row, so
+      // a truncated read would under-report how much each source has added.
+      fetchAllRows(
+        (from, to) =>
+          supabase.from("keywords").select("source, created_at").order("id").range(from, to),
+        { label: "sources:keywords" }
+      ),
+      fetchAllRows(
+        (from, to) =>
+          supabase
+            .from("competitor_asins")
+            .select("source, created_at")
+            .order("id")
+            .range(from, to),
+        { label: "sources:competitor_asins" }
+      ),
+    ]);
 
     if (keywordError) return Response.json({ error: keywordError.message }, { status: 400 });
     if (competitorError) return Response.json({ error: competitorError.message }, { status: 400 });
@@ -79,7 +80,11 @@ export async function GET() {
     const sources: SourceUsageRow[] = SOURCE_REGISTRY.map((def) => {
       const kw = keywordUsage.get(def.id);
       const comp = competitorUsage.get(def.id);
-      const lastUsedAt = [kw?.lastUsedAt, comp?.lastUsedAt].filter((d): d is string => !!d).sort().pop() ?? null;
+      const lastUsedAt =
+        [kw?.lastUsedAt, comp?.lastUsedAt]
+          .filter((d): d is string => !!d)
+          .sort()
+          .pop() ?? null;
       return {
         id: def.id,
         label: def.label,

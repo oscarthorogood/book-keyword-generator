@@ -11,10 +11,7 @@ export const maxDuration = 60;
  * The escape hatch for a capture that hit a bot check at creation time, or
  * for a book whose product page has since changed.
  */
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: bookId } = await params;
 
@@ -24,7 +21,7 @@ export async function POST(
     }
 
     const supabase = await supabaseServer();
-    const loaded = await loadBookWithSnapshot(supabase, bookId, user.id, { forceRefresh: true });
+    const loaded = await loadBookWithSnapshot(supabase, bookId, { forceRefresh: true });
 
     if (!loaded) {
       return Response.json({ error: "Book not found" }, { status: 404 });

@@ -26,7 +26,10 @@ interface CampaignTargetRow {
  * update) route uses, but read-only and exposed for the UI to list rather
  * than folded straight into a diff.
  */
-export async function GET(_request: Request, { params }: { params: Promise<{ id: string; campaignId: string }> }) {
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string; campaignId: string }> }
+) {
   try {
     const { id: bookId, campaignId } = await params;
 
@@ -40,7 +43,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       .select("id, book_id, campaign_type, status")
       .eq("id", campaignId)
       .eq("book_id", bookId)
-      .eq("user_id", user.id)
       .maybeSingle();
     if (campaignError) return Response.json({ error: campaignError.message }, { status: 400 });
     if (!campaign) return Response.json({ error: "Campaign not found" }, { status: 404 });

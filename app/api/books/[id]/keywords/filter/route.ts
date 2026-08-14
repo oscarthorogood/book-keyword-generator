@@ -61,7 +61,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const supabase = await supabaseServer();
-    const loaded = await loadBookWithSnapshot(supabase, bookId, user.id);
+    const loaded = await loadBookWithSnapshot(supabase, bookId);
     if (!loaded) return Response.json({ error: "Book not found" }, { status: 404 });
 
     const { snapshot } = loaded;
@@ -83,7 +83,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .from("keywords")
       .select("id, text, source, status, match_type, bid, category, specificity")
       .eq("book_id", bookId)
-      .eq("user_id", user.id)
       .in("status", REFILTERABLE_STATUSES);
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
@@ -168,7 +167,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     let aiRanked = false;
     if (isAiRankingConfigured()) {
       const familySearchTerms = genreFamilySearchTerms(snapshot.genreFamilies ?? []);
-      const genreSeedTerms = [...(snapshot.genreTerms ?? []).slice(0, 8), ...familySearchTerms.slice(0, 4)].filter(Boolean);
+      const genreSeedTerms = [
+        ...(snapshot.genreTerms ?? []).slice(0, 8),
+        ...familySearchTerms.slice(0, 4),
+      ].filter(Boolean);
 
       const activeOutcomes = outcomes.filter((o) => o.status === "active");
 
@@ -226,7 +228,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           // Anything the AI explicitly "dropped" (i.e. not in reranked) gets paused
           const rerankedTexts = new Set([...rerankedTropes, ...rerankedComp].map((c) => c.text));
           for (const outcome of activeOutcomes) {
-            if (!rerankedTexts.has(outcome.text) && (tropesHead.some(c => c.text === outcome.text) || compHead.some(c => c.text === outcome.text))) {
+            if (
+              !rerankedTexts.has(outcome.text) &&
+              (tropesHead.some((c) => c.text === outcome.text) ||
+                compHead.some((c) => c.text === outcome.text))
+            ) {
               outcome.status = "paused";
               outcome.reason = "Dropped by AI relevance filter as off-topic for this book.";
               outcome.filter = "aiRelevance";
@@ -323,8 +329,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           text: update.text,
           specificity: update.specificity,
         })
-        .eq("id", update.id)
-        .eq("user_id", user.id);
+        .eq("id", update.id);
 
       if (updateError) {
         // A database from before sql/09-keyword-specificity.sql has no
@@ -339,8 +344,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
               rejected_by_filter: update.filter,
               text: update.text,
             })
-            .eq("id", update.id)
-            .eq("user_id", user.id);
+            .eq("id", update.id);
           if (!retryError) return true;
         }
         // A rewrite can collide with a keyword that already exists at the new

@@ -163,7 +163,11 @@ function buildSnapshotCandidates(
     ...buildDescriptionPhraseCandidates(snapshot.description),
   ];
 
-  const reviewText = [...snapshot.reviewSnippets, ...snapshot.compReviewSnippets, ...snapshot.reviewBodies];
+  const reviewText = [
+    ...snapshot.reviewSnippets,
+    ...snapshot.compReviewSnippets,
+    ...snapshot.reviewBodies,
+  ];
   const reviewLanguageCandidates = mergeKeywordCandidates(
     mineReviewLanguage(reviewText),
     buildReviewGenreIndicators(reviewText, themeTerms)
@@ -241,10 +245,7 @@ function countBy<T extends string>(values: T[]): Record<string, number> {
  * POST /api/books/[id]/keywords/generate
  * Body: { keyTropes?: string[], knownTags?: string[], keywordCategories?: KeywordCategory[], sources?: KeywordSource[], defaultBid?: number, resultCap?: number }
  */
-export async function POST(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id: bookId } = await params;
 
@@ -254,7 +255,7 @@ export async function POST(
     }
 
     const supabase = await supabaseServer();
-    const loaded = await loadBookWithSnapshot(supabase, bookId, user.id);
+    const loaded = await loadBookWithSnapshot(supabase, bookId);
 
     if (!loaded) {
       return Response.json({ error: "Book not found" }, { status: 404 });
@@ -276,24 +277,29 @@ export async function POST(
     const body = await request.json().catch(() => ({}));
     const asStrings = (value: unknown, limit: number): string[] =>
       Array.isArray(value)
-        ? value.filter((v): v is string => typeof v === "string" && v.trim().length > 0).slice(0, limit)
+        ? value
+            .filter((v): v is string => typeof v === "string" && v.trim().length > 0)
+            .slice(0, limit)
         : [];
 
     const keyTropes = asStrings(body.keyTropes, 50);
     const knownTags = asStrings(body.knownTags, 50);
     const keywordCategories: KeywordCategory[] = Array.isArray(body.keywordCategories)
-      ? body.keywordCategories.filter((c: unknown): c is KeywordCategory =>
-          typeof c === "string" && ALL_KEYWORD_CATEGORIES.includes(c as KeywordCategory)
+      ? body.keywordCategories.filter(
+          (c: unknown): c is KeywordCategory =>
+            typeof c === "string" && ALL_KEYWORD_CATEGORIES.includes(c as KeywordCategory)
         )
       : ALL_KEYWORD_CATEGORIES;
     const enabledSources = new Set<KeywordSource>(
       Array.isArray(body.sources)
-        ? body.sources.filter((s: unknown): s is KeywordSource =>
-            typeof s === "string" && ALL_KEYWORD_SOURCES.includes(s as KeywordSource)
+        ? body.sources.filter(
+            (s: unknown): s is KeywordSource =>
+              typeof s === "string" && ALL_KEYWORD_SOURCES.includes(s as KeywordSource)
           )
         : ALL_KEYWORD_SOURCES
     );
-    const defaultBid = typeof body.defaultBid === "number" && body.defaultBid > 0 ? body.defaultBid : 0.5;
+    const defaultBid =
+      typeof body.defaultBid === "number" && body.defaultBid > 0 ? body.defaultBid : 0.5;
     // How many results this run keeps, per ad group (tropes vs. comp names) —
     // user-facing cap from the Generate form. Never exceeds the book-library
     // hard ceiling (BOOK_KEYWORD_MAX/BOOK_COMP_NAME_MAX) regardless of what's
@@ -306,7 +312,9 @@ export async function POST(
     const compNameCap = Math.min(requestedCap, BOOK_COMP_NAME_MAX);
 
     const asRecordArray = (value: unknown): Array<Record<string, unknown>> =>
-      Array.isArray(value) ? value.filter((v): v is Record<string, unknown> => !!v && typeof v === "object") : [];
+      Array.isArray(value)
+        ? value.filter((v): v is Record<string, unknown> => !!v && typeof v === "object")
+        : [];
     const searchTermReportRows = asRecordArray(body.searchTermReportRows);
     const reverseAsinRows = asRecordArray(body.reverseAsinRows);
     const decodoRows = asRecordArray(body.decodoRows);
@@ -318,7 +326,7 @@ export async function POST(
     // independent Supabase round trips overlap with the candidate-building
     // work below (and, for the ASIN rows, with the live source fetches)
     // instead of serializing in front of it.
-    const existingAsinRowsPromise = getCompetitorAsins(supabase, bookId, user.id);
+    const existingAsinRowsPromise = getCompetitorAsins(supabase, bookId);
 
     const filterContext = buildFilterContext({
       title: snapshot.title,
@@ -359,7 +367,10 @@ export async function POST(
       ...snapshot.firecrawlSeeds,
     ];
 
-    const serpApiSeeds = [...genreSeedTerms.slice(0, 3), ...(snapshot.seriesName ? [snapshot.seriesName] : [])];
+    const serpApiSeeds = [
+      ...genreSeedTerms.slice(0, 3),
+      ...(snapshot.seriesName ? [snapshot.seriesName] : []),
+    ];
 
     // Shared context for both persona-LLM sources. They previously got title
     // + author only, against a prompt that hardcoded a crime-fiction reader —
@@ -396,10 +407,12 @@ export async function POST(
       existingAsinRowsResult,
     ] = await Promise.all([
       isAdsApiConfigured()
-        ? getAdsApiKeywordRecommendations(snapshot.asin, snapshot.marketplace).catch((err: Error) => {
-            console.error("[generate] Ads API recommendations failed:", err.message);
-            return [] as KeywordCandidate[];
-          })
+        ? getAdsApiKeywordRecommendations(snapshot.asin, snapshot.marketplace).catch(
+            (err: Error) => {
+              console.error("[generate] Ads API recommendations failed:", err.message);
+              return [] as KeywordCandidate[];
+            }
+          )
         : Promise.resolve([] as KeywordCandidate[]),
       getAutocompleteKeywordSet(seedTerms, snapshot.marketplace),
       getGoogleAutocompleteKeywordSet(seedTerms),
@@ -476,11 +489,11 @@ export async function POST(
             parseDecodoRows(decodoRows)
           )
         : liveDecodoRows.length > 0
-        ? buildDecodoCandidates(
-            { title: snapshot.title, author: snapshot.author, seriesName: snapshot.seriesName },
-            liveDecodoRows
-          )
-        : [];
+          ? buildDecodoCandidates(
+              { title: snapshot.title, author: snapshot.author, seriesName: snapshot.seriesName },
+              liveDecodoRows
+            )
+          : [];
 
     const zenrowsCandidates =
       liveZenrowsRows.length > 0
@@ -536,7 +549,9 @@ export async function POST(
     );
 
     const merged = mergeKeywordCandidates(
-      ...ALL_KEYWORD_SOURCES.filter((s) => enabledSources.has(s)).map((s) => sourceCandidateGroups[s] ?? []),
+      ...ALL_KEYWORD_SOURCES.filter((s) => enabledSources.has(s)).map(
+        (s) => sourceCandidateGroups[s] ?? []
+      ),
       categorized.filter((c) => c.sources.some((source) => enabledSources.has(source)))
     );
 
@@ -722,10 +737,14 @@ export async function POST(
       .select();
 
     const needsFilterMigration =
-      !!insertError && /rejection_reason|rejected_by_filter|status_check|rejected/i.test(insertError.message);
+      !!insertError &&
+      /rejection_reason|rejected_by_filter|status_check|rejected/i.test(insertError.message);
 
     if (needsFilterMigration) {
-      console.error("[generate] filter columns missing — apply sql/08-keyword-filter-status.sql:", insertError!.message);
+      console.error(
+        "[generate] filter columns missing — apply sql/08-keyword-filter-status.sql:",
+        insertError!.message
+      );
       const legacyRows = passedRows.map(({ rejection_reason, rejected_by_filter, ...row }) => {
         void rejection_reason;
         void rejected_by_filter;
@@ -740,7 +759,10 @@ export async function POST(
     const needsSpecificityMigration = !!insertError && /specificity/i.test(insertError.message);
 
     if (needsSpecificityMigration) {
-      console.error("[generate] specificity column missing — apply sql/09-keyword-specificity.sql:", insertError!.message);
+      console.error(
+        "[generate] specificity column missing — apply sql/09-keyword-specificity.sql:",
+        insertError!.message
+      );
       const sourceRows = needsFilterMigration
         ? passedRows.map(({ rejection_reason, rejected_by_filter, ...row }) => {
             void rejection_reason;
@@ -754,7 +776,10 @@ export async function POST(
       });
       ({ data: inserted, error: insertError } = await supabase
         .from("keywords")
-        .upsert(rowsWithoutSpecificity, { onConflict: "book_id,text,match_type", ignoreDuplicates: true })
+        .upsert(rowsWithoutSpecificity, {
+          onConflict: "book_id,text,match_type",
+          ignoreDuplicates: true,
+        })
         .select());
     }
 

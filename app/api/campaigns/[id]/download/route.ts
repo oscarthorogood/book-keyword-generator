@@ -19,18 +19,23 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
     .from("campaigns")
     .select("bulksheet_path")
     .eq("id", campaignId)
-    .eq("user_id", user.id)
     .maybeSingle();
   if (error) return Response.json({ error: error.message }, { status: 400 });
   if (!campaign?.bulksheet_path) {
-    return Response.json({ error: "No bulksheet has been exported for this campaign yet." }, { status: 404 });
+    return Response.json(
+      { error: "No bulksheet has been exported for this campaign yet." },
+      { status: 404 }
+    );
   }
 
   const { data: signed, error: signError } = await supabase.storage
     .from("bulksheets")
     .createSignedUrl(campaign.bulksheet_path, 3600);
   if (signError || !signed?.signedUrl) {
-    return Response.json({ error: signError?.message ?? "Could not sign the bulksheet URL." }, { status: 500 });
+    return Response.json(
+      { error: signError?.message ?? "Could not sign the bulksheet URL." },
+      { status: 500 }
+    );
   }
 
   return Response.redirect(signed.signedUrl, 302);

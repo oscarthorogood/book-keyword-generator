@@ -5,10 +5,7 @@ import { supabaseServer } from "@/lib/supabaseServer";
  * GET /api/books/[id]
  * Get a specific book
  */
-export async function GET(
-  request: Request,
-  { params }: { params: Promise<{ id: string }> }
-) {
+export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
   try {
     const { id } = await params;
 
@@ -37,7 +34,6 @@ export async function GET(
       `
       )
       .eq("id", id)
-      .eq("user_id", user.id)
       .single();
 
     // sql/13-match-type-profile.sql not applied yet — retry without the
@@ -59,16 +55,12 @@ export async function GET(
         `
         )
         .eq("id", id)
-        .eq("user_id", user.id)
         .single());
       if (book) book = { ...book, match_type_profile: "mixed" };
     }
 
     if (bookError || !book) {
-      return Response.json(
-        { error: "Book not found" },
-        { status: 404 }
-      );
+      return Response.json({ error: "Book not found" }, { status: 404 });
     }
 
     return Response.json({
@@ -108,12 +100,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       .from("books")
       .update(updates)
       .eq("id", id)
-      .eq("user_id", user.id)
       .select()
       .single();
 
     if (error || !book) {
-      return Response.json({ error: error?.message || "Book not found" }, { status: error ? 400 : 404 });
+      return Response.json(
+        { error: error?.message || "Book not found" },
+        { status: error ? 400 : 404 }
+      );
     }
 
     return Response.json({ success: true, book });

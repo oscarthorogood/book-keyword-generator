@@ -7,10 +7,11 @@ export const runtime = "nodejs";
 /**
  * GET /api/competitors/all
  *
- * Every competitor ASIN across every one of the user's books, grouped by
- * ASIN (competitor-ASIN enhancements task 3) — mirrors GET /api/keywords/all
- * exactly, for ASINs instead of keyword text. Read-only — editing still
- * happens in each book's own Competitors tab, linked to from here.
+ * Every competitor ASIN across every book in the shared workspace (sql/35),
+ * grouped by ASIN (competitor-ASIN enhancements task 3) — mirrors
+ * GET /api/keywords/all exactly, for ASINs instead of keyword text.
+ * Read-only — editing still happens in each book's own Competitors tab,
+ * linked to from here.
  */
 export async function GET() {
   try {
@@ -21,8 +22,7 @@ export async function GET() {
 
     const { data: books, error: booksError } = await supabase
       .from("books")
-      .select("id, title, author")
-      .eq("user_id", user.id);
+      .select("id, title, author");
     if (booksError) return Response.json({ error: booksError.message }, { status: 400 });
 
     const bookById = new Map((books ?? []).map((b) => [b.id, b]));
@@ -36,12 +36,12 @@ export async function GET() {
           .select(
             "book_id, competitor_asin, source, status, bid, title, author, price, bsr, competitor_count, mean_rank"
           )
-          .eq("user_id", user.id)
           .order("id")
           .range(from, to),
       { label: "competitors/all" }
     );
-    if (competitorsError) return Response.json({ error: competitorsError.message }, { status: 400 });
+    if (competitorsError)
+      return Response.json({ error: competitorsError.message }, { status: 400 });
 
     const rows = (competitors ?? [])
       .filter((c) => bookById.has(c.book_id))

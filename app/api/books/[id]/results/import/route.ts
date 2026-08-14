@@ -12,7 +12,8 @@ import type { Marketplace } from "@/lib/types";
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-const CAMPAIGN_RESULTS_UPSERT_CONFLICT = "book_id,campaign_name,ad_group_name,keyword_text,match_type,report_start,report_end";
+const CAMPAIGN_RESULTS_UPSERT_CONFLICT =
+  "book_id,campaign_name,ad_group_name,keyword_text,match_type,report_start,report_end";
 const CAMPAIGN_RESULTS_BATCH_SIZE = 500;
 
 /**
@@ -47,7 +48,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .from("books")
       .select("id, marketplace")
       .eq("id", bookId)
-      .eq("user_id", user.id)
       .single();
     if (bookError || !book) return Response.json({ error: "Book not found" }, { status: 404 });
 
@@ -59,8 +59,16 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!(file instanceof File)) {
       return Response.json({ error: "file is required (multipart/form-data)" }, { status: 400 });
     }
-    if (typeof reportStart !== "string" || !reportStart || typeof reportEnd !== "string" || !reportEnd) {
-      return Response.json({ error: "reportStart and reportEnd (YYYY-MM-DD) are required" }, { status: 400 });
+    if (
+      typeof reportStart !== "string" ||
+      !reportStart ||
+      typeof reportEnd !== "string" ||
+      !reportEnd
+    ) {
+      return Response.json(
+        { error: "reportStart and reportEnd (YYYY-MM-DD) are required" },
+        { status: 400 }
+      );
     }
 
     const bytes = new Uint8Array(await file.arrayBuffer());
@@ -75,7 +83,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .maybeSingle();
     if (existingImport) {
       return Response.json(
-        { error: "This exact file was already imported for this book.", importId: existingImport.id },
+        {
+          error: "This exact file was already imported for this book.",
+          importId: existingImport.id,
+        },
         { status: 409 }
       );
     }
@@ -94,7 +105,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .select("id")
       .single();
     if (insertImportError || !importRow) {
-      return Response.json({ error: insertImportError?.message ?? "Failed to start import" }, { status: 400 });
+      return Response.json(
+        { error: insertImportError?.message ?? "Failed to start import" },
+        { status: 400 }
+      );
     }
     const importId: string = importRow.id;
 
@@ -103,17 +117,24 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       const reportRows = parseSearchTermReportRows(rawRows);
       const aggregated = aggregateByTarget(reportRows);
 
-      const [{ data: keywordRows }, { data: asinRows }, { data: campaignRows }] = await Promise.all([
-        supabase.from("keywords").select("id, text, match_type").eq("book_id", bookId).eq("user_id", user.id),
-        supabase.from("competitor_asins").select("id, competitor_asin").eq("book_id", bookId).eq("user_id", user.id),
-        supabase.from("campaigns").select("id, name").eq("book_id", bookId).eq("user_id", user.id),
-      ]);
+      const [{ data: keywordRows }, { data: asinRows }, { data: campaignRows }] = await Promise.all(
+        [
+          supabase.from("keywords").select("id, text, match_type").eq("book_id", bookId),
+          supabase.from("competitor_asins").select("id, competitor_asin").eq("book_id", bookId),
+          supabase.from("campaigns").select("id, name").eq("book_id", bookId),
+        ]
+      );
 
       const context: MatchContext = {
         keywordsByTextAndMatchType: new Map(
-          (keywordRows ?? []).map((k) => [`${normalizeKeyword(k.text)}::${k.match_type}`, k.id as string])
+          (keywordRows ?? []).map((k) => [
+            `${normalizeKeyword(k.text)}::${k.match_type}`,
+            k.id as string,
+          ])
         ),
-        competitorAsinsByAsin: new Map((asinRows ?? []).map((a) => [a.competitor_asin.toUpperCase(), a.id as string])),
+        competitorAsinsByAsin: new Map(
+          (asinRows ?? []).map((a) => [a.competitor_asin.toUpperCase(), a.id as string])
+        ),
         campaignsByName: new Map((campaignRows ?? []).map((c) => [c.name, c.id as string])),
       };
 
@@ -169,7 +190,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return Response.json({ import: completedImport });
     } catch (processingError) {
       const message = processingError instanceof Error ? processingError.message : "Unknown error";
-      await supabase.from("result_imports").update({ status: "failed", error: message }).eq("id", importId);
+      await supabase
+        .from("result_imports")
+        .update({ status: "failed", error: message })
+        .eq("id", importId);
       return Response.json({ error: message, importId }, { status: 500 });
     }
   } catch (err) {
@@ -242,12 +266,16 @@ async function refreshLastPeriodCache(
   const asinSums = sumsByEntity("competitorAsinId");
 
   const updates: Array<{ table: "keywords" | "competitor_asins"; id: string; sums: EntitySums }> = [
-    ...Array.from(keywordSums.entries()).map(
-      ([id, sums]) => ({ table: "keywords" as const, id, sums })
-    ),
-    ...Array.from(asinSums.entries()).map(
-      ([id, sums]) => ({ table: "competitor_asins" as const, id, sums })
-    ),
+    ...Array.from(keywordSums.entries()).map(([id, sums]) => ({
+      table: "keywords" as const,
+      id,
+      sums,
+    })),
+    ...Array.from(asinSums.entries()).map(([id, sums]) => ({
+      table: "competitor_asins" as const,
+      id,
+      sums,
+    })),
   ];
 
   const failures = await mapWithConcurrency(

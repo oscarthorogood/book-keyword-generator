@@ -27,9 +27,9 @@ export async function POST(
       .select("id, status")
       .eq("id", recId)
       .eq("book_id", bookId)
-      .eq("user_id", user.id)
       .single();
-    if (recError || !rec) return Response.json({ error: "Recommendation not found" }, { status: 404 });
+    if (recError || !rec)
+      return Response.json({ error: "Recommendation not found" }, { status: 404 });
     if (rec.status !== "pending") {
       return Response.json({ error: `Recommendation is already ${rec.status}` }, { status: 409 });
     }

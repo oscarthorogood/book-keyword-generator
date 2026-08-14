@@ -39,7 +39,6 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       .from("campaigns")
       .select("id, name")
       .eq("book_id", bookId)
-      .eq("user_id", user.id)
       .not("bulksheet_path", "is", null)
       .order("name");
     if (campaignsError) return Response.json({ error: campaignsError.message }, { status: 400 });
@@ -49,7 +48,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     const { data: targetRows, error: targetsError } = await supabase
       .from("campaign_targets")
-      .select("campaign_id, keyword_id, competitor_asin_id, target_text, match_type, bid, state, is_negative, created_at")
+      .select(
+        "campaign_id, keyword_id, competitor_asin_id, target_text, match_type, bid, state, is_negative, created_at"
+      )
       .in(
         "campaign_id",
         campaigns.map((c) => c.id)
