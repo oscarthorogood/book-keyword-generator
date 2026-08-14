@@ -5,91 +5,6 @@
  * unit-testable without a database.
  */
 
-function countBy<T>(items: T[], key: (item: T) => string): Record<string, number> {
-  const counts: Record<string, number> = {};
-  for (const item of items) {
-    const k = key(item);
-    counts[k] = (counts[k] ?? 0) + 1;
-  }
-  return counts;
-}
-
-export interface CampaignSummaryCampaignRow {
-  id: string;
-  status: string;
-}
-
-export interface CampaignSummaryResultRow {
-  campaign_id: string | null;
-  spend: number | string;
-  sales: number | string;
-  orders: number;
-  clicks: number;
-  impressions: number;
-  report_start: string;
-  report_end: string;
-}
-
-export interface SpendPeriod {
-  reportStart: string;
-  reportEnd: string;
-  spend: number;
-  sales: number;
-}
-
-export interface CampaignSummary {
-  totalCampaigns: number;
-  byStatus: Record<string, number>;
-  totals: { spend: number; sales: number; orders: number; clicks: number; impressions: number };
-  /** Blended ACOS across every imported result period (spend / sales), null with no sales yet. */
-  acos: number | null;
-  /** Spend/sales grouped by report period, oldest first, for the spend-over-time widget. */
-  spendByPeriod: SpendPeriod[];
-}
-
-/**
- * Cross-book campaign spend/ACOS summary — the dashboard "Campaign
- * performance" widget. Sums every `campaign_results` row the user has ever
- * imported (campaigns spec §2.3), grouped by report period for the
- * spend-over-time bars and rolled up into lifetime totals + blended ACOS.
- */
-export function summarizeCampaigns(
-  campaigns: CampaignSummaryCampaignRow[],
-  results: CampaignSummaryResultRow[]
-): CampaignSummary {
-  const totals = { spend: 0, sales: 0, orders: 0, clicks: 0, impressions: 0 };
-  const byPeriod = new Map<string, SpendPeriod>();
-
-  for (const r of results) {
-    const spend = Number(r.spend ?? 0);
-    const sales = Number(r.sales ?? 0);
-    totals.spend += spend;
-    totals.sales += sales;
-    totals.orders += r.orders ?? 0;
-    totals.clicks += r.clicks ?? 0;
-    totals.impressions += r.impressions ?? 0;
-
-    const key = `${r.report_start}_${r.report_end}`;
-    const existing = byPeriod.get(key);
-    if (existing) {
-      existing.spend += spend;
-      existing.sales += sales;
-    } else {
-      byPeriod.set(key, { reportStart: r.report_start, reportEnd: r.report_end, spend, sales });
-    }
-  }
-
-  return {
-    totalCampaigns: campaigns.length,
-    byStatus: countBy(campaigns, (c) => c.status),
-    totals,
-    acos: totals.sales > 0 ? totals.spend / totals.sales : null,
-    spendByPeriod: Array.from(byPeriod.values()).sort(
-      (a, b) => new Date(a.reportStart).getTime() - new Date(b.reportStart).getTime()
-    ),
-  };
-}
-
 export interface AttentionBookRow {
   id: string;
   title: string;
@@ -109,6 +24,7 @@ export interface AttentionItem {
   bookTitle: string;
   reason: AttentionReason;
   detail: string;
+  coverImageUrl?: string;
 }
 
 const ATTENTION_REASON_LABEL: Record<AttentionReason, string> = {
@@ -141,13 +57,14 @@ export function booksNeedingAttention(
   const booksWithCampaigns = new Set(campaigns.map((c) => c.book_id));
 
   for (const book of books) {
-    const snapshot = (book.metadata_json ?? {}) as { capture?: { ok?: boolean } };
+    const snapshot = (book.metadata_json ?? {}) as { coverImageUrl?: string; capture?: { ok?: boolean } };
     if (snapshot.capture?.ok === false) {
       items.push({
         bookId: book.id,
         bookTitle: book.title,
         reason: "capture_issue",
         detail: ATTENTION_REASON_LABEL.capture_issue,
+        coverImageUrl: snapshot.coverImageUrl,
       });
     }
     if (!booksWithCampaigns.has(book.id)) {
@@ -156,6 +73,7 @@ export function booksNeedingAttention(
         bookTitle: book.title,
         reason: "no_campaigns",
         detail: ATTENTION_REASON_LABEL.no_campaigns,
+        coverImageUrl: snapshot.coverImageUrl,
       });
     }
   }
@@ -163,11 +81,13 @@ export function booksNeedingAttention(
   for (const campaign of campaigns) {
     if (!campaign.last_export_error) continue;
     const book = bookById.get(campaign.book_id);
+    const snapshot = (book?.metadata_json ?? {}) as { coverImageUrl?: string };
     items.push({
       bookId: campaign.book_id,
       bookTitle: book?.title ?? "Unknown book",
       reason: "export_failed",
       detail: `${campaign.name}: ${campaign.last_export_error}`,
+      coverImageUrl: snapshot.coverImageUrl,
     });
   }
 
@@ -219,4 +139,76 @@ export function recentBooksSummary(books: RecentBookRow[], limit = 5): RecentBoo
         completeness: snapshot.capture?.completeness ?? null,
       };
     });
+}
+
+export interface TargetingSourceRow {
+  id: string;
+  status: string;
+  /** keywords.last_sales / competitor_asins.last_sales — cached from the latest results import (sql/24). */
+  lastSales: number | string | null;
+}
+
+export interface TargetingTargetRow {
+  keyword_id: string | null;
+  competitor_asin_id: string | null;
+  is_negative: boolean;
+  state: string;
+}
+
+export interface TargetingFunnelStage {
+  label: string;
+  value: number;
+  note: string;
+}
+
+export interface TargetingSummary {
+  stages: TargetingFunnelStage[];
+  /** Share of live targets that converted at least one sale, 0-100; null with no live targets yet. */
+  accuracyPct: number | null;
+  convertingCount: number;
+  liveCount: number;
+}
+
+/**
+ * The "Keyword & ASIN funnel" + "Targeting accuracy" widgets (Dashboard,
+ * Book detail): how far research narrows down to what's actually live, and
+ * how much of what's live is working. Every stage is a strict subset of the
+ * one before it, deduped by the underlying keyword/ASIN id since the same
+ * target can be selected into more than one campaign.
+ */
+export function computeTargetingSummary(
+  keywords: TargetingSourceRow[],
+  competitorAsins: TargetingSourceRow[],
+  targets: TargetingTargetRow[]
+): TargetingSummary {
+  const sources = [...keywords, ...competitorAsins];
+  const salesById = new Map(sources.map((s) => [s.id, Number(s.lastSales ?? 0)]));
+
+  const researched = sources.length;
+  const passedFilter = sources.filter((s) => s.status === "active").length;
+
+  const idOf = (t: TargetingTargetRow) => t.keyword_id ?? t.competitor_asin_id;
+  const positiveTargets = targets.filter((t) => !t.is_negative);
+  const selectedIds = new Set(positiveTargets.map(idOf).filter((id): id is string => !!id));
+  const liveIds = new Set(
+    positiveTargets
+      .filter((t) => t.state === "enabled")
+      .map(idOf)
+      .filter((id): id is string => !!id)
+  );
+
+  const liveCount = liveIds.size;
+  const convertingCount = Array.from(liveIds).filter((id) => (salesById.get(id) ?? 0) > 0).length;
+
+  return {
+    stages: [
+      { label: "Researched", value: researched, note: "from reviews, comps, Q&A" },
+      { label: "Passed relevance filter", value: passedFilter, note: "duplicate/off-topic removed" },
+      { label: "Selected into campaigns", value: selectedIds.size, note: "scored + budget-fit" },
+      { label: "Live on Amazon", value: liveCount, note: "exported & uploaded" },
+    ],
+    accuracyPct: liveCount > 0 ? Math.round((convertingCount / liveCount) * 100) : null,
+    convertingCount,
+    liveCount,
+  };
 }

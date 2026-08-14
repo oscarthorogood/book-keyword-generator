@@ -66,11 +66,18 @@ export default function AttentionWidget() {
           <p className="meta-line">Nothing needs attention right now.</p>
         </div>
       ) : (
-        <ul className="mt-3 divide-y" style={{ borderColor: "var(--line)" }}>
+        <ul className="mt-2" style={{ borderColor: "var(--line)" }}>
           {items.slice(0, 8).map((item, i) => (
-            <li key={`${item.bookId}-${item.reason}-${i}`} className="flex items-start gap-3 py-2">
-              <span className={`badge ${REASON_BADGE[item.reason]} mt-0.5 shrink-0`}>
-                {REASON_BADGE_TEXT[item.reason]}
+            <li
+              key={`${item.bookId}-${item.reason}-${i}`}
+              className="flex items-center gap-3 border-t py-3 first:border-t-0"
+              style={{ borderColor: "var(--bg-muted)" }}
+            >
+              <span className="avatar avatar-sm shrink-0 overflow-hidden">
+                {item.coverImageUrl ? (
+                  // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
+                  <img src={item.coverImageUrl} alt="" className="h-full w-full object-cover" />
+                ) : null}
               </span>
               <div className="min-w-0 flex-1">
                 <Link href={`/books/${item.bookId}`} className="cell-primary block truncate">
@@ -78,6 +85,7 @@ export default function AttentionWidget() {
                 </Link>
                 <p className="meta-line truncate text-xs">{item.detail}</p>
               </div>
+              <span className={`badge ${REASON_BADGE[item.reason]} shrink-0`}>{REASON_BADGE_TEXT[item.reason]}</span>
             </li>
           ))}
         </ul>

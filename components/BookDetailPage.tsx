@@ -3,6 +3,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertTriangle, ArrowLeft, Loader2, RefreshCw } from "lucide-react";
 import BookCampaigns from "./BookCampaigns";
+import BookStatTiles from "./BookStatTiles";
+import BookRecentActivity from "./BookRecentActivity";
+import TargetingFunnelWidget from "./dashboard/TargetingFunnelWidget";
+import TargetingAccuracyWidget from "./dashboard/TargetingAccuracyWidget";
 
 /** The slice of the stored snapshot (books.metadata_json) this page renders. */
 export interface BookSnapshotView {
@@ -189,16 +193,6 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
   const snapshot = book.metadata_json ?? {};
   const captureFailed = snapshot.capture ? !snapshot.capture.ok || snapshot.capture.blocked : true;
   const genreTerms = snapshot.genreTerms ?? [];
-  const mineable =
-    (snapshot.competitors?.length ?? 0) +
-    (snapshot.compTitles?.length ?? 0) +
-    (snapshot.reviewSnippets?.length ?? 0) +
-    (snapshot.reviewBodies?.length ?? 0) +
-    (snapshot.compReviewSnippets?.length ?? 0) +
-    (snapshot.qnaQuestions?.length ?? 0) +
-    (snapshot.goodreadsTags?.length ?? 0) +
-    (snapshot.openLibrarySubjects?.length ?? 0) +
-    (snapshot.googleBooksCategories?.length ?? 0);
 
   const facts: Array<[string, string]> = [
     ["ASIN", book.asin],
@@ -263,9 +257,9 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
         </div>
       </header>
 
-      <div className="page-body flex-1 space-y-6">
+      <div className="page-body flex-1">
         {captureFailed && (
-          <div className="alert alert-error" role="alert">
+          <div className="alert alert-error mb-6" role="alert">
             <AlertTriangle size={20} className="mt-0.5 shrink-0" />
             <div>
               <p className="alert-title">Amazon didn&apos;t return this book&apos;s product page</p>
@@ -278,97 +272,94 @@ export default function BookDetailPage({ bookId, onBack }: BookDetailPageProps) 
         )}
 
         {metaError && (
-          <div className="alert alert-error" role="alert">
+          <div className="alert alert-error mb-6" role="alert">
             <AlertTriangle size={20} className="mt-0.5 shrink-0" />
             <p className="flex-1">{metaError}</p>
           </div>
         )}
 
         {metaNotice && (
-          <div className="alert alert-success" aria-live="polite">
+          <div className="alert alert-success mb-6" aria-live="polite">
             <p className="flex-1">{metaNotice}</p>
           </div>
         )}
 
-        {/* Campaigns first — this is what the page is for. */}
-        <BookCampaigns bookId={bookId} metadataReady={!captureFailed} onChanged={reloadBook} />
+        <BookStatTiles bookId={bookId} genreTermCount={genreTerms.length} rating={snapshot.rating} />
 
-        {/* Captured metadata — the exact listing every campaign is built from. */}
-        <section className="card">
-          <div className="mb-5">
-            <p className="card-title">Listing this book&apos;s campaigns are built from</p>
-            <p className="meta-line mt-1">
-              Captured {formatDate(snapshot.capturedAt)} · {mineable} data points available to campaign generation
-              {snapshot.capture?.completeness !== undefined &&
-                ` · ${Math.round(snapshot.capture.completeness * 100)}% of listing fields read`}
-            </p>
-          </div>
+        <div className="grid gap-6" style={{ gridTemplateColumns: "1.4fr 1fr", alignItems: "start" }}>
+          <div className="flex flex-col gap-6">
+            {/* Campaigns first — this is what the page is for. */}
+            <BookCampaigns bookId={bookId} metadataReady={!captureFailed} onChanged={reloadBook} />
 
-          <div className="flex flex-wrap gap-6">
-            {snapshot.coverImageUrl && (
-              // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
-              <img
-                src={snapshot.coverImageUrl}
-                alt={`${book.title} cover`}
-                className="w-24 shrink-0 rounded-md border object-contain"
-                style={{ borderColor: "var(--line)" }}
-              />
-            )}
+            {/* Captured metadata — the exact listing every campaign is built from. */}
+            <section className="card">
+              <div className="mb-4 flex flex-wrap items-baseline justify-between gap-3">
+                <p className="card-title">Listing this book&apos;s campaigns are built from</p>
+                <p className="whitespace-nowrap text-xs" style={{ color: "var(--text-placeholder)" }}>
+                  Captured {formatDate(snapshot.capturedAt)}
+                  {snapshot.capture?.completeness !== undefined &&
+                    ` · ${Math.round(snapshot.capture.completeness * 100)}% of fields read`}
+                </p>
+              </div>
 
-            <div className="min-w-[260px] flex-1 space-y-5">
-              <dl className="grid grid-cols-2 gap-x-6 gap-y-4 md:grid-cols-3">
-                {facts.map(([label, value]) => (
-                  <div key={label}>
-                    <dt className="text-xs" style={{ color: "var(--text-secondary)" }}>
-                      {label}
-                    </dt>
-                    <dd className="mt-0.5 text-sm font-medium" style={{ color: "var(--text-primary)" }}>
-                      {value}
-                    </dd>
-                  </div>
-                ))}
-              </dl>
+              <div className="flex gap-4">
+                {snapshot.coverImageUrl && (
+                  // eslint-disable-next-line @next/next/no-img-element -- Amazon CDN host isn't in next.config images.remotePatterns
+                  <img
+                    src={snapshot.coverImageUrl}
+                    alt={`${book.title} cover`}
+                    className="w-14 shrink-0 rounded-md border object-contain"
+                    style={{ borderColor: "var(--line)" }}
+                  />
+                )}
 
-              {genreTerms.length > 0 && (
-                <div>
-                  <p className="mb-2 text-xs" style={{ color: "var(--text-secondary)" }}>
-                    Genre vocabulary campaign targeting is seeded from
-                  </p>
-                  <div className="flex flex-wrap gap-2">
-                    {genreTerms.slice(0, 14).map((term) => (
-                      <span key={term} className="chip-tag">
-                        {term}
-                      </span>
+                <div className="min-w-0 flex-1 space-y-3">
+                  <div className="flex flex-wrap gap-x-5 gap-y-1.5">
+                    {facts.map(([label, value]) => (
+                      <div key={label} className="flex items-baseline gap-1.5">
+                        <span className="text-xs" style={{ color: "var(--text-placeholder)" }}>
+                          {label}
+                        </span>
+                        <span className="text-sm font-medium" style={{ color: "var(--text-primary)" }}>
+                          {value}
+                        </span>
+                      </div>
                     ))}
                   </div>
-                </div>
-              )}
 
-              {snapshot.categoryPath && snapshot.categoryPath.length > 0 && (
-                <div>
-                  <p className="mb-1 text-xs" style={{ color: "var(--text-secondary)" }}>
-                    Amazon category path
-                  </p>
-                  <p className="text-sm" style={{ color: "var(--text-ui)" }}>
-                    {snapshot.categoryPath.join(" › ")}
-                  </p>
-                </div>
-              )}
+                  {snapshot.description && (
+                    <p className="line-clamp-2 text-sm" style={{ color: "var(--text-secondary)" }}>
+                      {snapshot.description}
+                    </p>
+                  )}
 
-              {snapshot.description && (
-                <div>
-                  <p className="mb-1 text-xs" style={{ color: "var(--text-secondary)" }}>
-                    Description
-                  </p>
-                  <p className="line-clamp-4 text-sm" style={{ color: "var(--text-secondary)" }}>
-                    {snapshot.description}
-                  </p>
+                  {snapshot.categoryPath && snapshot.categoryPath.length > 0 && (
+                    <p className="text-xs" style={{ color: "var(--text-placeholder)" }}>
+                      {snapshot.categoryPath.join(" › ")}
+                    </p>
+                  )}
+
+                  {genreTerms.length > 0 && (
+                    <div className="flex flex-wrap gap-1.5">
+                      {genreTerms.slice(0, 4).map((term) => (
+                        <span key={term} className="chip-tag-accent">
+                          {term}
+                        </span>
+                      ))}
+                      {genreTerms.length > 4 && <span className="badge badge-gray">+{genreTerms.length - 4} more</span>}
+                    </div>
+                  )}
                 </div>
-              )}
-            </div>
+              </div>
+            </section>
           </div>
-        </section>
 
+          <div className="flex flex-col gap-6">
+            <TargetingAccuracyWidget bookId={bookId} variant="sm" />
+            <TargetingFunnelWidget bookId={bookId} variant="compact" />
+            <BookRecentActivity bookId={bookId} capturedAt={snapshot.capturedAt} />
+          </div>
+        </div>
       </div>
     </div>
   );

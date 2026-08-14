@@ -1,11 +1,18 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Search } from "lucide-react";
+import { AlertTriangle, Boxes, CheckCircle2, Search, Tags } from "lucide-react";
 import Link from "next/link";
 import type { AggregatedKeywordRow } from "@/lib/allKeywordsAggregate";
 import type { AggregatedCompetitorRow } from "@/lib/allCompetitorsAggregate";
 import { isCannibalized } from "@/lib/cannibalization";
+import { StatTilesRow } from "./StatTiles";
+
+const KIND_FILTERS = [
+  { key: "all", label: "All" },
+  { key: "keyword", label: "Keywords" },
+  { key: "asin", label: "ASINs" },
+] as const;
 
 interface BookRef {
   id: string;
@@ -30,13 +37,6 @@ interface TargetRow {
 }
 
 const PAGE_SIZE = 100;
-const SPECIFICITY_LABELS: Record<number, string> = {
-  1: "Broad",
-  2: "Somewhat broad",
-  3: "Medium",
-  4: "Somewhat specific",
-  5: "Very specific",
-};
 
 function labelForSource(source: string): string {
   return source.replace(/-/g, " ");
@@ -206,147 +206,193 @@ export default function TargetsDatabasePage() {
           </div>
         ) : (
           <>
-            <div className="mb-4 flex flex-wrap items-center gap-3">
-              <div className="relative min-w-[200px] flex-1">
-                <Search size={20} className="input-icon" aria-hidden="true" />
-                <label className="sr-only" htmlFor="targets-search">
-                  Search keywords and ASINs
-                </label>
-                <input
-                  id="targets-search"
-                  type="search"
-                  value={search}
-                  onChange={(e) => {
-                    setSearch(e.target.value);
-                    resetPaging();
-                  }}
-                  placeholder="Search keyword, ASIN or title"
-                  className="input input-with-icon"
-                />
-              </div>
-
-              <select
-                value={kindFilter}
-                onChange={(e) => {
-                  setKindFilter(e.target.value as "all" | "keyword" | "asin");
-                  resetPaging();
-                }}
-                className="input w-auto"
-                aria-label="Filter by type"
-              >
-                <option value="all">Keywords + ASINs</option>
-                <option value="keyword">Keywords only</option>
-                <option value="asin">ASINs only</option>
-              </select>
-
-              <select
-                value={bookFilter}
-                onChange={(e) => {
-                  setBookFilter(e.target.value);
-                  resetPaging();
-                }}
-                className="input w-auto"
-                aria-label="Filter by book"
-              >
-                <option value="all">All books</option>
-                {books.map((book) => (
-                  <option key={book.id} value={book.id}>
-                    {book.title}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={statusFilter}
-                onChange={(e) => {
-                  setStatusFilter(e.target.value);
-                  resetPaging();
-                }}
-                className="input w-auto"
-                aria-label="Filter by status"
-              >
-                <option value="all">Any status</option>
-                {statuses.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-
-              <select
-                value={sourceFilter}
-                onChange={(e) => {
-                  setSourceFilter(e.target.value);
-                  resetPaging();
-                }}
-                className="input w-auto"
-                aria-label="Filter by source"
-              >
-                <option value="all">All sources</option>
-                {sources.map((source) => (
-                  <option key={source} value={source}>
-                    {labelForSource(source)}
-                  </option>
-                ))}
-              </select>
-            </div>
-
-            <p className="mb-3 text-sm" style={{ color: "var(--text-secondary)" }}>
-              Showing {Math.min(page.length, filtered.length)} of {filtered.length}
-            </p>
+            <StatTilesRow
+              tiles={[
+                { label: "Total researched", value: rows.length, icon: Tags },
+                { label: "Keywords", value: keywordCount, icon: Search },
+                { label: "ASINs", value: asinCount, icon: Boxes },
+                { label: "Live", value: rows.filter((r) => r.statuses.includes("active")).length, icon: CheckCircle2 },
+              ]}
+            />
 
             <div className="table-wrap overflow-x-auto">
+              <div
+                className="flex flex-wrap items-center gap-3 border-b p-4"
+                style={{ borderColor: "var(--line)", background: "var(--bg-subtle)" }}
+              >
+                <div className="relative w-full sm:w-80">
+                  <Search size={20} className="input-icon" aria-hidden="true" />
+                  <label className="sr-only" htmlFor="targets-search">
+                    Search keywords and ASINs
+                  </label>
+                  <input
+                    id="targets-search"
+                    type="search"
+                    value={search}
+                    onChange={(e) => {
+                      setSearch(e.target.value);
+                      resetPaging();
+                    }}
+                    placeholder="Search keyword, ASIN or title"
+                    className="input input-with-icon"
+                    style={{ background: "var(--panel)" }}
+                  />
+                </div>
+
+                <div className="flex flex-wrap gap-1.5">
+                  {KIND_FILTERS.map((f) => (
+                    <button
+                      key={f.key}
+                      type="button"
+                      onClick={() => {
+                        setKindFilter(f.key);
+                        resetPaging();
+                      }}
+                      style={{
+                        borderRadius: "var(--radius-md)",
+                        padding: "6px 12px",
+                        fontSize: "0.8125rem",
+                        fontWeight: 600,
+                        cursor: "pointer",
+                        border: kindFilter === f.key ? "1px solid var(--primary-solid)" : "1px solid var(--line-strong)",
+                        background: kindFilter === f.key ? "var(--primary-solid)" : "var(--panel)",
+                        color: kindFilter === f.key ? "var(--primary-fg)" : "var(--text-ui)",
+                      }}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                <select
+                  value={bookFilter}
+                  onChange={(e) => {
+                    setBookFilter(e.target.value);
+                    resetPaging();
+                  }}
+                  className="input input-sm w-auto"
+                  aria-label="Filter by book"
+                >
+                  <option value="all">All books</option>
+                  {books.map((book) => (
+                    <option key={book.id} value={book.id}>
+                      {book.title}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={statusFilter}
+                  onChange={(e) => {
+                    setStatusFilter(e.target.value);
+                    resetPaging();
+                  }}
+                  className="input input-sm w-auto"
+                  aria-label="Filter by status"
+                >
+                  <option value="all">Any status</option>
+                  {statuses.map((status) => (
+                    <option key={status} value={status}>
+                      {status}
+                    </option>
+                  ))}
+                </select>
+
+                <select
+                  value={sourceFilter}
+                  onChange={(e) => {
+                    setSourceFilter(e.target.value);
+                    resetPaging();
+                  }}
+                  className="input input-sm w-auto"
+                  aria-label="Filter by source"
+                >
+                  <option value="all">All sources</option>
+                  {sources.map((source) => (
+                    <option key={source} value={source}>
+                      {labelForSource(source)}
+                    </option>
+                  ))}
+                </select>
+
+                <p className="ml-auto text-sm" style={{ color: "var(--text-secondary)" }}>
+                  Showing {Math.min(page.length, filtered.length)} of {filtered.length}
+                </p>
+              </div>
+
               <table className="table table-dense">
                 <thead>
                   <tr>
+                    <th scope="col">Term / ASIN</th>
                     <th scope="col">Type</th>
-                    <th scope="col">Target</th>
                     <th scope="col">Books</th>
+                    <th scope="col">Relevance</th>
                     <th scope="col">Status</th>
-                    <th scope="col" className="hidden xl:table-cell">
-                      Specificity
-                    </th>
                     <th scope="col" className="hidden xl:table-cell">
                       Source
                     </th>
                   </tr>
                 </thead>
                 <tbody>
-                  {page.map((row) => (
-                    <tr key={row.key}>
-                      <td>
-                        <span className="badge badge-gray">{row.kind === "keyword" ? "Keyword" : "ASIN"}</span>
-                      </td>
-                      <td>
-                        <p className="cell-primary">
-                          <span className={row.kind === "asin" ? "font-mono" : undefined}>{row.target}</span>
-                          {row.shared && (
-                            <span
-                              className="badge badge-warning ml-2"
-                              title="Active on 2+ books — competes against itself in Amazon's auction"
-                            >
-                              Shared
-                            </span>
+                  {page.map((row) => {
+                    const relevancePct = row.specificity !== null ? Math.round((row.specificity / 5) * 100) : null;
+                    const relevanceColor =
+                      relevancePct === null
+                        ? "var(--line-strong)"
+                        : relevancePct >= 80
+                          ? "var(--color-success-500)"
+                          : relevancePct >= 60
+                            ? "var(--accent)"
+                            : "var(--color-warning-500)";
+                    return (
+                      <tr key={row.key}>
+                        <td>
+                          <p className="cell-primary">
+                            <span className={row.kind === "asin" ? "font-mono" : undefined}>{row.target}</span>
+                            {row.shared && (
+                              <span
+                                className="badge badge-warning ml-2"
+                                title="Active on 2+ books — competes against itself in Amazon's auction"
+                              >
+                                Shared
+                              </span>
+                            )}
+                          </p>
+                          {row.detail && <p className="meta-line truncate">{row.detail}</p>}
+                        </td>
+                        <td>
+                          <span className={`badge ${row.kind === "asin" ? "badge-brand" : "badge-gray"}`}>
+                            {row.kind === "keyword" ? "Keyword" : "ASIN"}
+                          </span>
+                        </td>
+                        <td>
+                          <div className="flex flex-wrap gap-1">
+                            {row.books.map((b) => (
+                              <Link key={b.bookId} href={`/books/${b.bookId}`} className="chip-tag">
+                                {b.bookTitle}
+                              </Link>
+                            ))}
+                          </div>
+                        </td>
+                        <td>
+                          {relevancePct === null ? (
+                            <span style={{ color: "var(--text-placeholder)" }}>—</span>
+                          ) : (
+                            <div className="flex items-center gap-2">
+                              <div style={{ width: 60, height: 6, borderRadius: 9999, background: "var(--bg-muted)", overflow: "hidden" }}>
+                                <div style={{ width: `${relevancePct}%`, height: "100%", background: relevanceColor }} />
+                              </div>
+                              <span className="text-xs" style={{ color: "var(--text-secondary)" }}>
+                                {relevancePct}%
+                              </span>
+                            </div>
                           )}
-                        </p>
-                        {row.detail && <p className="meta-line truncate">{row.detail}</p>}
-                      </td>
-                      <td>
-                        <div className="flex flex-wrap gap-1">
-                          {row.books.map((b) => (
-                            <Link key={b.bookId} href={`/books/${b.bookId}`} className="chip-tag">
-                              {b.bookTitle}
-                            </Link>
-                          ))}
-                        </div>
-                      </td>
-                      <td>{row.statuses.join(", ")}</td>
-                      <td className="hidden xl:table-cell">
-                        {row.specificity ? SPECIFICITY_LABELS[row.specificity] : "—"}
-                      </td>
-                      <td className="hidden xl:table-cell">{row.sources.map(labelForSource).join(", ")}</td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td>{row.statuses.join(", ")}</td>
+                        <td className="hidden xl:table-cell">{row.sources.map(labelForSource).join(", ")}</td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

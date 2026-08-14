@@ -93,6 +93,16 @@
   --color-accent-pink: #dd2590;
   --color-accent-orange: #ec4a0a;
 
+  /* ---- Brand accent: warm yellow — the app's identity colour (logo mark,
+     active nav underline, progress fill, genre/"in campaign" pills). Kept
+     apart from --color-brand-* (purple), which stays reserved for focus
+     rings and the dark CTA cards' gradient overlay. */
+  --color-accent-yellow-50: #fffbef;
+  --color-accent-yellow-100: #fef7dc;
+  --color-accent-yellow-200: #f0dfa0;
+  --color-accent-yellow-300: #f2c230;
+  --color-accent-yellow-700: #8a6d00;
+
   /* ---- Type scale ------------------------------------------------------ */
   --text-display-2xl: 4.5rem;
   --text-display-2xl--line-height: 5.625rem;
@@ -170,6 +180,15 @@
   --primary-solid-hover: #000000;
   --primary-fg: #ffffff;
 
+  /* Brand accent — see --color-accent-yellow-* above for the raw scale. */
+  --accent: var(--color-accent-yellow-300);
+  --accent-text: var(--color-accent-yellow-700);
+  --accent-tile-bg: var(--color-accent-yellow-100);
+  --accent-pill-bg: var(--color-accent-yellow-50);
+  --accent-pill-border: var(--color-accent-yellow-200);
+  /* Radial purple wash used on the dark CTA cards (Dashboard, Add book). */
+  --gradient-dark-cta: radial-gradient(120% 140% at 100% 0%, rgba(127, 86, 217, 0.35), transparent 60%);
+
   /* Focus rings (§3.5) */
   --ring-brand: 0 0 0 4px rgba(158, 119, 237, 0.24);
   --ring-gray: 0 0 0 4px rgba(152, 162, 179, 0.14);
@@ -180,8 +199,6 @@
   --motion-overlay: 240ms cubic-bezier(0.16, 1, 0.3, 1);
 
   /* Layout (§3.2) */
-  --sidebar-width: 280px;
-  --sidebar-width-collapsed: 80px;
   --container-max: 1280px;
 
   color-scheme: light;
@@ -297,7 +314,7 @@ h6 {
   }
 
   .page-body {
-    padding: 32px;
+    padding: 28px 32px;
   }
 
   @media (max-width: 640px) {
@@ -624,7 +641,7 @@ h6 {
   .card {
     background: var(--panel);
     border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xs);
     padding: 24px;
   }
@@ -675,9 +692,9 @@ h6 {
     background: var(--primary-solid);
     color: var(--primary-fg);
     border: 1px solid var(--primary-solid);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xs);
-    padding: 16px;
+    padding: 20px;
     cursor: pointer;
     text-align: left;
     transition:
@@ -796,6 +813,260 @@ h6 {
     margin-bottom: 8px;
   }
 
+  /* ---- Top nav shell ---------------------------------------------------- */
+
+  .top-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    padding: 20px 32px;
+    border-bottom: 1px solid var(--line);
+    background: var(--panel);
+  }
+
+  .top-nav-left {
+    display: flex;
+    align-items: center;
+    gap: 40px;
+    min-width: 0;
+  }
+
+  .top-nav-brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .top-nav-logo-mark {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    flex-shrink: 0;
+    border-radius: var(--radius-md);
+    background: var(--accent);
+    color: #ffffff;
+    font-size: 0.8125rem;
+    font-weight: 700;
+  }
+
+  .top-nav-links {
+    display: flex;
+    align-items: center;
+    gap: 28px;
+  }
+
+  .top-nav-link {
+    font-size: 0.875rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    text-decoration: none;
+    white-space: nowrap;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    /* Sits flush on the header's own bottom border when active. */
+    padding-bottom: 20px;
+    margin-bottom: -21px;
+    border-bottom: 2px solid transparent;
+    transition:
+      color var(--motion-micro),
+      border-color var(--motion-micro);
+  }
+
+  .top-nav-link:hover {
+    color: var(--text-ui);
+  }
+
+  .top-nav-link:focus-visible {
+    outline: none;
+    box-shadow: var(--ring-gray);
+    border-radius: var(--radius-xs);
+  }
+
+  .top-nav-link-active {
+    font-weight: 600;
+    color: var(--text-primary);
+    border-bottom-color: var(--accent);
+  }
+
+  .top-nav-right {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-shrink: 0;
+  }
+
+  .top-nav-search {
+    position: relative;
+  }
+
+  .top-nav-search input {
+    width: 240px;
+    box-sizing: border-box;
+    border: 1px solid var(--line-strong);
+    border-radius: var(--radius-md);
+    padding: 8px 12px 8px 34px;
+    font-size: 0.875rem;
+    color: var(--text-primary);
+    background: var(--panel);
+  }
+
+  .top-nav-search input:focus,
+  .top-nav-search input:focus-visible {
+    outline: none;
+    border-color: var(--text-placeholder);
+    box-shadow: var(--ring-gray);
+  }
+
+  .top-nav-search .input-icon {
+    left: 12px;
+  }
+
+  .top-nav-icon-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    flex-shrink: 0;
+    border-radius: var(--radius-full);
+    background: var(--bg-subtle);
+    border: 1px solid var(--line);
+    color: var(--icon-default);
+    cursor: pointer;
+    transition: background var(--motion-micro);
+  }
+
+  .top-nav-icon-btn:hover:not(:disabled) {
+    background: var(--bg-muted);
+  }
+
+  .top-nav-icon-btn:focus-visible {
+    outline: none;
+    box-shadow: var(--ring-gray);
+  }
+
+  /* ---- Stat tiles (4-up KPI row atop list pages) ------------------------ */
+
+  .stat-tile {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid var(--line);
+    border-radius: var(--radius-xl);
+    padding: 16px;
+    background: var(--panel);
+  }
+
+  .stat-tile-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 40px;
+    height: 40px;
+    flex-shrink: 0;
+    border-radius: 10px;
+    background: var(--accent-tile-bg);
+    color: var(--accent-text);
+  }
+
+  .stat-tile-label {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin: 0;
+  }
+
+  .stat-tile-value {
+    font-size: 1.25rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin: 4px 0 0;
+  }
+
+  /* ---- Targeting funnel bars --------------------------------------------- */
+
+  .funnel-row {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+
+  .funnel-label {
+    flex-shrink: 0;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    color: var(--text-ui);
+  }
+
+  .funnel-track {
+    flex: 1;
+    background: var(--bg-muted);
+    border-radius: var(--radius-md);
+    height: 36px;
+    display: flex;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .funnel-fill {
+    height: 100%;
+    border-radius: var(--radius-md);
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    padding-right: 10px;
+    box-sizing: border-box;
+    color: #ffffff;
+    font-size: 0.8125rem;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    transition: width var(--motion-overlay);
+  }
+
+  .funnel-note {
+    flex-shrink: 0;
+    text-align: right;
+    font-size: 0.75rem;
+    color: var(--text-placeholder);
+  }
+
+  /* Compact variant used on the Book detail page's smaller funnel card. */
+  .funnel-track-sm {
+    height: 26px;
+    border-radius: var(--radius-sm);
+  }
+
+  .funnel-fill-sm {
+    border-radius: var(--radius-sm);
+    padding-right: 8px;
+    font-size: 0.75rem;
+  }
+
+  /* ---- Accent chip (genre terms, "in campaign" pills) -------------------- */
+
+  .chip-tag-accent {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 9px;
+    border-radius: var(--radius-full);
+    border: 1px solid var(--accent-pill-border);
+    background: var(--accent-pill-bg);
+    font-size: 0.6875rem;
+    font-weight: 500;
+    color: var(--accent-text);
+  }
+
+  /* ---- Dark CTA card with radial gradient wash --------------------------- */
+
+  .action-card-gradient {
+    background-image: var(--gradient-dark-cta);
+  }
+
   /* ---- Tabs (§4.4, pill style) ----------------------------------------- */
 
   .tabs {
@@ -856,7 +1127,7 @@ h6 {
 
   .table-wrap {
     border: 1px solid var(--line);
-    border-radius: var(--radius-lg);
+    border-radius: var(--radius-xl);
     box-shadow: var(--shadow-xs);
     overflow: hidden;
     background: var(--panel);
@@ -1057,6 +1328,17 @@ h6 {
     color: var(--color-success-700);
   }
 
+  /* In-progress / informational — the Add book capture step. */
+  .alert-accent {
+    background: var(--accent-pill-bg);
+    border-color: var(--accent-pill-border);
+    color: var(--text-secondary);
+  }
+
+  .alert-accent .alert-title {
+    color: var(--text-primary);
+  }
+
   /* ---- Progress (§4.10) ------------------------------------------------- */
 
   .progress-track {
@@ -1072,6 +1354,10 @@ h6 {
     border-radius: var(--radius-full);
     background: var(--primary-solid);
     transition: width var(--motion-overlay);
+  }
+
+  .progress-fill-accent {
+    background: var(--accent);
   }
 
   /* ---- Empty states & skeletons (§4.12) --------------------------------- */

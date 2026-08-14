@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 import {
   booksNeedingAttention,
+  computeTargetingSummary,
   recentBooksSummary,
-  summarizeCampaigns,
 } from "../lib/dashboardStats";
 
 describe("recentBooksSummary", () => {
@@ -35,61 +35,42 @@ describe("recentBooksSummary", () => {
   });
 });
 
-describe("summarizeCampaigns", () => {
-  it("sums totals, computes blended ACOS, and groups spend by report period", () => {
-    const summary = summarizeCampaigns(
+describe("computeTargetingSummary", () => {
+  it("narrows each stage to a strict subset of the one before it, deduped by underlying id", () => {
+    const summary = computeTargetingSummary(
       [
-        { id: "c1", status: "live" },
-        { id: "c2", status: "paused" },
+        { id: "k1", status: "active", lastSales: 12 },
+        { id: "k2", status: "active", lastSales: 0 },
+        { id: "k3", status: "rejected", lastSales: null },
       ],
+      [{ id: "a1", status: "active", lastSales: null }],
       [
-        {
-          campaign_id: "c1",
-          spend: 10,
-          sales: 50,
-          orders: 2,
-          clicks: 5,
-          impressions: 100,
-          report_start: "2026-01-01",
-          report_end: "2026-01-07",
-        },
-        {
-          campaign_id: "c2",
-          spend: "5.50",
-          sales: "20",
-          orders: 1,
-          clicks: 2,
-          impressions: 40,
-          report_start: "2026-01-01",
-          report_end: "2026-01-07",
-        },
-        {
-          campaign_id: "c1",
-          spend: 20,
-          sales: 0,
-          orders: 0,
-          clicks: 8,
-          impressions: 150,
-          report_start: "2026-01-08",
-          report_end: "2026-01-14",
-        },
+        // k1 selected into two campaigns — counts once.
+        { keyword_id: "k1", competitor_asin_id: null, is_negative: false, state: "enabled" },
+        { keyword_id: "k1", competitor_asin_id: null, is_negative: false, state: "paused" },
+        { keyword_id: "k2", competitor_asin_id: null, is_negative: false, state: "enabled" },
+        { keyword_id: null, competitor_asin_id: "a1", is_negative: false, state: "paused" },
+        // Negative targets don't count toward selection at all.
+        { keyword_id: "k3", competitor_asin_id: null, is_negative: true, state: "enabled" },
       ]
     );
 
-    expect(summary.totalCampaigns).toBe(2);
-    expect(summary.byStatus).toEqual({ live: 1, paused: 1 });
-    expect(summary.totals).toEqual({ spend: 35.5, sales: 70, orders: 3, clicks: 15, impressions: 290 });
-    expect(summary.acos).toBeCloseTo(35.5 / 70);
-    expect(summary.spendByPeriod).toEqual([
-      { reportStart: "2026-01-01", reportEnd: "2026-01-07", spend: 15.5, sales: 70 },
-      { reportStart: "2026-01-08", reportEnd: "2026-01-14", spend: 20, sales: 0 },
+    expect(summary.stages).toEqual([
+      { label: "Researched", value: 4, note: "from reviews, comps, Q&A" },
+      { label: "Passed relevance filter", value: 3, note: "duplicate/off-topic removed" },
+      { label: "Selected into campaigns", value: 3, note: "scored + budget-fit" },
+      { label: "Live on Amazon", value: 2, note: "exported & uploaded" },
     ]);
+    // Live: k1 (sales 12, converting) and k2 (sales 0, not converting).
+    expect(summary.liveCount).toBe(2);
+    expect(summary.convertingCount).toBe(1);
+    expect(summary.accuracyPct).toBe(50);
   });
 
-  it("returns a null ACOS with no sales", () => {
-    const summary = summarizeCampaigns([{ id: "c1", status: "draft" }], []);
-    expect(summary.acos).toBeNull();
-    expect(summary.spendByPeriod).toEqual([]);
+  it("returns a null accuracy with no live targets yet", () => {
+    const summary = computeTargetingSummary([{ id: "k1", status: "active", lastSales: null }], [], []);
+    expect(summary.liveCount).toBe(0);
+    expect(summary.accuracyPct).toBeNull();
   });
 });
 

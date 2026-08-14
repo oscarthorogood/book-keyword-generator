@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Download, Megaphone } from "lucide-react";
+import { AlertTriangle, DollarSign, Megaphone, Radio, TrendingUp } from "lucide-react";
 import Link from "next/link";
+import { StatTilesRow } from "./StatTiles";
 
 interface CampaignRow {
   id: string;
@@ -19,24 +20,38 @@ interface CampaignRow {
   book_author: string | null;
   bulksheet_path?: string | null;
   last_export_error?: string | null;
+  spend: number;
+  sales: number;
+  acos: number | null;
 }
 
-function labelForType(type: string): string {
-  return type.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+const STATUS_FILTERS = ["all", "live", "paused", "draft"] as const;
+type StatusFilter = (typeof STATUS_FILTERS)[number];
+
+const STATUS_BADGE: Record<string, string> = {
+  live: "badge-success",
+  exported: "badge-success",
+  paused: "badge-warning",
+  draft: "badge-gray",
+  archived: "badge-gray",
+};
+
+function labelForStatus(status: string): string {
+  return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
 /**
  * Cross-book campaigns list (campaigns spec §7) — every sub-campaign of
- * every book's 5-campaign structure, grouped by `export_batch_id` (one
- * Create Campaign run). Mirrors CompetitorsOverviewPage.tsx's read-only
- * aggregate-table shape; links through to the book (edit) and to
+ * every book's campaign structure, with a status filter and spend/ACOS from
+ * imported results. Links through to the book (edit) and to
  * `/campaigns/[id]` (export history, results, recommendations).
  */
 export default function CampaignsOverviewPage() {
   const [campaigns, setCampaigns] = useState<CampaignRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<"all" | string>("all");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
 
   useEffect(() => {
     let active = true;
@@ -58,35 +73,30 @@ export default function CampaignsOverviewPage() {
     };
   }, []);
 
-  const statuses = useMemo(() => Array.from(new Set(campaigns.map((c) => c.status))).sort(), [campaigns]);
+  const filtered = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return campaigns.filter((c) => {
+      if (statusFilter !== "all" && c.status !== statusFilter) return false;
+      if (term && !c.name.toLowerCase().includes(term) && !(c.book_title ?? "").toLowerCase().includes(term)) return false;
+      return true;
+    });
+  }, [campaigns, search, statusFilter]);
 
-  const filtered = useMemo(
-    () => (statusFilter === "all" ? campaigns : campaigns.filter((c) => c.status === statusFilter)),
-    [campaigns, statusFilter]
-  );
-
-  const batches = useMemo(() => {
-    const order: string[] = [];
-    const byBatch = new Map<string, CampaignRow[]>();
-    for (const row of filtered) {
-      if (!byBatch.has(row.export_batch_id)) {
-        byBatch.set(row.export_batch_id, []);
-        order.push(row.export_batch_id);
-      }
-      byBatch.get(row.export_batch_id)!.push(row);
-    }
-    return order.map((batchId) => ({ batchId, rows: byBatch.get(batchId)! }));
-  }, [filtered]);
+  const liveCount = useMemo(() => campaigns.filter((c) => c.status === "live" || c.status === "exported").length, [campaigns]);
+  const totalBudget = useMemo(() => campaigns.reduce((sum, c) => sum + c.daily_budget, 0), [campaigns]);
+  const totalSpend = useMemo(() => campaigns.reduce((sum, c) => sum + c.spend, 0), [campaigns]);
+  const avgAcos = useMemo(() => {
+    const withAcos = campaigns.filter((c) => c.acos !== null);
+    if (withAcos.length === 0) return null;
+    return withAcos.reduce((sum, c) => sum + (c.acos ?? 0), 0) / withAcos.length;
+  }, [campaigns]);
 
   return (
     <div className="flex min-h-screen flex-col bg-white">
       <header className="page-header flex flex-wrap items-center justify-between gap-4">
         <div>
           <h1 className="page-title">Campaigns</h1>
-          <p className="page-subtitle mt-1">
-            {campaigns.length} sub-campaign{campaigns.length === 1 ? "" : "s"} across{" "}
-            {new Set(campaigns.map((c) => c.book_id)).size} book{new Set(campaigns.map((c) => c.book_id)).size === 1 ? "" : "s"}
-          </p>
+          <p className="page-subtitle mt-1">Every campaign running across all books.</p>
         </div>
       </header>
 
@@ -115,84 +125,104 @@ export default function CampaignsOverviewPage() {
               <Megaphone size={24} />
             </span>
             <p className="empty-state-title">No campaigns yet</p>
-            <p className="empty-state-body">Create a campaign from a book&apos;s keyword page to see it here.</p>
+            <p className="empty-state-body">Create a campaign from a book&apos;s page to see it here.</p>
           </div>
         ) : (
           <>
-            <div className="mb-4 flex flex-wrap items-center gap-3">
-              <select
-                value={statusFilter}
-                onChange={(e) => setStatusFilter(e.target.value)}
-                className="input w-auto"
-                aria-label="Filter by status"
-              >
-                <option value="all">Any status</option>
-                {statuses.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </div>
+            <StatTilesRow
+              tiles={[
+                { label: "Live campaigns", value: liveCount, icon: Radio },
+                { label: "Daily budget", value: `$${totalBudget.toFixed(2)}`, icon: DollarSign },
+                { label: "Total spend", value: `$${totalSpend.toFixed(2)}`, icon: Megaphone },
+                { label: "Avg. ACOS", value: avgAcos === null ? "—" : `${(avgAcos * 100).toFixed(0)}%`, icon: TrendingUp },
+              ]}
+            />
 
-            <div className="space-y-6">
-              {batches.map(({ batchId, rows }) => (
-                <div key={batchId} className="table-wrap overflow-x-auto">
-                  <table className="table table-dense">
-                    <thead>
-                      <tr>
-                        <th scope="col">Campaign</th>
-                        <th scope="col">Book</th>
-                        <th scope="col">Type</th>
-                        <th scope="col">Budget</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">
-                          <span className="sr-only">Download</span>
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {rows.map((row) => (
-                        <tr key={row.id}>
-                          <td>
-                            <Link href={`/campaigns/${row.id}`} className="cell-primary">
-                              {row.name}
-                            </Link>
-                            {row.last_export_error && (
-                              <span className="badge badge-error ml-2" title={row.last_export_error}>
-                                export failed
-                              </span>
-                            )}
-                          </td>
-                          <td>
-                            {row.book_id && (
-                              <Link href={`/books/${row.book_id}`} className="chip-tag">
-                                {row.book_title ?? "Book"}
-                              </Link>
-                            )}
-                          </td>
-                          <td>{labelForType(row.campaign_type)}</td>
-                          <td>
-                            {row.daily_budget.toFixed(2)} {row.currency}/day
-                          </td>
-                          <td>{row.status}</td>
-                          <td>
-                            {row.bulksheet_path && (
-                              <a
-                                href={`/api/campaigns/${row.id}/download`}
-                                className="btn btn-tertiary btn-sm"
-                                title="Download the current bulksheet for this campaign"
-                              >
-                                <Download size={14} /> Download
-                              </a>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
+            <div className="table-wrap overflow-x-auto">
+              <div
+                className="flex flex-wrap items-center gap-3 border-b p-4"
+                style={{ borderColor: "var(--line)", background: "var(--bg-subtle)" }}
+              >
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(e) => setSearch(e.target.value)}
+                  placeholder="Search campaign or book"
+                  aria-label="Search campaign or book"
+                  className="input w-full sm:w-80"
+                  style={{ background: "var(--panel)" }}
+                />
+                <div className="flex flex-wrap gap-1.5">
+                  {STATUS_FILTERS.map((status) => (
+                    <button
+                      key={status}
+                      type="button"
+                      onClick={() => setStatusFilter(status)}
+                      style={{
+                        borderRadius: "var(--radius-md)",
+                        padding: "6px 12px",
+                        fontSize: "0.8125rem",
+                        border: statusFilter === status ? "1px solid var(--primary-solid)" : "1px solid var(--line-strong)",
+                        background: statusFilter === status ? "var(--primary-solid)" : "var(--panel)",
+                        color: statusFilter === status ? "var(--primary-fg)" : "var(--text-ui)",
+                      }}
+                    >
+                      {status === "all" ? "All" : labelForStatus(status)}
+                    </button>
+                  ))}
                 </div>
-              ))}
+              </div>
+
+              <table className="table">
+                <thead>
+                  <tr>
+                    <th scope="col">Campaign</th>
+                    <th scope="col">Book</th>
+                    <th scope="col">Daily budget</th>
+                    <th scope="col">Spend</th>
+                    <th scope="col">ACOS</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtered.map((row) => (
+                    <tr key={row.id}>
+                      <td>
+                        <Link href={`/campaigns/${row.id}`} className="cell-primary">
+                          {row.name}
+                        </Link>
+                        {row.last_export_error && (
+                          <span className="badge badge-error ml-2" title={row.last_export_error}>
+                            export failed
+                          </span>
+                        )}
+                      </td>
+                      <td>
+                        {row.book_id && (
+                          <Link href={`/books/${row.book_id}`} className="chip-tag-accent">
+                            {row.book_title ?? "Book"}
+                          </Link>
+                        )}
+                      </td>
+                      <td>${row.daily_budget.toFixed(2)}</td>
+                      <td>${row.spend.toFixed(2)}</td>
+                      <td>{row.acos === null ? "—" : `${(row.acos * 100).toFixed(0)}%`}</td>
+                      <td>
+                        <span className={`badge ${STATUS_BADGE[row.status] ?? "badge-gray"}`}>
+                          {labelForStatus(row.status)}
+                        </span>
+                      </td>
+                    </tr>
+                  ))}
+                  {filtered.length === 0 && (
+                    <tr>
+                      <td colSpan={6} className="meta-line">
+                        No campaigns match this filter.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </>
         )}
