@@ -119,7 +119,7 @@ export default function CampaignDetailPage({ campaignId }: { campaignId: string 
           <h1 className="page-title">{campaign?.name ?? "Campaign"}</h1>
           {book && (
             <p className="page-subtitle mt-1">
-              <Link href={`/books/${book.id}`} className="chip-tag">
+              <Link href={`/books/${book.id}`} className="chip-tag-accent">
                 {book.title}
               </Link>{" "}
               by {book.author}

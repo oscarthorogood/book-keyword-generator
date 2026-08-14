@@ -6,7 +6,6 @@ import {
   CheckCircle2,
   Download,
   Loader2,
-  Megaphone,
   RefreshCw,
   Rocket,
   Sliders,
@@ -333,16 +332,52 @@ export default function BookCampaigns({ bookId, metadataReady, onChanged }: Book
           <div className="skeleton h-10 w-full" />
         </div>
       ) : campaigns.length === 0 ? (
-        <div className="empty-state">
-          <span className="icon-tile icon-tile-lg">
-            <Megaphone size={24} style={{ color: "var(--icon-default)" }} />
-          </span>
-          <div className="space-y-1">
-            <p className="empty-state-title">No campaigns yet</p>
-            <p className="empty-state-body">
-              Create campaigns builds the full Amazon Ads structure for this book. It researches the keywords and
-              competitor ASINs it needs on the way, so there is nothing to set up first.
+        <div className="relative">
+          <div aria-hidden="true" className="space-y-2 pointer-events-none" style={{ filter: "blur(4px)", opacity: 0.5 }}>
+            <div className="table-wrap">
+              <table className="table table-dense">
+                <thead>
+                  <tr>
+                    <th scope="col">Campaign</th>
+                    <th scope="col">Daily budget</th>
+                    <th scope="col">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {[0, 1, 2].map((row) => (
+                    <tr key={row}>
+                      <td>
+                        <div className="skeleton h-4 w-32" />
+                      </td>
+                      <td>
+                        <div className="skeleton h-4 w-12" />
+                      </td>
+                      <td>
+                        <div className="skeleton h-5 w-14 rounded-full" />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+          <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 p-6 text-center">
+            <p className="max-w-xs text-sm" style={{ color: "var(--text-secondary)" }}>
+              Researches this book&apos;s keywords and competitor ASINs, then builds the full campaign structure.
             </p>
+            <button
+              onClick={() => createCampaigns(false)}
+              disabled={busy || !metadataReady}
+              className="btn btn-primary"
+              title={
+                metadataReady
+                  ? "Researches keywords and competitor ASINs if needed, then builds the campaign bulksheet"
+                  : "This book's Amazon metadata could not be read — re-fetch it first"
+              }
+            >
+              {creating ? <Loader2 size={20} className="animate-spin" /> : <Rocket size={20} />}
+              Create campaigns
+            </button>
           </div>
         </div>
       ) : (

@@ -1,35 +1,48 @@
+import Link from "next/link";
+import { Plus } from "lucide-react";
 import AppShell from "@/components/AppShell";
-import OverviewStatsWidget from "@/components/dashboard/OverviewStatsWidget";
 import AttentionWidget from "@/components/dashboard/AttentionWidget";
-import CampaignSummaryWidget from "@/components/dashboard/CampaignSummaryWidget";
 import RecentBooksWidget from "@/components/dashboard/RecentBooksWidget";
+import TargetingFunnelWidget from "@/components/dashboard/TargetingFunnelWidget";
+import TargetingAccuracyWidget from "@/components/dashboard/TargetingAccuracyWidget";
 
 /**
- * Books, campaigns and results across the whole library.
- *
- * The keyword-flavoured widgets (Keyword stats, Top keywords by genre) are
- * gone: keywords are an implementation detail of campaign generation now,
- * not something the user manages, so a dashboard panel ranking them was
- * reporting on machinery rather than on work.
+ * At-a-glance overview of books, campaigns and targeting performance
+ * (Ads Builder redesign handoff). The funnel + accuracy donut are the
+ * dashboard's headline widgets now — the old KPI tile row and spend-over-
+ * time chart aren't part of this layout; "Needs attention" and "Recent
+ * books" cover the same ground the KPI row did, and per-campaign spend
+ * detail lives on the Campaign detail page.
  */
 export default function DashboardPage() {
   return (
     <AppShell active="dashboard">
-      <div className="flex min-h-screen flex-col bg-white">
-        <header className="page-header">
-          <h1 className="page-title">Dashboard</h1>
-          <p className="page-subtitle mt-1">An overview of every book and campaign you&apos;re running.</p>
-        </header>
+      <div className="page-body" style={{ display: "grid", gridTemplateColumns: "1.4fr 1fr", gap: 24 }}>
+        <div className="flex flex-col gap-6">
+          <TargetingFunnelWidget variant="hero" />
 
-        <div className="page-body flex-1 space-y-5">
-          <OverviewStatsWidget />
-
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
-            <CampaignSummaryWidget />
+          <div className="grid gap-6" style={{ gridTemplateColumns: "1.2fr 1fr" }}>
             <AttentionWidget />
-          </div>
 
+            <Link href="/books/add" className="action-card action-card-gradient">
+              <p className="text-lg font-semibold">Add a new book</p>
+              <p className="text-sm" style={{ color: "var(--line-strong)" }}>
+                Paste an Amazon product link to capture a new listing and start building its campaigns.
+              </p>
+              <span
+                className="mt-auto inline-flex items-center justify-between gap-2 rounded-md px-3.5 py-2.5 text-sm font-semibold"
+                style={{ background: "#ffffff", color: "var(--text-primary)" }}
+              >
+                Add new book
+                <Plus size={16} />
+              </span>
+            </Link>
+          </div>
+        </div>
+
+        <div className="flex flex-col gap-6">
           <RecentBooksWidget />
+          <TargetingAccuracyWidget variant="lg" />
         </div>
       </div>
     </AppShell>

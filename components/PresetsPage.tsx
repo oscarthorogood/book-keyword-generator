@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Download, Plus, Trash2 } from "lucide-react";
+import { AlertTriangle, Download, FolderTree, Layers, Plus, Tag, Target, Trash2 } from "lucide-react";
+import { StatTilesRow } from "./StatTiles";
 
 type MatchType = "broad" | "phrase" | "exact";
 type Tier = "a" | "b";
@@ -262,6 +263,17 @@ export default function PresetsPage() {
       )}
 
       <div className="page-body flex-1">
+        {!loadError && !loading && !needsMigration && (
+          <StatTilesRow
+            tiles={[
+              { label: "Top-level genres", value: topLevel.length, icon: FolderTree },
+              { label: "Sub-genres", value: genres.length - topLevel.length, icon: Layers },
+              { label: "Preset keywords", value: genres.reduce((s, g) => s + g.keywords.length, 0), icon: Tag },
+              { label: "Preset competitor ASINs", value: genres.reduce((s, g) => s + g.competitorAsins.length, 0), icon: Target },
+            ]}
+          />
+        )}
+
         {loadError ? (
           <div className="alert alert-error" role="alert">
             <AlertTriangle size={20} className="mt-0.5 shrink-0" />

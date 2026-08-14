@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, BookOpen, Plus, Search } from "lucide-react";
+import { AlertTriangle, BookOpen, Globe, Megaphone, Plus, Search } from "lucide-react";
+import { StatTilesRow } from "./StatTiles";
 
 interface Book {
   id: string;
@@ -67,6 +68,17 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
     [books]
   );
 
+  const flaggedCount = useMemo(
+    () =>
+      books.filter((book) => {
+        const capture = book.metadata_json?.capture;
+        return capture ? !capture.ok || capture.blocked : false;
+      }).length,
+    [books]
+  );
+
+  const marketplaceCount = useMemo(() => new Set(books.map((b) => b.marketplace)).size, [books]);
+
   return (
     <div className="flex min-h-screen flex-col bg-white">
       <header className="page-header flex flex-wrap items-center justify-between gap-4">
@@ -84,6 +96,17 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
       </header>
 
       <div className="page-body flex-1">
+        {!loadError && !loading && books.length > 0 && (
+          <StatTilesRow
+            tiles={[
+              { label: "Books", value: books.length, icon: BookOpen },
+              { label: "Campaigns", value: totalCampaigns, icon: Megaphone },
+              { label: "Needs attention", value: flaggedCount, icon: AlertTriangle },
+              { label: "Marketplaces", value: marketplaceCount, icon: Globe },
+            ]}
+          />
+        )}
+
         {loadError ? (
           <div className="alert alert-error" role="alert">
             <AlertTriangle size={20} className="mt-0.5 shrink-0" />
@@ -124,11 +147,11 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
             </button>
           </div>
         ) : (
-          <>
-            <div className="mb-5 flex flex-wrap items-center justify-between gap-4">
-              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
-                Showing {filteredBooks.length} of {books.length}
-              </p>
+          <div className="table-wrap overflow-x-auto">
+            <div
+              className="flex flex-wrap items-center gap-3 border-b p-4"
+              style={{ borderColor: "var(--line)", background: "var(--bg-subtle)" }}
+            >
               <div className="relative w-full sm:w-80">
                 <Search size={20} className="input-icon" aria-hidden="true" />
                 <label className="sr-only" htmlFor="book-search">
@@ -141,12 +164,16 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
                   value={searchTerm}
                   onChange={(e) => setSearchTerm(e.target.value)}
                   className="input input-with-icon"
+                  style={{ background: "var(--panel)" }}
                 />
               </div>
+              <p className="text-sm" style={{ color: "var(--text-secondary)" }}>
+                Showing {filteredBooks.length} of {books.length}
+              </p>
             </div>
 
             {filteredBooks.length === 0 ? (
-              <div className="empty-state">
+              <div className="empty-state" style={{ border: "none", borderRadius: 0 }}>
                 <span className="icon-tile icon-tile-lg">
                   <Search size={24} style={{ color: "var(--icon-default)" }} />
                 </span>
@@ -161,7 +188,7 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
                 </button>
               </div>
             ) : (
-              <div className="table-wrap overflow-x-auto">
+              <div className="overflow-x-auto">
                 <table className="table">
                   <thead>
                     <tr>
@@ -256,7 +283,7 @@ export default function BooksListDashboard({ onAddBook, onSelectBook }: BooksLis
                 </table>
               </div>
             )}
-          </>
+          </div>
         )}
       </div>
     </div>

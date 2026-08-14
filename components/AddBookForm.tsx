@@ -1,10 +1,18 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { AlertCircle, ArrowLeft, Loader2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, Loader2, Search } from "lucide-react";
 import { parseAmazonInput } from "@/lib/amazonUrl";
 
 const MARKETPLACES = ["US", "UK", "CA", "DE", "FR", "IT", "ES"] as const;
+
+/** The "Sources checked" card — a static list of what the capture reads from. */
+const SOURCES_CHECKED = [
+  "Amazon product page",
+  "Comparable titles & also-boughts",
+  "Reviews & Q&A",
+  "Goodreads, Google Books, Open Library",
+];
 
 // The create call reads the product page, crawls comparable titles and
 // queries the external catalogues, so it takes a while. Naming the step in
@@ -103,9 +111,17 @@ export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
       </header>
 
       <div className="page-body flex-1">
-        <form onSubmit={handleSubmit} className="max-w-2xl">
-          <div className="card mb-6">
-            <p className="card-title mb-5">Book lookup</p>
+        <form onSubmit={handleSubmit} className="grid gap-6" style={{ gridTemplateColumns: "1.4fr 1fr", alignItems: "start" }}>
+          <div className="card">
+            <div className="mb-5 flex items-start gap-3.5">
+              <span className="stat-tile-icon">
+                <Search size={20} />
+              </span>
+              <div>
+                <p className="card-title">Book lookup</p>
+                <p className="meta-line mt-1">One paste captures everything campaigns are built from.</p>
+              </div>
+            </div>
 
             <label className="field-label" htmlFor="book-input">
               Amazon link, ASIN or ISBN
@@ -162,42 +178,70 @@ export default function AddBookForm({ onBack, onSuccess }: AddBookFormProps) {
                 </span>
               </div>
             )}
-          </div>
 
-          {error && (
-            <div className="alert alert-error mb-6" role="alert">
-              <AlertCircle size={20} className="mt-0.5 shrink-0" />
-              <div>
-                <p className="alert-title">Couldn&apos;t add that book</p>
-                <p className="mt-1">{error}</p>
-              </div>
-            </div>
-          )}
-
-          {isSaving && (
-            <div className="alert mb-6" aria-live="polite">
-              <Loader2 size={20} className="mt-0.5 shrink-0 animate-spin" style={{ color: "var(--icon-default)" }} />
-              <div className="flex-1">
-                <p className="alert-title">{CAPTURE_STEPS[stepIndex]}</p>
-                <p className="mt-1">This takes up to a minute. It only happens once per book.</p>
-                <div className="progress-track mt-3">
-                  <div
-                    className="progress-fill"
-                    style={{ width: `${((stepIndex + 1) / CAPTURE_STEPS.length) * 100}%` }}
-                  />
+            {error && (
+              <div className="alert alert-error mt-5" role="alert">
+                <AlertCircle size={20} className="mt-0.5 shrink-0" />
+                <div>
+                  <p className="alert-title">Couldn&apos;t add that book</p>
+                  <p className="mt-1">{error}</p>
                 </div>
               </div>
-            </div>
-          )}
+            )}
 
-          <div className="flex items-center justify-end gap-3">
-            <button type="button" onClick={onBack} className="btn btn-secondary" disabled={isSaving}>
-              Cancel
-            </button>
-            <button type="submit" className="btn btn-primary" disabled={isSaving || !input.trim()}>
-              {isSaving && <Loader2 size={20} className="animate-spin" />}
-              {isSaving ? "Adding book…" : "Add book"}
-            </button>
+            {isSaving && (
+              <div className="alert alert-accent mt-5" aria-live="polite">
+                <Loader2
+                  size={20}
+                  className="mt-0.5 shrink-0 animate-spin"
+                  style={{ color: "var(--accent-text)" }}
+                />
+                <div className="flex-1">
+                  <p className="alert-title">{CAPTURE_STEPS[stepIndex]}</p>
+                  <p className="mt-1">This takes up to a minute. It only happens once per book.</p>
+                  <div className="progress-track mt-2.5">
+                    <div
+                      className="progress-fill progress-fill-accent"
+                      style={{ width: `${((stepIndex + 1) / CAPTURE_STEPS.length) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button type="button" onClick={onBack} className="btn btn-secondary" disabled={isSaving}>
+                Cancel
+              </button>
+              <button type="submit" className="btn btn-primary" disabled={isSaving || !input.trim()}>
+                {isSaving && <Loader2 size={20} className="animate-spin" />}
+                {isSaving ? "Adding book…" : "Add book"}
+              </button>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-6">
+            <div className="action-card action-card-gradient">
+              <p className="text-lg font-semibold">What gets captured</p>
+              <p className="text-sm" style={{ color: "var(--line-strong)" }}>
+                A single Amazon listing read pulls everything campaign generation needs — title, category path,
+                reviews, competitor titles and Q&amp;A — so it only has to happen once.
+              </p>
+            </div>
+
+            <div className="card">
+              <p className="card-title">Sources checked</p>
+              <ul className="mt-2">
+                {SOURCES_CHECKED.map((source) => (
+                  <li key={source} className="flex items-center gap-3 border-t py-2.5 first:border-t-0" style={{ borderColor: "var(--bg-muted)" }}>
+                    <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: "var(--accent)" }} />
+                    <p className="text-sm" style={{ color: "var(--text-ui)" }}>
+                      {source}
+                    </p>
+                  </li>
+                ))}
+              </ul>
+            </div>
           </div>
         </form>
       </div>
