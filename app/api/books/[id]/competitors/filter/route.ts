@@ -52,7 +52,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const supabase = await supabaseServer();
-    const loaded = await loadBookWithSnapshot(supabase, bookId, user.id);
+    const loaded = await loadBookWithSnapshot(supabase, bookId);
     if (!loaded) return Response.json({ error: "Book not found" }, { status: 404 });
 
     const { snapshot } = loaded;
@@ -62,7 +62,6 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .from("competitor_asins")
       .select("id, competitor_asin, status, notes, title, author, specificity")
       .eq("book_id", bookId)
-      .eq("user_id", user.id)
       .in("status", REFILTERABLE_STATUSES);
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
@@ -109,7 +108,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       status: "active",
       reason: null,
       filter: null,
-      specificity: scoreAsinSpecificity({ title: row.title, author: row.author }, filterContext.anchors),
+      specificity: scoreAsinSpecificity(
+        { title: row.title, author: row.author },
+        filterContext.anchors
+      ),
     }));
 
     // --- Heuristic filter pass ---
@@ -132,7 +134,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     let aiRanked = false;
     if (isAiRankingConfigured() && snapshot.title) {
       const familySearchTerms = genreFamilySearchTerms(snapshot.genreFamilies ?? []);
-      const genreSeedTerms = [...(snapshot.genreTerms ?? []).slice(0, 8), ...familySearchTerms.slice(0, 4)].filter(Boolean);
+      const genreSeedTerms = [
+        ...(snapshot.genreTerms ?? []).slice(0, 8),
+        ...familySearchTerms.slice(0, 4),
+      ].filter(Boolean);
 
       // Build pseudo-keyword candidates from the ASIN's notes text so we can
       // pass them through the existing rankKeywordsWithAi interface.
@@ -153,7 +158,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             description: snapshot.description,
             pageMarkdown: snapshot.pageMarkdownExcerpt,
           },
-          [],           // no tropes — we only care about comp relevance
+          [], // no tropes — we only care about comp relevance
           compNameCandidates
         ).catch((err: Error) => {
           console.error("[competitors filter] AI ranking failed:", err.message);
@@ -180,42 +185,52 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     }
 
     const updates = outcomes.filter(
-      (outcome) => outcome.status !== outcome.row.status || outcome.specificity !== outcome.row.specificity
+      (outcome) =>
+        outcome.status !== outcome.row.status || outcome.specificity !== outcome.row.specificity
     );
 
     // Independent per-row updates: run with bounded concurrency rather than
     // one at a time so a book with many changed ASINs doesn't pay a full
     // network round trip per row, serially.
     const UPDATE_CONCURRENCY = 8;
-    const updateOutcomes = await mapWithConcurrency(updates, UPDATE_CONCURRENCY, async (outcome) => {
-      const { error: updateError } = await supabase
-        .from("competitor_asins")
-        .update({
-          status: outcome.status,
-          rejection_reason: outcome.reason,
-          rejected_by_filter: outcome.filter,
-          specificity: outcome.specificity,
-        })
-        .eq("id", outcome.row.id)
-        .eq("user_id", user.id);
+    const updateOutcomes = await mapWithConcurrency(
+      updates,
+      UPDATE_CONCURRENCY,
+      async (outcome) => {
+        const { error: updateError } = await supabase
+          .from("competitor_asins")
+          .update({
+            status: outcome.status,
+            rejection_reason: outcome.reason,
+            rejected_by_filter: outcome.filter,
+            specificity: outcome.specificity,
+          })
+          .eq("id", outcome.row.id);
 
-      if (updateError) {
-        // A database from before sql/29-competitor-asin-specificity.sql has
-        // no specificity column — retry without it rather than losing the
-        // status/reason update over a missing migration.
-        if (/specificity/i.test(updateError.message)) {
-          const { error: retryError } = await supabase
-            .from("competitor_asins")
-            .update({ status: outcome.status, rejection_reason: outcome.reason, rejected_by_filter: outcome.filter })
-            .eq("id", outcome.row.id)
-            .eq("user_id", user.id);
-          if (!retryError) return true;
+        if (updateError) {
+          // A database from before sql/29-competitor-asin-specificity.sql has
+          // no specificity column — retry without it rather than losing the
+          // status/reason update over a missing migration.
+          if (/specificity/i.test(updateError.message)) {
+            const { error: retryError } = await supabase
+              .from("competitor_asins")
+              .update({
+                status: outcome.status,
+                rejection_reason: outcome.reason,
+                rejected_by_filter: outcome.filter,
+              })
+              .eq("id", outcome.row.id);
+            if (!retryError) return true;
+          }
+          console.error(
+            `[competitors filter] could not update ${outcome.row.id}:`,
+            updateError.message
+          );
+          return false;
         }
-        console.error(`[competitors filter] could not update ${outcome.row.id}:`, updateError.message);
-        return false;
+        return true;
       }
-      return true;
-    });
+    );
     const changed = updateOutcomes.filter(Boolean).length;
 
     return Response.json({ success: true, examined: asins.length, changed, aiRanked });

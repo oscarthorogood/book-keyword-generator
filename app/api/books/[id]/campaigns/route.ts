@@ -1,5 +1,9 @@
 import { randomUUID } from "node:crypto";
-import { buildCampaignPlans, DEFAULT_DAILY_BUDGET_PER_CAMPAIGN, type CampaignPlan } from "@/lib/campaignBulksheetPlan";
+import {
+  buildCampaignPlans,
+  DEFAULT_DAILY_BUDGET_PER_CAMPAIGN,
+  type CampaignPlan,
+} from "@/lib/campaignBulksheetPlan";
 import { buildCampaignReviewRows, buildCampaignUploadRows } from "@/lib/campaignBulksheetExport";
 import { toCsv } from "@/lib/bulksheetSchema";
 import { describeExportFailure } from "@/lib/campaignExportError";
@@ -34,7 +38,6 @@ const CONFIRMATION_THRESHOLD_PER_DAY = 50;
 async function noEligibleTargetsMessage(
   supabase: Awaited<ReturnType<typeof supabaseServer>>,
   bookId: string,
-  userId: string,
   bank: KeywordWithRollups[],
   asinBank: CompetitorAsin[],
   prepare: PrepareBankResult
@@ -54,8 +57,16 @@ async function noEligibleTargetsMessage(
   }
 
   const [{ count: archivedKeywordCount }, { count: archivedAsinCount }] = await Promise.all([
-    supabase.from("keywords").select("id", { count: "exact", head: true }).eq("book_id", bookId).eq("user_id", userId).eq("status", "archived"),
-    supabase.from("competitor_asins").select("id", { count: "exact", head: true }).eq("book_id", bookId).eq("user_id", userId).eq("status", "archived"),
+    supabase
+      .from("keywords")
+      .select("id", { count: "exact", head: true })
+      .eq("book_id", bookId)
+      .eq("status", "archived"),
+    supabase
+      .from("competitor_asins")
+      .select("id", { count: "exact", head: true })
+      .eq("book_id", bookId)
+      .eq("status", "archived"),
   ]);
 
   if ((archivedKeywordCount ?? 0) > 0 || (archivedAsinCount ?? 0) > 0) {
@@ -82,7 +93,6 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       "id, campaign_type, name, daily_budget, status, amazon_campaign_id, export_batch_id, updated_at, bulksheet_path, last_export_error, last_export_error_at"
     )
     .eq("book_id", bookId)
-    .eq("user_id", user.id)
     .order("updated_at", { ascending: false });
   if (error) return Response.json({ error: error.message }, { status: 400 });
 
@@ -113,7 +123,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await request.json().catch(() => ({}));
-    const dailyBudgetPerCampaign = Number(body.dailyBudgetPerCampaign) || DEFAULT_DAILY_BUDGET_PER_CAMPAIGN;
+    const dailyBudgetPerCampaign =
+      Number(body.dailyBudgetPerCampaign) || DEFAULT_DAILY_BUDGET_PER_CAMPAIGN;
     const includeAutoDiscovery = body.includeAutoDiscovery === true;
     const confirmed = body.confirmed === true;
 
@@ -123,9 +134,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // book has no campaign-eligible targets yet, generate and filter them
     // now. No-ops when the bank is already populated, which is what keeps
     // the `confirmed: true` round-trip below from generating twice.
-    const prepare = await prepareBank(supabase, bookId, user.id);
+    const prepare = await prepareBank(supabase, bookId);
 
-    const context = await loadCampaignContext(supabase, bookId, user.id);
+    const context = await loadCampaignContext(supabase, bookId);
     if (!context) return Response.json({ error: "Book not found" }, { status: 404 });
     const { book, campaignBook, bank, asinBank, siblingBooks, negatives, anchors } = context;
 
@@ -142,19 +153,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     if (plans.length === 0) {
       return Response.json(
-        { error: await noEligibleTargetsMessage(supabase, bookId, user.id, bank, asinBank, prepare) },
+        { error: await noEligibleTargetsMessage(supabase, bookId, bank, asinBank, prepare) },
         { status: 400 }
       );
     }
 
-    const totalDailyBudget = Math.round(plans.reduce((sum, p) => sum + p.dailyBudget, 0) * 100) / 100;
+    const totalDailyBudget =
+      Math.round(plans.reduce((sum, p) => sum + p.dailyBudget, 0) * 100) / 100;
     if (totalDailyBudget > CONFIRMATION_THRESHOLD_PER_DAY && !confirmed) {
       return Response.json(
         {
           error: `This creates ${plans.length} campaign(s) totalling ${totalDailyBudget.toFixed(2)}/day, above the ${CONFIRMATION_THRESHOLD_PER_DAY.toFixed(2)}/day confirmation threshold. Resend with confirmed: true to proceed.`,
           needsConfirmation: true,
           totalDailyBudget,
-          plans: plans.map((p) => ({ campaignType: p.campaignType, name: p.name, dailyBudget: p.dailyBudget, targetCount: p.targets.length })),
+          plans: plans.map((p) => ({
+            campaignType: p.campaignType,
+            name: p.name,
+            dailyBudget: p.dailyBudget,
+            targetCount: p.targets.length,
+          })),
         },
         { status: 400 }
       );
@@ -183,7 +200,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     for (const row of sameNameCampaigns ?? []) {
       if (row.book_id !== bookId) {
         return Response.json(
-          { error: `A campaign named "${row.name}" already exists on another book — rename it before creating campaigns here.` },
+          {
+            error: `A campaign named "${row.name}" already exists on another book — rename it before creating campaigns here.`,
+          },
           { status: 409 }
         );
       }
@@ -225,7 +244,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         .delete()
         .in("campaign_id", [...reusableIdByName.values()])
         .eq("user_id", user.id);
-      if (clearTargetsError) return Response.json({ error: clearTargetsError.message }, { status: 400 });
+      if (clearTargetsError)
+        return Response.json({ error: clearTargetsError.message }, { status: 400 });
     }
 
     const plansToInsert = plans.filter((p) => !reusableIdByName.has(p.name));
@@ -246,9 +266,13 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         )
         .select("id, campaign_type");
       if (insertCampaignsError || !insertedCampaigns) {
-        return Response.json({ error: insertCampaignsError?.message ?? "Failed to create campaigns" }, { status: 400 });
+        return Response.json(
+          { error: insertCampaignsError?.message ?? "Failed to create campaigns" },
+          { status: 400 }
+        );
       }
-      for (const c of insertedCampaigns) campaignIdByType.set(c.campaign_type as string, c.id as string);
+      for (const c of insertedCampaigns)
+        campaignIdByType.set(c.campaign_type as string, c.id as string);
     }
 
     const campaignIds = [...campaignIdByType.values()];
@@ -285,7 +309,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       return [...targets, ...negativeRows];
     });
 
-    const { error: insertTargetsError } = await supabase.from("campaign_targets").insert(targetRows);
+    const { error: insertTargetsError } = await supabase
+      .from("campaign_targets")
+      .insert(targetRows);
     if (insertTargetsError) {
       return Response.json({ error: insertTargetsError.message }, { status: 400 });
     }
@@ -302,17 +328,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     try {
       const xlsxBuffer = await buildUploadXlsx(uploadRows);
       const [uploadResult, reviewResult] = await Promise.all([
+        supabase.storage.from("bulksheets").upload(uploadPath, xlsxBuffer, {
+          contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        }),
         supabase.storage
           .from("bulksheets")
-          .upload(uploadPath, xlsxBuffer, {
-            contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-          }),
-        supabase.storage.from("bulksheets").upload(reviewPath, reviewCsv, { contentType: "text/csv" }),
+          .upload(reviewPath, reviewCsv, { contentType: "text/csv" }),
       ]);
       if (uploadResult.error) throw new Error(uploadResult.error.message);
       if (reviewResult.error) throw new Error(reviewResult.error.message);
 
-      const { data: signedUpload } = await supabase.storage.from("bulksheets").createSignedUrl(uploadPath, 3600);
+      const { data: signedUpload } = await supabase.storage
+        .from("bulksheets")
+        .createSignedUrl(uploadPath, 3600);
 
       const { data: exportedCampaigns, error: flipError } = await supabase
         .from("campaigns")
@@ -338,8 +366,14 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             (p) => `${p.name}: ${p.targets.length} target(s), $${p.dailyBudget.toFixed(2)}/day`
           ),
           attachments: [
-            { filename: "campaigns-upload.xlsx", content: Buffer.from(xlsxBuffer).toString("base64") },
-            { filename: "campaigns-review.csv", content: Buffer.from(reviewCsv).toString("base64") },
+            {
+              filename: "campaigns-upload.xlsx",
+              content: Buffer.from(xlsxBuffer).toString("base64"),
+            },
+            {
+              filename: "campaigns-review.csv",
+              content: Buffer.from(reviewCsv).toString("base64"),
+            },
           ],
         });
       } catch (emailErr) {
@@ -362,12 +396,20 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       // that doesn't exist. The insert already succeeded, so this is
       // recoverable: a retry re-runs Create Campaigns for the same book and
       // picks these drafts back up.
-      const message = describeExportFailure(uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed");
+      const message = describeExportFailure(
+        uploadErr instanceof Error ? uploadErr.message : "Bulksheet upload failed"
+      );
       await supabase
         .from("campaigns")
         .update({ last_export_error: message, last_export_error_at: new Date().toISOString() })
         .in("id", campaignIds);
-      return Response.json({ error: `Campaigns created as draft, but the bulksheet upload failed: ${message}`, campaignIds }, { status: 500 });
+      return Response.json(
+        {
+          error: `Campaigns created as draft, but the bulksheet upload failed: ${message}`,
+          campaignIds,
+        },
+        { status: 500 }
+      );
     }
   } catch (err) {
     console.error("Error creating campaigns:", err);

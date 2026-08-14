@@ -6,7 +6,12 @@
  */
 
 import type { SupabaseClient } from "@supabase/supabase-js";
-import { captureBookSnapshot, DEFAULT_CAPTURE_BUDGET_MS, isUsableSnapshot, type BookSnapshot } from "./bookSnapshot";
+import {
+  captureBookSnapshot,
+  DEFAULT_CAPTURE_BUDGET_MS,
+  isUsableSnapshot,
+  type BookSnapshot,
+} from "./bookSnapshot";
 import type { Marketplace } from "./types";
 
 export interface BookRecord {
@@ -32,19 +37,18 @@ export interface BookWithSnapshot {
   captured: boolean;
 }
 
-const BOOK_COLUMNS_LEGACY = "id, asin, marketplace, title, author, description, total_keywords, created_at, metadata_json";
+const BOOK_COLUMNS_LEGACY =
+  "id, asin, marketplace, title, author, description, total_keywords, created_at, metadata_json";
 const BOOK_COLUMNS = `${BOOK_COLUMNS_LEGACY}, match_type_profile`;
 
 export async function getBook(
   supabase: SupabaseClient,
-  bookId: string,
-  userId: string
+  bookId: string
 ): Promise<BookRecord | null> {
   let { data, error } = await supabase
     .from("books")
     .select(BOOK_COLUMNS)
     .eq("id", bookId)
-    .eq("user_id", userId)
     .maybeSingle();
 
   // sql/13-match-type-profile.sql not applied yet — retry without the
@@ -54,7 +58,6 @@ export async function getBook(
       .from("books")
       .select(BOOK_COLUMNS_LEGACY)
       .eq("id", bookId)
-      .eq("user_id", userId)
       .maybeSingle());
   }
 
@@ -62,7 +65,8 @@ export async function getBook(
   const record = data as Record<string, unknown>;
   return {
     ...record,
-    match_type_profile: (record.match_type_profile as "mixed" | "phrase-only" | undefined) ?? "mixed",
+    match_type_profile:
+      (record.match_type_profile as "mixed" | "phrase-only" | undefined) ?? "mixed",
   } as BookRecord;
 }
 
@@ -104,10 +108,9 @@ export async function persistSnapshot(
 export async function loadBookWithSnapshot(
   supabase: SupabaseClient,
   bookId: string,
-  userId: string,
   options: { forceRefresh?: boolean } = {}
 ): Promise<BookWithSnapshot | null> {
-  const book = await getBook(supabase, bookId, userId);
+  const book = await getBook(supabase, bookId);
   if (!book) return null;
 
   if (!options.forceRefresh && isUsableSnapshot(book.metadata_json)) {
@@ -119,7 +122,9 @@ export async function loadBookWithSnapshot(
   // maxDuration, same as "add a book" — the explicit budget leaves headroom
   // so a slow scrape costs metadata instead of the whole request being
   // killed with no response at all.
-  const snapshot = await captureBookSnapshot(book.asin, book.marketplace, { budgetMs: DEFAULT_CAPTURE_BUDGET_MS });
+  const snapshot = await captureBookSnapshot(book.asin, book.marketplace, {
+    budgetMs: DEFAULT_CAPTURE_BUDGET_MS,
+  });
   const updated = await persistSnapshot(supabase, book, snapshot);
   return { book: updated, snapshot, captured: true };
 }

@@ -24,19 +24,22 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (typeof body.notes === "string" || body.notes === null) updates.notes = body.notes;
     if (body.tier === "a" || body.tier === "b") updates.tier = body.tier;
 
-    if (Object.keys(updates).length === 0) return Response.json({ error: "No valid fields to update" }, { status: 400 });
+    if (Object.keys(updates).length === 0)
+      return Response.json({ error: "No valid fields to update" }, { status: 400 });
 
     const supabase = await supabaseServer();
     const { data: presetCompetitorAsin, error } = await supabase
       .from("preset_competitor_asins")
       .update(updates)
       .eq("id", id)
-      .eq("user_id", user.id)
       .select()
       .single();
 
     if (error || !presetCompetitorAsin) {
-      return Response.json({ error: error?.message || "Preset competitor ASIN not found" }, { status: error ? 400 : 404 });
+      return Response.json(
+        { error: error?.message || "Preset competitor ASIN not found" },
+        { status: error ? 400 : 404 }
+      );
     }
 
     let propagatedCount = 0;
@@ -49,7 +52,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         .from("competitor_asins")
         .update(propagateUpdates)
         .eq("preset_competitor_asin_id", id)
-        .eq("user_id", user.id)
         .select("id, book_id");
 
       if (propagateError) return Response.json({ error: propagateError.message }, { status: 400 });
@@ -76,7 +78,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const supabase = await supabaseServer();
-    const { error } = await supabase.from("preset_competitor_asins").delete().eq("id", id).eq("user_id", user.id);
+    const { error } = await supabase.from("preset_competitor_asins").delete().eq("id", id);
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
     return Response.json({ success: true });

@@ -42,14 +42,15 @@ import { BOOK_KEYWORD_MAX } from "./keywordMerge";
  * from the unit tests that cover the skip rules below.
  */
 async function pipelineHandlers() {
-  const [keywordPresets, keywordFilter, keywordGenerate, asinPresets, asinFilter, asinGenerate] = await Promise.all([
-    import("@/app/api/books/[id]/keywords/apply-presets/route"),
-    import("@/app/api/books/[id]/keywords/filter/route"),
-    import("@/app/api/books/[id]/keywords/generate/route"),
-    import("@/app/api/books/[id]/competitors/apply-presets/route"),
-    import("@/app/api/books/[id]/competitors/filter/route"),
-    import("@/app/api/books/[id]/competitors/generate/route"),
-  ]);
+  const [keywordPresets, keywordFilter, keywordGenerate, asinPresets, asinFilter, asinGenerate] =
+    await Promise.all([
+      import("@/app/api/books/[id]/keywords/apply-presets/route"),
+      import("@/app/api/books/[id]/keywords/filter/route"),
+      import("@/app/api/books/[id]/keywords/generate/route"),
+      import("@/app/api/books/[id]/competitors/apply-presets/route"),
+      import("@/app/api/books/[id]/competitors/filter/route"),
+      import("@/app/api/books/[id]/competitors/generate/route"),
+    ]);
   return {
     applyKeywordPresets: keywordPresets.POST,
     filterKeywords: keywordFilter.POST,
@@ -75,7 +76,10 @@ export interface PrepareBankResult {
   warnings: string[];
 }
 
-type RouteHandler = (request: Request, ctx: { params: Promise<{ id: string }> }) => Promise<Response>;
+type RouteHandler = (
+  request: Request,
+  ctx: { params: Promise<{ id: string }> }
+) => Promise<Response>;
 
 /** What a bank in a given state needs doing to it. */
 export interface PreparePlan {
@@ -139,31 +143,27 @@ function errorText(data: Record<string, unknown>, fallback: string): string {
 }
 
 /** Counts what's in the bank now, split by whether campaign selection can see it. */
-async function countBank(supabase: SupabaseClient, bookId: string, userId: string) {
+async function countBank(supabase: SupabaseClient, bookId: string) {
   const [eligibleKeywords, eligibleAsins, anyKeywords, anyAsins] = await Promise.all([
     supabase
       .from("keywords")
       .select("id", { count: "exact", head: true })
       .eq("book_id", bookId)
-      .eq("user_id", userId)
       .in("status", ["active", "paused"]),
     supabase
       .from("competitor_asins")
       .select("id", { count: "exact", head: true })
       .eq("book_id", bookId)
-      .eq("user_id", userId)
       .in("status", ["active", "paused"]),
     supabase
       .from("keywords")
       .select("id", { count: "exact", head: true })
       .eq("book_id", bookId)
-      .eq("user_id", userId)
       .neq("status", "rejected"),
     supabase
       .from("competitor_asins")
       .select("id", { count: "exact", head: true })
       .eq("book_id", bookId)
-      .eq("user_id", userId)
       .neq("status", "rejected"),
   ]);
 
@@ -181,8 +181,7 @@ async function countBank(supabase: SupabaseClient, bookId: string, userId: strin
  */
 export async function prepareBank(
   supabase: SupabaseClient,
-  bookId: string,
-  userId: string
+  bookId: string
 ): Promise<PrepareBankResult> {
   const result: PrepareBankResult = {
     ran: false,
@@ -195,7 +194,7 @@ export async function prepareBank(
     warnings: [],
   };
 
-  const before = await countBank(supabase, bookId, userId);
+  const before = await countBank(supabase, bookId);
   const plan = planPrepare(before.eligible, before.total);
   if (!plan.generate && !plan.filter) return result;
 
@@ -227,11 +226,15 @@ export async function prepareBank(
     // and there is no bank to fall back on, so surface it as the headline
     // problem rather than burying it behind "no eligible targets".
     if (!keywords.ok && keywords.data.needsRefresh) {
-      result.warnings.push(errorText(keywords.data, "This book's Amazon metadata could not be read."));
+      result.warnings.push(
+        errorText(keywords.data, "This book's Amazon metadata could not be read.")
+      );
       return result;
     }
-    if (!keywords.ok) result.warnings.push(errorText(keywords.data, "Could not generate keywords."));
-    if (!asins.ok) result.warnings.push(errorText(asins.data, "Could not generate competitor ASINs."));
+    if (!keywords.ok)
+      result.warnings.push(errorText(keywords.data, "Could not generate keywords."));
+    if (!asins.ok)
+      result.warnings.push(errorText(asins.data, "Could not generate competitor ASINs."));
   }
 
   // Step 2: genre presets, applied on top of whatever the bank now holds.
@@ -246,9 +249,12 @@ export async function prepareBank(
     callRoute(applyKeywordPresets, bookId, "keywords/apply-presets"),
     callRoute(applyAsinPresets, bookId, "competitors/apply-presets"),
   ]);
-  result.presetsApplied = num(keywordPresets.data.appliedCount) + num(asinPresets.data.appliedCount);
-  if (!keywordPresets.ok) result.warnings.push(errorText(keywordPresets.data, "Could not apply keyword presets."));
-  if (!asinPresets.ok) result.warnings.push(errorText(asinPresets.data, "Could not apply ASIN presets."));
+  result.presetsApplied =
+    num(keywordPresets.data.appliedCount) + num(asinPresets.data.appliedCount);
+  if (!keywordPresets.ok)
+    result.warnings.push(errorText(keywordPresets.data, "Could not apply keyword presets."));
+  if (!asinPresets.ok)
+    result.warnings.push(errorText(asinPresets.data, "Could not apply ASIN presets."));
 
   // Step 3: promotes archived rows into active — the step campaign
   // selection needs, and the one that reads the book's whole bank back
@@ -259,8 +265,10 @@ export async function prepareBank(
   ]);
   result.filtered = true;
   result.examined = num(keywordFilter.data.examined) + num(asinFilter.data.examined);
-  if (!keywordFilter.ok) result.warnings.push(errorText(keywordFilter.data, "Could not run the keyword filters."));
-  if (!asinFilter.ok) result.warnings.push(errorText(asinFilter.data, "Could not run the ASIN filters."));
+  if (!keywordFilter.ok)
+    result.warnings.push(errorText(keywordFilter.data, "Could not run the keyword filters."));
+  if (!asinFilter.ok)
+    result.warnings.push(errorText(asinFilter.data, "Could not run the ASIN filters."));
 
   return result;
 }
@@ -270,7 +278,9 @@ export function describePrepare(result: PrepareBankResult): string | null {
   if (!result.ran) return null;
   const parts: string[] = [];
   if (result.generated) {
-    parts.push(`generated ${result.generatedKeywords} keyword(s) and ${result.generatedAsins} ASIN(s)`);
+    parts.push(
+      `generated ${result.generatedKeywords} keyword(s) and ${result.generatedAsins} ASIN(s)`
+    );
   }
   if (result.presetsApplied > 0) parts.push(`applied ${result.presetsApplied} preset row(s)`);
   if (result.filtered) parts.push(`filtered ${result.examined} row(s)`);

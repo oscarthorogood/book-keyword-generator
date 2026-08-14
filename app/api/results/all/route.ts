@@ -32,14 +32,16 @@ export async function GET() {
 
     const supabase = await supabaseServer();
 
-    const [{ data: books, error: booksError }, { data: imports, error: importsError }] = await Promise.all([
-      supabase.from("books").select("id, title, author").eq("user_id", user.id),
-      supabase
-        .from("result_imports")
-        .select("id, book_id, source_file, report_start, report_end, row_count, matched_count, unmatched_count, status, error, created_at")
-        .eq("user_id", user.id)
-        .order("created_at", { ascending: false }),
-    ]);
+    const [{ data: books, error: booksError }, { data: imports, error: importsError }] =
+      await Promise.all([
+        supabase.from("books").select("id, title, author"),
+        supabase
+          .from("result_imports")
+          .select(
+            "id, book_id, source_file, report_start, report_end, row_count, matched_count, unmatched_count, status, error, created_at"
+          )
+          .order("created_at", { ascending: false }),
+      ]);
     if (booksError) return Response.json({ error: booksError.message }, { status: 400 });
     if (importsError) return Response.json({ error: importsError.message }, { status: 400 });
 
@@ -50,7 +52,6 @@ export async function GET() {
         supabase
           .from("campaign_results")
           .select("import_id, impressions, clicks, spend, sales, orders, currency")
-          .eq("user_id", user.id)
           .order("id")
           .range(from, to),
       { label: "results/all" }
@@ -60,14 +61,21 @@ export async function GET() {
     const totalsByImport = new Map<string, ImportTotals>();
     const currencyByImport = new Map<string, string>();
     for (const row of resultRows ?? []) {
-      const totals = totalsByImport.get(row.import_id) ?? { clicks: 0, impressions: 0, spend: 0, sales: 0, orders: 0 };
+      const totals = totalsByImport.get(row.import_id) ?? {
+        clicks: 0,
+        impressions: 0,
+        spend: 0,
+        sales: 0,
+        orders: 0,
+      };
       totals.impressions += Number(row.impressions) || 0;
       totals.clicks += Number(row.clicks) || 0;
       totals.spend += Number(row.spend) || 0;
       totals.sales += Number(row.sales) || 0;
       totals.orders += Number(row.orders) || 0;
       totalsByImport.set(row.import_id, totals);
-      if (row.currency && !currencyByImport.has(row.import_id)) currencyByImport.set(row.import_id, row.currency);
+      if (row.currency && !currencyByImport.has(row.import_id))
+        currencyByImport.set(row.import_id, row.currency);
     }
 
     return Response.json({
@@ -91,7 +99,13 @@ export async function GET() {
           error: row.error,
           createdAt: row.created_at,
           currency: currencyByImport.get(row.id) ?? null,
-          totals: totalsByImport.get(row.id) ?? { clicks: 0, impressions: 0, spend: 0, sales: 0, orders: 0 },
+          totals: totalsByImport.get(row.id) ?? {
+            clicks: 0,
+            impressions: 0,
+            spend: 0,
+            sales: 0,
+            orders: 0,
+          },
         })),
     });
   } catch (err) {

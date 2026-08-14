@@ -18,11 +18,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       .from("preset_genres")
       .update({ name })
       .eq("id", id)
-      .eq("user_id", user.id)
       .select()
       .single();
 
-    if (error || !data) return Response.json({ error: error?.message || "Genre not found" }, { status: error ? 400 : 404 });
+    if (error || !data)
+      return Response.json(
+        { error: error?.message || "Genre not found" },
+        { status: error ? 400 : 404 }
+      );
     return Response.json({ success: true, genre: data });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Unknown error";
@@ -43,7 +46,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const supabase = await supabaseServer();
-    const { error } = await supabase.from("preset_genres").delete().eq("id", id).eq("user_id", user.id);
+    const { error } = await supabase.from("preset_genres").delete().eq("id", id);
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
     return Response.json({ success: true });

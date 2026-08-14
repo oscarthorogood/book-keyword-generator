@@ -20,23 +20,28 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
 
     const body = await request.json();
     const updates: Record<string, unknown> = {};
-    if (typeof body.keyword === "string" && body.keyword.trim()) updates.keyword = body.keyword.trim();
-    if (typeof body.matchType === "string" && MATCH_TYPES.includes(body.matchType)) updates.match_type = body.matchType;
+    if (typeof body.keyword === "string" && body.keyword.trim())
+      updates.keyword = body.keyword.trim();
+    if (typeof body.matchType === "string" && MATCH_TYPES.includes(body.matchType))
+      updates.match_type = body.matchType;
     if (body.tier === "a" || body.tier === "b") updates.tier = body.tier;
 
-    if (Object.keys(updates).length === 0) return Response.json({ error: "No valid fields to update" }, { status: 400 });
+    if (Object.keys(updates).length === 0)
+      return Response.json({ error: "No valid fields to update" }, { status: 400 });
 
     const supabase = await supabaseServer();
     const { data: presetKeyword, error } = await supabase
       .from("preset_keywords")
       .update(updates)
       .eq("id", id)
-      .eq("user_id", user.id)
       .select()
       .single();
 
     if (error || !presetKeyword) {
-      return Response.json({ error: error?.message || "Preset keyword not found" }, { status: error ? 400 : 404 });
+      return Response.json(
+        { error: error?.message || "Preset keyword not found" },
+        { status: error ? 400 : 404 }
+      );
     }
 
     let propagatedCount = 0;
@@ -49,7 +54,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         .from("keywords")
         .update(propagateUpdates)
         .eq("preset_keyword_id", id)
-        .eq("user_id", user.id)
         .select("id, book_id");
 
       if (propagateError) return Response.json({ error: propagateError.message }, { status: 400 });
@@ -77,7 +81,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const supabase = await supabaseServer();
-    const { error } = await supabase.from("preset_keywords").delete().eq("id", id).eq("user_id", user.id);
+    const { error } = await supabase.from("preset_keywords").delete().eq("id", id);
 
     if (error) return Response.json({ error: error.message }, { status: 400 });
     return Response.json({ success: true });

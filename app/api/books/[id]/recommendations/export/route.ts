@@ -2,7 +2,15 @@ import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 
 export const runtime = "nodejs";
 
-const COLUMNS = ["Type", "Entity", "Current Bid", "Suggested Bid", "Confidence", "Reason", "Generated At"] as const;
+const COLUMNS = [
+  "Type",
+  "Entity",
+  "Current Bid",
+  "Suggested Bid",
+  "Confidence",
+  "Reason",
+  "Generated At",
+] as const;
 
 function escapeCsv(value: string): string {
   return /[",\n]/.test(value) ? `"${value.replace(/"/g, '""')}"` : value;
@@ -26,15 +34,18 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     const { data: recs, error } = await supabase
       .from("keyword_recommendations")
-      .select("type, current_bid, suggested_bid, confidence, reason, generated_at, keyword_id, competitor_asin_id")
+      .select(
+        "type, current_bid, suggested_bid, confidence, reason, generated_at, keyword_id, competitor_asin_id"
+      )
       .eq("book_id", bookId)
-      .eq("user_id", user.id)
       .eq("status", "pending")
       .order("generated_at", { ascending: false });
     if (error) return Response.json({ error: error.message }, { status: 400 });
 
     const keywordIds = (recs ?? []).map((r) => r.keyword_id).filter((id): id is string => !!id);
-    const asinIds = (recs ?? []).map((r) => r.competitor_asin_id).filter((id): id is string => !!id);
+    const asinIds = (recs ?? [])
+      .map((r) => r.competitor_asin_id)
+      .filter((id): id is string => !!id);
 
     const [{ data: keywords }, { data: asins }] = await Promise.all([
       keywordIds.length > 0
@@ -49,7 +60,9 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 
     const lines = [COLUMNS.join(",")];
     for (const rec of recs ?? []) {
-      const entity = rec.keyword_id ? (keywordText.get(rec.keyword_id) ?? rec.keyword_id) : (asinText.get(rec.competitor_asin_id ?? "") ?? rec.competitor_asin_id ?? "");
+      const entity = rec.keyword_id
+        ? (keywordText.get(rec.keyword_id) ?? rec.keyword_id)
+        : (asinText.get(rec.competitor_asin_id ?? "") ?? rec.competitor_asin_id ?? "");
       const row = [
         rec.type,
         entity,

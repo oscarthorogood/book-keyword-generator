@@ -43,7 +43,8 @@ export async function POST(
     if (!user) return Response.json({ error: "Unauthorized" }, { status: 401 });
 
     const body = await request.json().catch(() => ({}));
-    const mode: "archive-only" | "archive-and-block" = body.mode === "archive-and-block" ? "archive-and-block" : "archive-only";
+    const mode: "archive-only" | "archive-and-block" =
+      body.mode === "archive-and-block" ? "archive-and-block" : "archive-only";
     const confirm = body.confirm === true;
 
     const supabase = await supabaseServer();
@@ -53,13 +54,16 @@ export async function POST(
       .select("*")
       .eq("id", recId)
       .eq("book_id", bookId)
-      .eq("user_id", user.id)
       .single();
-    if (recError || !rec) return Response.json({ error: "Recommendation not found" }, { status: 404 });
+    if (recError || !rec)
+      return Response.json({ error: "Recommendation not found" }, { status: 404 });
     const recommendation = rec as RecommendationRow;
 
     if (recommendation.status !== "pending") {
-      return Response.json({ error: `Recommendation is already ${recommendation.status}` }, { status: 409 });
+      return Response.json(
+        { error: `Recommendation is already ${recommendation.status}` },
+        { status: 409 }
+      );
     }
 
     if (recommendation.type === "promote_to_alpha_exact" && !confirm) {
@@ -105,7 +109,11 @@ async function applyRecommendation(
       if (error) return error.message;
 
       if (mode === "archive-and-block" && rec.keyword_id) {
-        const { data: keyword } = await supabase.from("keywords").select("text, match_type, book_id").eq("id", entityId).single();
+        const { data: keyword } = await supabase
+          .from("keywords")
+          .select("text, match_type, book_id")
+          .eq("id", entityId)
+          .single();
         if (keyword) {
           const { error: negError } = await supabase.from("negative_keywords").insert({
             user_id: userId,
@@ -125,7 +133,10 @@ async function applyRecommendation(
     case "increase_bid":
     case "decrease_bid": {
       if (rec.suggested_bid === null) return "Recommendation has no suggested_bid";
-      const { error } = await supabase.from(table).update({ bid: rec.suggested_bid }).eq("id", entityId);
+      const { error } = await supabase
+        .from(table)
+        .update({ bid: rec.suggested_bid })
+        .eq("id", entityId);
       return error?.message ?? null;
     }
 
@@ -141,7 +152,10 @@ async function applyRecommendation(
 
     case "promote_to_alpha_exact": {
       if (!rec.keyword_id) return "promote_to_alpha_exact only applies to keywords";
-      const { error } = await supabase.from("keywords").update({ match_type: "exact", status: "active" }).eq("id", entityId);
+      const { error } = await supabase
+        .from("keywords")
+        .update({ match_type: "exact", status: "active" })
+        .eq("id", entityId);
       return error?.message ?? null;
     }
 

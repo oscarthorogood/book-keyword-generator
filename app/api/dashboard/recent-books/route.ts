@@ -19,7 +19,6 @@ export async function GET() {
     const { data, error } = await supabase
       .from("books")
       .select("id, title, author, created_at, metadata_json")
-      .eq("user_id", user.id)
       .order("created_at", { ascending: false })
       .limit(10);
 

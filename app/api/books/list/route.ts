@@ -2,7 +2,8 @@ import { currentUser, supabaseServer, withClockSkewRetry } from "@/lib/supabaseS
 
 /**
  * GET /api/books/list
- * Get all books for the authenticated user
+ * Get every book in the shared workspace (sql/35) — not just the ones the
+ * signed-in user added.
  */
 export async function GET() {
   try {
@@ -29,7 +30,6 @@ export async function GET() {
         metadata_json
       `
         )
-        .eq("user_id", user.id)
         .order("created_at", { ascending: false })
     );
 
@@ -44,8 +44,7 @@ export async function GET() {
     // count the rows instead. One extra query, no schema change.
     const { data: campaignRows, error: campaignsError } = await supabase
       .from("campaigns")
-      .select("book_id")
-      .eq("user_id", user.id);
+      .select("book_id");
     if (campaignsError) {
       console.error("Error fetching campaign counts:", campaignsError);
       return Response.json({ error: campaignsError.message }, { status: 400 });

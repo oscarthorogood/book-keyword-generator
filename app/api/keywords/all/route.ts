@@ -7,9 +7,9 @@ export const runtime = "nodejs";
 /**
  * GET /api/keywords/all
  *
- * Every keyword across every one of the user's books, grouped by text
- * (Enhancements spec §4). Read-only — editing still happens in each book's
- * own keyword manager, linked to from here.
+ * Every keyword across every book in the shared workspace (sql/35), grouped
+ * by text (Enhancements spec §4). Read-only — editing still happens in each
+ * book's own keyword manager, linked to from here.
  */
 export async function GET() {
   try {
@@ -20,8 +20,7 @@ export async function GET() {
 
     const { data: books, error: booksError } = await supabase
       .from("books")
-      .select("id, title, author")
-      .eq("user_id", user.id);
+      .select("id, title, author");
     if (booksError) return Response.json({ error: booksError.message }, { status: 400 });
 
     const bookById = new Map((books ?? []).map((b) => [b.id, b]));
@@ -34,7 +33,6 @@ export async function GET() {
         supabase
           .from("keywords")
           .select("book_id, text, status, match_type, source, specificity, bid")
-          .eq("user_id", user.id)
           .neq("status", "negative")
           .order("id")
           .range(from, to),

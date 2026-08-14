@@ -1,7 +1,12 @@
 import { loadBookWithSnapshot } from "@/lib/bookStore";
 import { buildFilterContext, applyFiltersToCandidates } from "@/lib/keywordFilters";
 import { dedupeSignature, scoreAndTierBids } from "@/lib/keywordMerge";
-import { matchGenresToBook, presetKeywordsForGenres, type PresetGenreRow, type PresetKeywordRow } from "@/lib/presetKeywords";
+import {
+  matchGenresToBook,
+  presetKeywordsForGenres,
+  type PresetGenreRow,
+  type PresetKeywordRow,
+} from "@/lib/presetKeywords";
 import { scoreSpecificity } from "@/lib/keywordSpecificity";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
 import type { KeywordSource, MatchType } from "@/lib/types";
@@ -32,21 +37,25 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
 
     const supabase = await supabaseServer();
 
-    const loaded = await loadBookWithSnapshot(supabase, bookId, user.id);
+    const loaded = await loadBookWithSnapshot(supabase, bookId);
     if (!loaded) return Response.json({ error: "Book not found" }, { status: 404 });
     const { snapshot } = loaded;
 
-    const [{ data: genreRows, error: genreError }, { data: presetKeywordRows, error: presetError }] = await Promise.all([
-      supabase.from("preset_genres").select("id, name, parent_id").eq("user_id", user.id),
-      supabase
-        .from("preset_keywords")
-        .select("id, genre_id, keyword, match_type, tier")
-        .eq("user_id", user.id),
+    const [
+      { data: genreRows, error: genreError },
+      { data: presetKeywordRows, error: presetError },
+    ] = await Promise.all([
+      supabase.from("preset_genres").select("id, name, parent_id"),
+      supabase.from("preset_keywords").select("id, genre_id, keyword, match_type, tier"),
     ]);
     if (genreError) return Response.json({ error: genreError.message }, { status: 400 });
     if (presetError) return Response.json({ error: presetError.message }, { status: 400 });
 
-    const genres: PresetGenreRow[] = (genreRows ?? []).map((g) => ({ id: g.id, name: g.name, parentId: g.parent_id }));
+    const genres: PresetGenreRow[] = (genreRows ?? []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      parentId: g.parent_id,
+    }));
     const presetKeywords: PresetKeywordRow[] = (presetKeywordRows ?? []).map((pk) => ({
       id: pk.id,
       genreId: pk.genre_id,
@@ -84,7 +93,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       .select("text")
       .eq("book_id", bookId);
     if (existingError) return Response.json({ error: existingError.message }, { status: 400 });
-    const existingSignatures = new Set((existingKeywords ?? []).map((k) => dedupeSignature(k.text) || k.text.toLowerCase()));
+    const existingSignatures = new Set(
+      (existingKeywords ?? []).map((k) => dedupeSignature(k.text) || k.text.toLowerCase())
+    );
 
     const newCandidates = candidates.filter((c) => {
       const sig = dedupeSignature(c.text) || c.text.toLowerCase();
@@ -121,7 +132,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     });
 
     const scored = scoreAndTierBids(newCandidates, 0.5);
-    const { passed, paused, rejected } = applyFiltersToCandidates(scored, filterContext) as unknown as {
+    const { passed, paused, rejected } = applyFiltersToCandidates(
+      scored,
+      filterContext
+    ) as unknown as {
       passed: Array<(typeof newCandidates)[number] & { matchTypeCeiling?: MatchType }>;
       paused: Array<(typeof newCandidates)[number] & { filter?: string; reason?: string }>;
       rejected: Array<(typeof newCandidates)[number] & { filter?: string; reason?: string }>;
@@ -148,7 +162,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         source: "genre-preset" as KeywordSource,
         bid: candidate.suggestedBid ?? 0.5,
         status: "archived" as const,
-        rejection_reason: candidate.reason ?? (tier === "b" && verdict === "active" ? "Tier B preset — review before activating." : null),
+        rejection_reason:
+          candidate.reason ??
+          (tier === "b" && verdict === "active"
+            ? "Tier B preset — review before activating."
+            : null),
         rejected_by_filter: candidate.filter ?? null,
         specificity: scoreSpecificity(candidate, filterContext.anchors),
         preset_keyword_id: candidate.presetKeywordId,
@@ -193,12 +211,10 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     // Subscribe the book to every matched genre, so future edits to that
     // genre's preset list know to propagate here (idempotent — a re-apply
     // just re-affirms the subscription).
-    await supabase
-      .from("book_preset_genres")
-      .upsert(
-        matchedGenres.map((g) => ({ book_id: bookId, genre_id: g.id, user_id: user.id })),
-        { onConflict: "book_id,genre_id", ignoreDuplicates: true }
-      );
+    await supabase.from("book_preset_genres").upsert(
+      matchedGenres.map((g) => ({ book_id: bookId, genre_id: g.id, user_id: user.id })),
+      { onConflict: "book_id,genre_id", ignoreDuplicates: true }
+    );
 
     return Response.json({
       success: true,
