@@ -308,6 +308,32 @@ h6 {
     min-height: 100vh;
   }
 
+  /* Two-column page layouts (Dashboard, Book detail, Add book) — a fixed
+     1.4fr/1fr split at desktop width, one column below it. Everything that
+     uses this must stack on narrower viewports; a bare inline-style grid
+     with no breakpoint is what made these pages overflow on anything
+     narrower than ~1280px. */
+  .grid-split {
+    display: grid;
+    grid-template-columns: 1.4fr 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+
+  .grid-split-tight {
+    display: grid;
+    grid-template-columns: 1.2fr 1fr;
+    gap: 24px;
+    align-items: start;
+  }
+
+  @media (max-width: 1024px) {
+    .grid-split,
+    .grid-split-tight {
+      grid-template-columns: 1fr;
+    }
+  }
+
   .page-header {
     border-bottom: 1px solid var(--line);
     padding: 24px 32px;
