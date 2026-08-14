@@ -327,6 +327,19 @@ h6 {
     align-items: start;
   }
 
+  /* A grid item's default min-width is `auto` — its content's natural
+     width, not 0. An unbroken long book title (`truncate`'s
+     `white-space: nowrap`) inside a column is exactly the kind of content
+     that blows past that: the column refuses to shrink below the title's
+     full width, so the whole grid — and the page — grows wider than the
+     viewport instead of the title truncating. Without this, `truncate`
+     only ever works by accident, when nothing inside happens to be long
+     enough to trigger it. */
+  .grid-split > *,
+  .grid-split-tight > * {
+    min-width: 0;
+  }
+
   @media (max-width: 1024px) {
     .grid-split,
     .grid-split-tight {
