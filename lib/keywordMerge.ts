@@ -632,6 +632,7 @@ const SIGNATURE_STOPWORDS = new Set(["a", "an", "the", "of", "and", "or", "for"]
  */
 export function dedupeSignature(text: string): string {
   const words = text
+    .toLowerCase()
     .replace(/[^a-z0-9\s]/g, "")
     .split(" ")
     .filter((w) => w && !SIGNATURE_STOPWORDS.has(w))
