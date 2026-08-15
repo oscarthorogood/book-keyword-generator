@@ -15,8 +15,31 @@ import { callOpenRouterJson } from "./llmClient";
 import { recommendForKeyword, recommendForCompetitorAsin, type KeywordPerformance } from "./recommendations";
 import type { CampaignPlanTarget } from "./campaignBulksheetPlan";
 import { MIN_CAMPAIGN_TARGETS, MAX_CAMPAIGN_TARGETS } from "./campaignSelection";
+import { scoreForRank } from "./keywordCapAndRank";
+import type { BookAnchors } from "./keywordAnchors";
+import type { KeywordCandidate, MatchType } from "./types";
 
 export { MIN_CAMPAIGN_TARGETS, MAX_CAMPAIGN_TARGETS };
+
+/**
+ * Shared scoring formula for both the "ready" replacement pool and the
+ * campaign's *current* targets, so a trim-to-max comparison (below) weighs
+ * two real quality signals against each other instead of a real score
+ * against a caller-side placeholder. Lifetime orders dominate — a keyword
+ * that has actually converted outranks a heuristic relevance score.
+ */
+export function keywordRebalanceScore(
+  keyword: KeywordCandidate & { matchType?: MatchType; bid?: number | null },
+  anchors: BookAnchors,
+  lifetimeOrders: number | null | undefined
+): number {
+  return scoreForRank(keyword, anchors) + (lifetimeOrders ?? 0) * 10;
+}
+
+/** Same purpose as keywordRebalanceScore, for competitor-ASIN targets — a lower mean discovery rank (stronger signal) scores higher. */
+export function asinRebalanceScore(meanRank: number | null | undefined, lifetimeOrders: number | null | undefined): number {
+  return -(meanRank ?? 999) + (lifetimeOrders ?? 0) * 10;
+}
 
 export interface RebalanceCandidate {
   keywordId?: string;
@@ -210,7 +233,11 @@ export async function rebalanceCampaignTargets(input: RebalanceInput): Promise<R
     }
   }
 
-  // Trim to max, keeping the highest-scoring targets (kept ones score above any dropped underperformer implicitly since they weren't flagged).
+  // Trim to max, keeping the highest-scoring targets. Correct only when the
+  // caller scores `current` and `ready` on the same scale (see
+  // keywordRebalanceScore/asinRebalanceScore above) — a caller that scores
+  // every current target 0 would have every real-scored ready candidate
+  // evict an established target regardless of its actual quality.
   if (targets.length > max) {
     targets = [...targets].sort((a, b) => b.score - a.score).slice(0, max);
   }

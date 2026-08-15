@@ -256,9 +256,13 @@ export function getKeywordQualityAdjustment(text: string): number {
     return -100;
   }
 
-  // STRATEGIC ISSUES (§3) — soft penalties
+  // STRATEGIC ISSUES (§3)
 
-  // §3.6: Non-buying-intent keywords
+  // §3.6: Non-buying-intent keywords ("movie", "spoiler", "pdf", ...). Despite
+  // living in the §3 "strategic issues" section, -20 is well past
+  // rebalanceKeywordBudget's -5 cutoff below, so this is a hard drop in
+  // practice, same as the §2 critical-bug checks above — not a soft
+  // score/bid reduction.
   if (containsNonBuyingIntentToken(text)) {
     return -20;
   }

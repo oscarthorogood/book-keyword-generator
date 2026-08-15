@@ -1,7 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { rebalanceCampaignTargets, MIN_CAMPAIGN_TARGETS, MAX_CAMPAIGN_TARGETS, type RebalanceCandidate } from "../lib/campaignRebalance";
+import {
+  rebalanceCampaignTargets,
+  keywordRebalanceScore,
+  asinRebalanceScore,
+  MIN_CAMPAIGN_TARGETS,
+  MAX_CAMPAIGN_TARGETS,
+  type RebalanceCandidate,
+} from "../lib/campaignRebalance";
 import { callOpenRouterJson } from "../lib/llmClient";
 import type { KeywordPerformance } from "../lib/recommendations";
+import type { BookAnchors } from "../lib/keywordAnchors";
 
 vi.mock("../lib/llmClient", () => ({
   callOpenRouterJson: vi.fn(async () => null),
@@ -34,6 +42,15 @@ function perf(id: string, overrides: Partial<KeywordPerformance> = {}): KeywordP
 function candidate(id: string, score = 1): RebalanceCandidate {
   return { keywordId: id, text: `kw-${id}`, matchType: "exact", bid: 0.5, adGroup: "Alpha Exact", score };
 }
+
+const anchors: BookAnchors = {
+  bookSpecific: ["scars of the past"],
+  genre: ["crime", "thriller"],
+  setting: ["scotland"],
+  comps: [],
+  bookIntent: ["book", "books", "kindle"],
+  primaryGenrePhrase: "scottish crime thriller",
+};
 
 describe("rebalanceCampaignTargets", () => {
   it("swaps an underperformer (30+ clicks, 0 orders, real spend) for the best ready candidate", async () => {
@@ -149,5 +166,83 @@ describe("rebalanceCampaignTargets", () => {
     expect(texts).not.toContain("kw-does-not-exist");
     expect(texts).toContain("kw-new2");
     expect(new Set(texts).size).toBe(texts.length);
+  });
+
+  // A trim-to-max compares `current`'s score against `ready`'s (see
+  // keywordRebalanceScore/asinRebalanceScore doc comment in
+  // lib/campaignRebalance.ts). If a caller ever scores `current` as a flat
+  // placeholder again, this catches it: an established, non-underperforming
+  // target must not lose its slot to an unproven ready candidate.
+  it("keeps an established target over a ready candidate when trimming to max, given comparable scores", async () => {
+    const establishedScore = keywordRebalanceScore(
+      { text: "scottish crime thriller", sources: ["genre-metadata"], matchType: "phrase", bid: 0.5 },
+      anchors,
+      5 // has real lifetime orders
+    );
+    const readyScore = keywordRebalanceScore(
+      { text: "some unproven phrase", sources: ["synonym"], matchType: "broad", bid: 0.4 },
+      anchors,
+      0 // no performance history yet
+    );
+    expect(establishedScore).toBeGreaterThan(readyScore);
+
+    const current = Array.from({ length: MAX_CAMPAIGN_TARGETS }, (_, i) => ({
+      keywordId: `established${i}`,
+      text: `kw-established${i}`,
+      matchType: "exact" as const,
+      bid: 0.5,
+      adGroup: "Alpha Exact",
+      score: establishedScore,
+    }));
+    const ready = [candidate("unproven", readyScore)];
+
+    const result = await rebalanceCampaignTargets({
+      campaignName: "Test",
+      current,
+      ready,
+      performanceById: new Map(),
+      targetAcos: 0.3,
+    });
+
+    expect(result.targets.length).toBe(MAX_CAMPAIGN_TARGETS);
+    expect(result.targets.some((t) => t.text === "kw-unproven")).toBe(false);
+    expect(result.targets.every((t) => t.text.startsWith("kw-established"))).toBe(true);
+  });
+});
+
+describe("keywordRebalanceScore / asinRebalanceScore", () => {
+  it("weights real lifetime orders far above a bare relevance score", () => {
+    const noOrders = keywordRebalanceScore(
+      { text: "scottish crime thriller", sources: ["genre-metadata"], matchType: "phrase", bid: 0.5 },
+      anchors,
+      0
+    );
+    const withOrders = keywordRebalanceScore(
+      { text: "scottish crime thriller", sources: ["genre-metadata"], matchType: "phrase", bid: 0.5 },
+      anchors,
+      3
+    );
+    expect(withOrders).toBe(noOrders + 30);
+  });
+
+  it("treats undefined/null lifetimeOrders as zero", () => {
+    const base = { text: "scottish crime thriller", sources: ["genre-metadata" as const], matchType: "phrase" as const, bid: 0.5 };
+    expect(keywordRebalanceScore(base, anchors, undefined)).toBe(keywordRebalanceScore(base, anchors, 0));
+    expect(keywordRebalanceScore(base, anchors, null)).toBe(keywordRebalanceScore(base, anchors, 0));
+  });
+
+  it("scores a stronger (lower) mean discovery rank higher", () => {
+    expect(asinRebalanceScore(2, 0)).toBeGreaterThan(asinRebalanceScore(50, 0));
+  });
+
+  it("defaults a missing mean rank to the weakest tier (999) rather than the strongest", () => {
+    expect(asinRebalanceScore(undefined, 0)).toBe(asinRebalanceScore(999, 0));
+    expect(asinRebalanceScore(null, 0)).toBeLessThan(asinRebalanceScore(1, 0));
+  });
+
+  it("lets real lifetime orders outweigh a weak mean rank", () => {
+    const weakRankNoOrders = asinRebalanceScore(200, 0);
+    const weakRankWithOrders = asinRebalanceScore(200, 2);
+    expect(weakRankWithOrders).toBe(weakRankNoOrders + 20);
   });
 });

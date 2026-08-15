@@ -13,8 +13,12 @@ import {
 } from "@/lib/campaignDiff";
 import { sendCampaignActivityEmail } from "@/lib/email";
 import { isOpenRouterConfigured } from "@/lib/llmClient";
-import { rebalanceCampaignTargets, type RebalanceCandidate } from "@/lib/campaignRebalance";
-import { scoreForRank } from "@/lib/keywordCapAndRank";
+import {
+  rebalanceCampaignTargets,
+  keywordRebalanceScore,
+  asinRebalanceScore,
+  type RebalanceCandidate,
+} from "@/lib/campaignRebalance";
 import type { KeywordPerformance } from "@/lib/recommendations";
 import { SINGLE_AD_GROUP_LABEL, type CampaignType } from "@/lib/campaignSelection";
 import { currentUser, supabaseServer } from "@/lib/supabaseServer";
@@ -226,8 +230,7 @@ export async function PATCH(
           matchType: k.matchType,
           bid: bidById.get(k.id) ?? null,
           adGroup,
-          score:
-            scoreForRank(k, anchors) + (rawPerformanceById.get(k.id)?.lifetimeOrders ?? 0) * 10,
+          score: keywordRebalanceScore(k, anchors, rawPerformanceById.get(k.id)?.lifetimeOrders),
         }));
       const readyAsins: RebalanceCandidate[] = asinBank
         .filter((a) => a.status === "active" && !currentIds.has(a.id))
@@ -237,16 +240,34 @@ export async function PATCH(
           targetingExpression: `asin="${a.competitor_asin}"`,
           bid: a.bid ?? null,
           adGroup,
-          score: -(a.mean_rank ?? 999) + (rawPerformanceById.get(a.id)?.lifetimeOrders ?? 0) * 10,
+          score: asinRebalanceScore(a.mean_rank, rawPerformanceById.get(a.id)?.lifetimeOrders),
         }));
       const ready =
         campaignType === "rival_asin_offensive" || campaignType === "catalog_cross_sell"
           ? readyAsins
           : readyKeywords;
 
+      // Scored on the same scale as `ready` above (keywordRebalanceScore /
+      // asinRebalanceScore) — a trim-to-max inside rebalanceCampaignTargets
+      // compares `current` against `ready` by score, so a placeholder score
+      // here would let any positive-scoring replacement evict an established,
+      // non-underperforming target regardless of its real quality.
+      const keywordById = new Map(bank.map((k) => [k.id, k]));
+      const asinById = new Map(asinBank.map((a) => [a.id, a]));
+      const currentScored = plan.targets.map((t) => {
+        const keyword = t.keywordId ? keywordById.get(t.keywordId) : undefined;
+        const asin = t.competitorAsinId ? asinById.get(t.competitorAsinId) : undefined;
+        const score = keyword
+          ? keywordRebalanceScore(keyword, anchors, rawPerformanceById.get(keyword.id)?.lifetimeOrders)
+          : asin
+            ? asinRebalanceScore(asin.mean_rank, rawPerformanceById.get(asin.id)?.lifetimeOrders)
+            : 0;
+        return { ...t, score };
+      });
+
       const rebalanced = await rebalanceCampaignTargets({
         campaignName: campaign.name,
-        current: plan.targets.map((t) => ({ ...t, score: 0 })),
+        current: currentScored,
         ready,
         performanceById,
         targetAcos,
