@@ -6,6 +6,7 @@
  */
 
 import { normalize } from "./keywordMerge";
+import { parseCountText, parsePriceText } from "./numberText";
 import { KeywordCandidate, MatchType, NegativeSuggestion } from "./types";
 
 /**
@@ -57,25 +58,34 @@ export function parseSearchTermReportRows(
     }
     return undefined;
   };
-  const toNumber = (value: unknown): number => {
+  // Money columns (Spend/Sales): four of this app's seven marketplaces — DE,
+  // FR, IT, ES (lib/marketplaceCurrency.ts) — write money the continental
+  // way, "12,50 €" for twelve-fifty, so a naive comma-strip-then-parseFloat
+  // read that as 1250, a hundredfold overstatement. parsePriceText already
+  // disambiguates the decimal separator correctly for both conventions (see
+  // its header comment); route through it instead of a bespoke regex here.
+  const toMoney = (value: unknown): number => {
     if (typeof value === "number") return Number.isFinite(value) ? value : 0;
-    if (typeof value === "string") {
-      // Every currency this app's marketplaces trade in, not just the dollar
-      // (lib/marketplaceCurrency.ts: USD, GBP, CAD, EUR). A UK report writes
-      // Spend as "£12.50"; leaving the symbol in made parseFloat return NaN,
-      // which this function then reported as a clean 0 — so for every non-US
-      // marketplace the whole report imported with zero spend and zero sales,
-      // silently disabling the zero-order negative suggestions (they key off
-      // `cost >= minSpendForNegative`) and collapsing avgCpc to its fallback.
-      // Non-breaking and narrow spaces go too: exports separate the symbol
-      // from the amount with one, and parseFloat stops at whitespace.
-      const cleaned = value.replace(/[%$,£€¥\s  ]/g, "").trim();
-      const num = parseFloat(cleaned);
-      if (!Number.isFinite(num)) return 0;
-      // A percentage-formatted ACOS ("25%") parses to 25, not 0.25.
-      return value.includes("%") ? num / 100 : num;
-    }
-    return 0;
+    return parsePriceText(value) ?? 0;
+  };
+
+  // Count columns (Clicks/Orders/Impressions) have no fractional part, so
+  // every "." and "," is a grouping separator — parseCountText's rule, not
+  // parsePriceText's.
+  const toCount = (value: unknown): number => {
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    return parseCountText(value) ?? 0;
+  };
+
+  // ACOS is a money-shaped decimal ("25%" or continental "25,5%") with a
+  // trailing percent sign parsePriceText's digit-run match already ignores;
+  // only the /100 needs handling here.
+  const toAcos = (value: unknown): number => {
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    if (typeof value !== "string") return 0;
+    const num = parsePriceText(value);
+    if (num === undefined) return 0;
+    return value.includes("%") ? num / 100 : num;
   };
 
   const pickString = (row: Record<string, unknown>, keys: string[]): string | undefined => {
@@ -95,16 +105,16 @@ export function parseSearchTermReportRows(
 
     rows.push({
       text: normalize(text),
-      clicks: toNumber(pick(raw, ["Clicks", "clicks"])),
-      orders: toNumber(pick(raw, ["7 Day Total Orders (#)", "Orders", "orders"])),
-      cost: toNumber(pick(raw, ["Spend", "Cost", "cost"])),
-      acos: toNumber(pick(raw, ["ACOS", "Acos", "acos", "7 Day Advertising Cost of Sales (ACOS)"])),
+      clicks: toCount(pick(raw, ["Clicks", "clicks"])),
+      orders: toCount(pick(raw, ["7 Day Total Orders (#)", "Orders", "orders"])),
+      cost: toMoney(pick(raw, ["Spend", "Cost", "cost"])),
+      acos: toAcos(pick(raw, ["ACOS", "Acos", "acos", "7 Day Advertising Cost of Sales (ACOS)"])),
       campaignName: pickString(raw, ["Campaign Name", "campaignName"]),
       adGroupName: pickString(raw, ["Ad Group Name", "adGroupName"]),
       targeting: pickString(raw, ["Targeting", "targeting"]),
       matchType: toMatchType(pickString(raw, ["Match Type", "matchType"])),
-      impressions: toNumber(pick(raw, ["Impressions", "impressions"])),
-      sales: toNumber(pick(raw, ["7 Day Total Sales", "Sales", "sales"])),
+      impressions: toCount(pick(raw, ["Impressions", "impressions"])),
+      sales: toMoney(pick(raw, ["7 Day Total Sales", "Sales", "sales"])),
     });
   }
   return rows;

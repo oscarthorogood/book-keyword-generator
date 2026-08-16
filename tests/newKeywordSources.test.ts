@@ -58,6 +58,28 @@ describe("searchTermImport", () => {
     expect(rows.map((r) => r.sales)).toEqual([40, 2000, 40]);
   });
 
+  // DE/FR/IT/ES marketplace reports (lib/marketplaceCurrency.ts) write money
+  // the continental way: comma as the decimal separator, dot as the
+  // thousands grouping. A naive comma-strip read "12,50 €" as 1250 (100x)
+  // and "1.234,56 €" as 1.23456 (~1000x) instead of 12.5 and 1234.56.
+  it("parses continental decimal-comma money without inflating or shrinking it", () => {
+    const rows = parseSearchTermReportRows([
+      { "Customer Search Term": "small continental spend", Clicks: 4, Orders: 2, Spend: "12,50 €", Sales: "40,00 €", ACOS: "20%" },
+      {
+        "Customer Search Term": "large continental spend",
+        Clicks: 4,
+        Orders: 2,
+        Spend: "1.234,56 €",
+        Sales: "2.000,00 €",
+        ACOS: "20,5%",
+      },
+    ]);
+
+    expect(rows.map((r) => r.cost)).toEqual([12.5, 1234.56]);
+    expect(rows.map((r) => r.sales)).toEqual([40, 2000]);
+    expect(rows[1].acos).toBeCloseTo(0.205);
+  });
+
   it("suggests a negative for a zero-order term whose spend is in a non-dollar currency", () => {
     const rows = parseSearchTermReportRows([
       { "Customer Search Term": "wasted spend", Clicks: 30, Orders: 0, Spend: "£15.00", ACOS: "0%" },
