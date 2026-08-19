@@ -6,6 +6,7 @@
  */
 
 import { normalize } from "./keywordMerge";
+import { parseCountText, parsePriceText } from "./numberText";
 import { KeywordCandidate, MatchType, NegativeSuggestion } from "./types";
 
 /**
@@ -57,24 +58,27 @@ export function parseSearchTermReportRows(
     }
     return undefined;
   };
-  const toNumber = (value: unknown): number => {
+  // Money and percentage figures (Spend, Sales, ACOS): decimal-valued, so the
+  // separator convention matters. This used to strip every "," as a
+  // thousands separator, which is right for "£12.50" but silently 100x'd the
+  // continental marketplaces (DE/FR/IT/ES), where Amazon Ads writes spend as
+  // "12,50 €" for twelve-fifty — parsePriceText (lib/numberText.ts) infers
+  // the separator from the number itself instead of assuming one convention.
+  const toDecimal = (value: unknown): number => {
     if (typeof value === "number") return Number.isFinite(value) ? value : 0;
     if (typeof value === "string") {
-      // Every currency this app's marketplaces trade in, not just the dollar
-      // (lib/marketplaceCurrency.ts: USD, GBP, CAD, EUR). A UK report writes
-      // Spend as "£12.50"; leaving the symbol in made parseFloat return NaN,
-      // which this function then reported as a clean 0 — so for every non-US
-      // marketplace the whole report imported with zero spend and zero sales,
-      // silently disabling the zero-order negative suggestions (they key off
-      // `cost >= minSpendForNegative`) and collapsing avgCpc to its fallback.
-      // Non-breaking and narrow spaces go too: exports separate the symbol
-      // from the amount with one, and parseFloat stops at whitespace.
-      const cleaned = value.replace(/[%$,£€¥\s  ]/g, "").trim();
-      const num = parseFloat(cleaned);
-      if (!Number.isFinite(num)) return 0;
+      const num = parsePriceText(value);
+      if (num === undefined) return 0;
       // A percentage-formatted ACOS ("25%") parses to 25, not 0.25.
       return value.includes("%") ? num / 100 : num;
     }
+    return 0;
+  };
+  // Whole-number counts (Clicks, Orders, Impressions): no fractional part, so
+  // every "." and "," is a grouping separator.
+  const toCount = (value: unknown): number => {
+    if (typeof value === "number") return Number.isFinite(value) ? value : 0;
+    if (typeof value === "string") return parseCountText(value) ?? 0;
     return 0;
   };
 
@@ -95,16 +99,16 @@ export function parseSearchTermReportRows(
 
     rows.push({
       text: normalize(text),
-      clicks: toNumber(pick(raw, ["Clicks", "clicks"])),
-      orders: toNumber(pick(raw, ["7 Day Total Orders (#)", "Orders", "orders"])),
-      cost: toNumber(pick(raw, ["Spend", "Cost", "cost"])),
-      acos: toNumber(pick(raw, ["ACOS", "Acos", "acos", "7 Day Advertising Cost of Sales (ACOS)"])),
+      clicks: toCount(pick(raw, ["Clicks", "clicks"])),
+      orders: toCount(pick(raw, ["7 Day Total Orders (#)", "Orders", "orders"])),
+      cost: toDecimal(pick(raw, ["Spend", "Cost", "cost"])),
+      acos: toDecimal(pick(raw, ["ACOS", "Acos", "acos", "7 Day Advertising Cost of Sales (ACOS)"])),
       campaignName: pickString(raw, ["Campaign Name", "campaignName"]),
       adGroupName: pickString(raw, ["Ad Group Name", "adGroupName"]),
       targeting: pickString(raw, ["Targeting", "targeting"]),
       matchType: toMatchType(pickString(raw, ["Match Type", "matchType"])),
-      impressions: toNumber(pick(raw, ["Impressions", "impressions"])),
-      sales: toNumber(pick(raw, ["7 Day Total Sales", "Sales", "sales"])),
+      impressions: toCount(pick(raw, ["Impressions", "impressions"])),
+      sales: toDecimal(pick(raw, ["7 Day Total Sales", "Sales", "sales"])),
     });
   }
   return rows;

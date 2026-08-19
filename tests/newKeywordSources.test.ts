@@ -65,6 +65,26 @@ describe("searchTermImport", () => {
     const { negativeSuggestions } = buildSearchTermReportCandidates({}, rows);
     expect(negativeSuggestions.map((n) => n.text)).toEqual(["wasted spend"]);
   });
+
+  // The DE/FR/IT/ES marketplaces write money with a decimal comma, not a
+  // thousands comma: "12,50 €" is twelve-fifty, not 1250. Stripping every
+  // comma as a grouping separator (the old behaviour) silently inflated
+  // continental spend and sales by 100x.
+  it("parses continental decimal-comma money without inflating it 100x", () => {
+    const rows = parseSearchTermReportRows([
+      {
+        "Customer Search Term": "continental row",
+        Clicks: 4,
+        Orders: 2,
+        Spend: "12,50 €",
+        Sales: "1.234,56 €",
+        ACOS: "20%",
+      },
+    ]);
+
+    expect(rows[0].cost).toBe(12.5);
+    expect(rows[0].sales).toBe(1234.56);
+  });
 });
 
 describe("reverseAsin", () => {
