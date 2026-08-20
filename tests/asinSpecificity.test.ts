@@ -41,4 +41,11 @@ describe("scoreAsinSpecificity", () => {
     const score = scoreAsinSpecificity({ title: "x", author: "y" }, anchors);
     expect(score === null || (score >= 1 && score <= 5)).toBe(true);
   });
+
+  it("does not treat a short, unrelated title as a comp match just because it substring-matches a comp anchor", () => {
+    // "kin" is a real, plausible short title with no relation to Ian Rankin,
+    // but it's a substring of the "ian rankin" comp anchor.
+    const score = scoreAsinSpecificity({ title: "Kin", author: "Someone Else" }, anchors);
+    expect(score).toBeLessThanOrEqual(2);
+  });
 });

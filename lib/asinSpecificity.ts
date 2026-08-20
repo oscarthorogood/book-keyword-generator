@@ -31,8 +31,15 @@ function normalize(value: string): string {
   return value.toLowerCase().trim();
 }
 
-/** Loose containment either way — a stored comp anchor is often just a surname or short title. */
+/**
+ * Loose containment either way — a stored comp anchor is often just a
+ * surname or short title. Both sides need the length floor: without it, a
+ * short value like "kin" would match `anchor.includes(value)` against any
+ * anchor that merely contains that substring (e.g. "ian rankin"), producing
+ * a false comp match.
+ */
 function overlapsAnyOf(value: string, anchors: string[]): string | undefined {
+  if (value.length < 4) return undefined;
   return anchors.find((anchor) => anchor.length >= 4 && (value.includes(anchor) || anchor.includes(value)));
 }
 
